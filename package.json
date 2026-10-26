@@ -16,6 +16,7 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
-    "@nestjs/cli": "12.0.10"
+    "@nestjs/cli": "12.0.10",
+    "typescript": "5.9.3"
   }
 }
