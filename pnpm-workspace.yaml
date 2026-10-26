@@ -1,0 +1,8 @@
+allowBuilds:
+  unrs-resolver: true
+  prisma: false
+  '@prisma/engines': false
+  '@nestjs/core': false
+  esbuild: false
+  '@swc/core': false
+  puppeteer: false

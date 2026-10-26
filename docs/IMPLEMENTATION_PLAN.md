@@ -34,7 +34,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 ## Milestone 0 — Setup and toolchain (branch `chore/tooling-foundation`, one PR) — TDD §2.6, §7
 
 - [x] **0.1** `git init -b main`, `.gitignore`, `.nvmrc`, TDD moved to `docs/TDD.md`, this plan created. *Done when:* `git status` shows only those files and the plan lists 89 steps. The root `LICENSE` ("all rights reserved") is part of this step. *Publishing (only when the owner asks):* create the public repo `eosmin/wwebjs-gateway` and push the initial `main` once — the only direct push to `main`, needed so PRs have a base.
-- [ ] **0.2** pnpm workspace and `package.json` (scripts of §2.6.2). *Done when:* `pnpm install` works with pnpm 11.25.0 and generates the lockfile.
+- [x] **0.2** pnpm workspace and `package.json` (scripts of §2.6.2). *Done when:* `pnpm install` works with pnpm 11.25.0 and generates the lockfile.
 - [ ] **0.3** One `chore(deps): add <package>` per dependency, then the Nest scaffold on the Fastify adapter with `GET /health`. *Done when:* `pnpm build` passes and a spec proves `/health` answers 200.
 - [ ] **0.4** Prettier and editor settings. *Done when:* `pnpm format:check` passes.
 - [ ] **0.5** ESLint flat config. *Done when:* `pnpm lint` passes with zero warnings on the scaffold.
@@ -165,7 +165,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 | Step | Status | PR | Date |
 | ---- | ------ | -- | ---- |
 | 0.1 | done | local commit on `main` (not pushed yet) | 2026-10-27 |
-| 0.2 | todo | - | - |
+| 0.2 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
 | 0.3 | todo | - | - |
 | 0.4 | todo | - | - |
 | 0.5 | todo | - | - |
