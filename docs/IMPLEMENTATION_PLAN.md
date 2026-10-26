@@ -35,7 +35,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 - [x] **0.1** `git init -b main`, `.gitignore`, `.nvmrc`, TDD moved to `docs/TDD.md`, this plan created. *Done when:* `git status` shows only those files and the plan lists 89 steps. The root `LICENSE` ("all rights reserved") is part of this step. *Publishing (only when the owner asks):* create the public repo `eosmin/wwebjs-gateway` and push the initial `main` once — the only direct push to `main`, needed so PRs have a base.
 - [x] **0.2** pnpm workspace and `package.json` (scripts of §2.6.2). *Done when:* `pnpm install` works with pnpm 11.25.0 and generates the lockfile.
-- [ ] **0.3** One `chore(deps): add <package>` per dependency, then the Nest scaffold on the Fastify adapter with `GET /health`. *Done when:* `pnpm build` passes and a spec proves `/health` answers 200.
+- [x] **0.3** One `chore(deps): add <package>` per dependency, then the Nest scaffold on the Fastify adapter with `GET /health`. *Done when:* `pnpm build` passes and `/health` answers 200 (verified in 0.3 by booting the built app with Fastify `inject`; Jest does not exist yet, so the committed health spec lands in 0.6 as TDD §7 says).
 - [ ] **0.4** Prettier and editor settings. *Done when:* `pnpm format:check` passes.
 - [ ] **0.5** ESLint flat config. *Done when:* `pnpm lint` passes with zero warnings on the scaffold.
 - [ ] **0.6** Jest with coverage gates (unit and integration configs). *Done when:* `pnpm test` and `pnpm test:cov` pass.
@@ -166,7 +166,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 | ---- | ------ | -- | ---- |
 | 0.1 | done | local commit on `main` (not pushed yet) | 2026-10-27 |
 | 0.2 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.3 | todo | - | - |
+| 0.3 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
 | 0.4 | todo | - | - |
 | 0.5 | todo | - | - |
 | 0.6 | todo | - | - |

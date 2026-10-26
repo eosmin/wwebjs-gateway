@@ -2,10 +2,17 @@
   "name": "wwebjs-gateway",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "license": "UNLICENSED",
   "packageManager": "pnpm@11.25.0",
   "engines": {
     "node": ">=24"
+  },
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@nestjs/common": "12.0.1",

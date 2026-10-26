@@ -56,7 +56,7 @@ Versions verified against the npm registry on 2026-10-26.
 | Language | TypeScript (`strict`, `noImplicitAny`, `noUncheckedIndexedAccess`) | **5.9.3** (stay on 5.9 until typescript-eslint, ts-jest and Nest certify the next major — same policy as `omnichannel-platform`) |
 | WhatsApp | `whatsapp-web.js` | 1.34.7 |
 | Framework | NestJS: `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-fastify` (Fastify 5 adapter), `@nestjs/cli`, `@nestjs/testing` | 12.0.1 / 12.0.1 / 12.0.1 / 12.0.10 / 12.0.1 (the pins `omnichannel-platform` runs with; bump deliberately, one area per PR) |
-| HTTP engine | `fastify` (via adapter; use the version `@nestjs/platform-fastify` requires) | 5.12.7 |
+| HTTP engine | `fastify` (via adapter; use the version `@nestjs/platform-fastify` requires: `@nestjs/platform-fastify@12.0.1` pins fastify `5.12.1` exactly; 5.12.7 belongs to adapter 12.2.0) | 5.12.1 |
 | Validation | `zod` (v4, import from `"zod"`) + `nestjs-zod` | 4.6.7 / 5.5.0 |
 | OpenAPI | `@nestjs/swagger` | 12.0.4 |
 | Config / health / throttling | `@nestjs/config` 12.0.1, `@nestjs/terminus` 12.1.0, `@nestjs/throttler` 6.7.1 | — |
@@ -81,7 +81,7 @@ Versions verified against the npm registry on 2026-10-26.
 
 **Notes:**
 - **Toolchain alignment:** every tool and version above that is not specific to this gateway (pnpm, Node, TypeScript 5.9.3, ESLint 10, Prettier, Jest 30 + ts-jest, Husky, lint-staged, commitlint, gitleaks, Prisma 7.10.1, BullMQ, pino, Postgres/Redis images) mirrors `omnichannel-platform` on purpose, so both projects share tooling behavior. NestJS needs `experimentalDecorators` + `emitDecoratorMetadata`. §2.6 specifies the whole toolchain and automation, which is installed in Phase 0 BEFORE any feature code.
-- **Module format:** Nest 12 + Prisma 7 + Jest: confirm via Context7 whether ESM or CJS output is recommended and configure `tsconfig`/`nest-cli.json` accordingly (`omnichannel-platform` runs jest with `module: commonjs`, `moduleResolution: node10`, `verbatimModuleSyntax: false` in `tsconfig.spec.json`); whatever is chosen, only `src/whatsapp/wwebjs-adapter.ts` imports `whatsapp-web.js` (CommonJS; if named ESM imports fail use `import wwebjs from 'whatsapp-web.js'; const { Client, LocalAuth, MessageMedia, Poll, Location, ScheduledEvent } = wwebjs;`).
+- **Module format (decided in step 0.3): ESM.** `"type": "module"`, `module`/`moduleResolution: nodenext`, relative imports carry the `.js` suffix. `@nestjs/core`, `@nestjs/common` and `@nestjs/platform-fastify` 12 are ESM-only (`type: module`), and `nest new` defaults to ESM; CommonJS only type-checks under `moduleResolution: node10` and runs through Node 24's `require(esm)`, which breaks on top-level await and is removed from TypeScript 7. Jest runs from `.cts` configs with `tsconfig.spec.json` set to `module: commonjs`/`moduleResolution: node10`/`verbatimModuleSyntax: false`, as in `omnichannel-platform`. whatever is chosen, only `src/whatsapp/wwebjs-adapter.ts` imports `whatsapp-web.js` (CommonJS; if named ESM imports fail use `import wwebjs from 'whatsapp-web.js'; const { Client, LocalAuth, MessageMedia, Poll, Location, ScheduledEvent } = wwebjs;`).
 - **Logging:** `nestjs-pino` 5.1.0 + `pino` 10.3.1 are what `omnichannel-platform` runs with on Nest 12; reuse that setup (request-id correlation, redaction).
 - **Do NOT add `puppeteer` as a direct dependency** (whatsapp-web.js depends on it). In Docker install system Chromium and set `PUPPETEER_SKIP_DOWNLOAD=true` + `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`.
 - Before pinning any version re-run `npm view <pkg> version` and re-verify with Context7 (§8). If it differs from this table, update this TDD first.
@@ -1764,6 +1764,7 @@ Before writing code that touches a library fetch current docs: (1) load skill `c
 - **Production instance, demo and visuals:** PRIVATE. No live demo, no public Swagger UI in production (`ENABLE_DOCS=false`), no screenshots in the README. This is an intentional deviation from the portfolio-wide standards "Live Demo" and "README screenshots" in the root `CLAUDE.md`; every other quality standard (tests > 70% — here 80%, CI/CD, Docker, `.env.example`, no secrets, Conventional Commits, protected `main`) is met.
 - **Repository name:** `wwebjs-gateway`.
 - **License:** all rights reserved (decided 2026-10-27). A root `LICENSE` file states "Copyright (c) 2026 Erick Monjaras (eosmin). All rights reserved." with no grant of rights; `package.json` uses `"license": "UNLICENSED"` and `"private": true`.
+- **Module format:** ESM (decided 2026-10-27, step 0.3); see the note in §2.
 - Technology and design decisions (NestJS + Fastify adapter, Prisma 7, single instance, `whatsapp-web.js` over Baileys, ordering buffer + `message_batch`, persistent send queue, send policy, WA Web version pinning, toolchain mirrored from `omnichannel-platform`) are in §2, §6 and become ADRs (§6.13).
 
 **PENDING — ask the owner at the stated moment:**
