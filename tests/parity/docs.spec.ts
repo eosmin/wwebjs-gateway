@@ -59,7 +59,7 @@ describe('architecture decision records', () => {
     const rule = (type: string): Record<string, unknown> | undefined =>
       ruleset.rules.find(candidate => candidate.type === type)?.parameters
     const checks = rule('required_status_checks')?.['required_status_checks'] as
-      { context: string }[] | undefined
+      { context: string; integration_id: number }[] | undefined
 
     expect(ruleset.bypass_actors).toEqual([])
     expect(ruleset.rules.map(candidate => candidate.type)).toEqual(
@@ -70,6 +70,8 @@ describe('architecture decision records', () => {
       required_review_thread_resolution: true,
       allowed_merge_methods: ['squash']
     })
+    // 15368 is the GitHub Actions app: no other app can report a check with these names
+    expect(checks?.every(check => check.integration_id === 15368)).toBe(true)
     expect(checks?.map(check => check.context)).toEqual([
       'lint-and-types',
       'unit-tests',

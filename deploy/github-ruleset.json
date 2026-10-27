@@ -24,10 +24,10 @@
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "lint-and-types" },
-          { "context": "unit-tests" },
-          { "context": "integration-tests" },
-          { "context": "security-scan" }
+          { "context": "lint-and-types", "integration_id": 15368 },
+          { "context": "unit-tests", "integration_id": 15368 },
+          { "context": "integration-tests", "integration_id": 15368 },
+          { "context": "security-scan", "integration_id": 15368 }
         ]
       }
     }
