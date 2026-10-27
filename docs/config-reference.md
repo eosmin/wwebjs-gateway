@@ -2,15 +2,97 @@
 
 # Configuration reference
 
-Every environment variable the gateway reads. `.env.example` declares the same set.
+Every environment variable the gateway reads. `.env.example` declares the same set. A variable set to an empty value counts as unset.
 
 | Variable | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `NODE_ENV` | `development`, `test`, `production` | no | `development` | Runtime mode |
 | `HOST` | string, 1 character or more | no | `0.0.0.0` | Interface the HTTP server binds to |
 | `PORT` | integer, 1 to 65535 | no | `3000` | Port the HTTP server listens on |
+| `PUBLIC_BASE_URL` | URL | yes |  | Public URL of the gateway, used to build absolute links |
 | `LOG_LEVEL` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` | no | `info` | Minimum level written by the logger |
 | `DATABASE_URL` | URL | yes |  | PostgreSQL connection string |
 | `REDIS_URL` | URL | yes |  | Redis connection string |
 | `ADMIN_API_KEY` | string, 32 characters or more | yes |  | Admin API key, 32 characters or more (stored only as a hash) |
-| `METRICS_TOKEN` | string, 1 character or more | yes |  | Bearer token that grants access to GET /metrics |
+| `METRICS_TOKEN` | string, 1 character or more | no |  | Bearer token that grants access to GET /metrics; when unset, /metrics is closed |
+| `API_KEY_ROTATION_GRACE_MINUTES` | integer, 0 or more | no | `10` | Minutes the previous API key keeps working after a rotation |
+| `API_KEY_MAX_TTL_DAYS` | integer, 0 or more | no | `0` | Longest lifetime in days an API key may be given; 0 means no cap |
+| `TRUST_PROXY_HOPS` | integer, 0 or more | no | `0` | Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP |
+| `BULL_BOARD_ENABLED` | `true`, `false` | no | `false` | Serve the BullMQ dashboard to admin keys |
+| `CORS_ORIGINS` | string | no |  | Comma-separated origins allowed by CORS and Socket.IO |
+| `RATE_LIMIT_MAX` | integer, 1 or more | no | `300` | Requests per minute allowed per API key |
+| `ENABLE_DOCS` | `true`, `false` | no |  | Serve Swagger UI and the OpenAPI JSON; when unset, true except in production |
+| `WWEBJS_DATA_PATH` | string, 1 character or more | no | `./.wwebjs_auth` | Folder where whatsapp-web.js keeps the authenticated sessions |
+| `PUPPETEER_EXECUTABLE_PATH` | string, 1 character or more | no |  | Chromium or Chrome binary; when unset, the one Puppeteer downloaded |
+| `WWEB_VERSION` | string, 1 character or more | no |  | Pins the WhatsApp Web version; when unset, the live latest build |
+| `WWEB_VERSION_CACHE_TYPE` | `local`, `remote`, `none` | no | `local` | Where the pinned WhatsApp Web HTML snapshot is read from |
+| `WWEB_CACHE_PATH` | string, 1 character or more | no | `./.wwebjs_cache` | Folder holding the local WhatsApp Web HTML snapshots |
+| `WWEB_VERSION_REMOTE_PATH` | string, 1 character or more | no |  | URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote |
+| `WWEB_VERSION_STRICT` | `true`, `false` | no | `true` | Fail the session start when the pinned WhatsApp Web version cannot be loaded, instead of running the live latest build |
+| `QR_MAX_RETRIES` | integer, 0 or more | no | `6` | QR codes generated before a session gives up pairing |
+| `TAKEOVER_ON_CONFLICT` | `true`, `false` | no | `false` | Take the session back when WhatsApp Web is opened elsewhere |
+| `DEVICE_NAME` | string, 1 character or more | no |  | Device name shown in the linked devices list |
+| `BROWSER_NAME` | string, 1 character or more | no |  | Browser name shown in the linked devices list |
+| `PROXY_URL` | URL | no |  | Proxy the Chromium traffic goes through; when unset, a direct connection |
+| `WA_CALL_TIMEOUT_MS` | integer, 1 or more | no | `60000` | Milliseconds a call to WhatsApp Web may take before it is abandoned |
+| `FFMPEG_PATH` | string, 1 character or more | no |  | ffmpeg binary used to convert media; when unset, the one on the PATH |
+| `MAX_SESSIONS` | integer, 1 or more | no | `10` | Sessions the gateway accepts to create |
+| `SESSION_START_STAGGER_MS` | integer, 0 or more | no | `5000` | Milliseconds between the starts of sessions at boot |
+| `SESSION_START_TIMEOUT_MS` | integer, 1 or more | no | `180000` | Milliseconds a session may take to become ready |
+| `SESSION_RECONNECT_MAX_ATTEMPTS` | integer, 0 or more | no | `0` | Reconnection attempts after a disconnect; 0 means unlimited |
+| `WATCHDOG_INTERVAL_MS` | integer, 1 or more | no | `30000` | Milliseconds between health checks of each session |
+| `WATCHDOG_MAX_FAILURES` | integer, 1 or more | no | `3` | Consecutive failed health checks before a session is restarted |
+| `MEMORY_RESTART_THRESHOLD_MB` | integer, 0 or more | no | `0` | Memory in MB of a session browser above which it is restarted; 0 disables the check |
+| `INBOUND_ORDERING_ENABLED` | `true`, `false` | no | `true` | Hold and sort inbound messages per chat |
+| `INBOUND_LATE_THRESHOLD_S` | integer, 0 or more | no | `3` | Seconds of difference in sentAt after which a message counts as late |
+| `INBOUND_ORDER_WINDOW_MS` | integer, 0 or more | no | `1500` | Milliseconds the order buffer waits for earlier messages of a chat |
+| `INBOUND_ORDER_MAX_HOLD_MS` | integer, 0 or more | no | `5000` | Longest time in milliseconds a message is held, whatever keeps arriving |
+| `INBOUND_ORDER_MAX_MESSAGES` | integer, 1 or more | no | `200` | Messages a chat may hold in the order buffer before it flushes |
+| `MESSAGE_BATCH_ENABLED` | `true`, `false` | no | `true` | Publish the synthesized message_batch event |
+| `RECONCILE_ON_READY` | `true`, `false` | no | `true` | Fetch the recent messages of the busiest chats when a session becomes ready |
+| `RECONCILE_MAX_CHATS` | integer, 0 or more | no | `50` | Chats the reconciler visits per session start |
+| `RECONCILE_FETCH_LIMIT` | integer, 1 or more | no | `50` | Messages the reconciler fetches per chat |
+| `RECONCILE_LOOKBACK_HOURS` | integer, 0 or more | no | `48` | Hours into the past the reconciler looks for missed messages |
+| `INCLUDE_RAW` | `true`, `false` | no | `true` | Attach the sanitized raw WhatsApp data to messages |
+| `RAW_MAX_FIELD_BYTES` | integer, 1 or more | no | `8192` | Bytes a single field of the raw data may take before it is truncated |
+| `SEND_MIN_INTERVAL_MS` | integer, 0 or more | no | `1000` | Minimum milliseconds between two sends of the same session |
+| `SEND_JITTER_MS` | integer, 0 or more | no | `400` | Random milliseconds added to the send interval |
+| `SEND_SYNC_TIMEOUT_MS` | integer, 1 or more | no | `60000` | Milliseconds a synchronous send request waits for the outcome |
+| `SEND_MAX_WAIT_MS` | integer, 1 or more | no | `300000` | Milliseconds an accepted send may wait in the queue before it fails |
+| `SEND_NOT_READY_RETRY_MS` | integer, 1 or more | no | `5000` | Milliseconds before a send is retried while its session is not ready |
+| `SEND_BREAKER_THRESHOLD` | integer, 1 or more | no | `5` | Consecutive send failures that open the circuit breaker of a session |
+| `SEND_BREAKER_COOLDOWN_MS` | integer, 1 or more | no | `60000` | Milliseconds an open circuit breaker stays open |
+| `MAX_MEDIA_BYTES` | integer, 1 or more | no | `33554432` | Largest media file in bytes |
+| `CONVERSATION_WINDOW_HOURS` | integer, 1 or more | no | `24` | Hours after the last inbound message during which a chat counts as a conversation |
+| `ALLOW_COLD_SENDS` | `true`, `false` | no | `false` | Allow sending to chats without a conversation |
+| `COLD_SENDS_PER_DAY` | integer, 0 or more | no | `20` | Cold sends allowed per session per day |
+| `COLD_SEND_MIN_GAP_MS` | integer, 0 or more | no | `60000` | Minimum milliseconds between two cold sends |
+| `LOOKUPS_PER_DAY` | integer, 0 or more | no | `100` | Number lookups allowed per session per day |
+| `PER_CHAT_MIN_INTERVAL_MS` | integer, 0 or more | no | `1500` | Minimum milliseconds between two sends to the same chat |
+| `PER_CHAT_MAX_PER_MINUTE` | integer, 1 or more | no | `10` | Sends per minute to the same chat |
+| `SESSION_MAX_PER_MINUTE` | integer, 1 or more | no | `20` | Sends per minute of a session |
+| `SESSION_MAX_PER_HOUR` | integer, 1 or more | no | `300` | Sends per hour of a session |
+| `SESSION_MAX_PER_DAY` | integer, 1 or more | no | `1500` | Sends per day of a session |
+| `DUPLICATE_RECIPIENTS_THRESHOLD` | integer, 1 or more | no | `5` | Recipients of the same text inside the window that count as a mass send |
+| `DUPLICATE_WINDOW_MINUTES` | integer, 1 or more | no | `10` | Minutes in which identical texts are compared |
+| `WARMUP_DAYS` | integer, 0 or more | no | `14` | Days over which a new session ramps up to its full limits |
+| `WARMUP_START_FRACTION` | number, 0 to 1 | no | `0.1` | Fraction of the limits a session starts with on its first day |
+| `UNREACHABLE_STREAK` | integer, 1 or more | no | `5` | Consecutive unanswered sends that mark a recipient as unreachable |
+| `UNREACHABLE_MIN_AGE_HOURS` | integer, 0 or more | no | `72` | Hours a send must remain unanswered before it counts toward the unreachable streak |
+| `SEND_POLICY_MAX_WAIT_MS` | integer, 1 or more | no | `1800000` | Longest milliseconds the send policy may delay a message |
+| `HEALTH_WINDOW` | integer, 1 or more | no | `50` | Recent sends the session health score uses |
+| `HEALTH_MAX_BAD_RATIO` | number, 0 to 1 | no | `0.2` | Ratio of bad outcomes in the window that pauses the session |
+| `HEALTH_COOLDOWN_MIN` | integer, 0 or more | no | `30` | Minutes a session stays paused after a bad window |
+| `HUMANIZE_MIN_REPLY_DELAY_MS` | integer, 0 or more | no | `1500` | Minimum milliseconds between an inbound message and the reply to it |
+| `EVENT_REPLAY_WINDOW_SECONDS` | integer, 0 or more | no | `300` | Seconds of past events a reconnecting socket may replay |
+| `WEBHOOK_TIMEOUT_MS` | integer, 1 or more | no | `10000` | Milliseconds a webhook endpoint has to answer |
+| `WEBHOOK_MAX_ATTEMPTS` | integer, 1 or more | no | `10` | Delivery attempts per webhook event |
+| `WEBHOOK_BACKOFF_MS` | integer, 1 or more | no | `5000` | Milliseconds before the first webhook retry; later retries back off exponentially |
+| `WEBHOOK_WORKER_CONCURRENCY` | integer, 1 or more | no | `10` | Webhook deliveries in parallel |
+| `WEBHOOK_INLINE_MEDIA_MAX_BYTES` | integer, 0 or more | no | `5242880` | Largest media in bytes a webhook carries inline; larger media goes by URL |
+| `WEBHOOK_PRIVATE_HOST_ALLOWLIST` | string | no |  | Comma-separated hosts exempt from the private-address check of webhook URLs |
+| `ALLOW_PRIVATE_WEBHOOK_TARGETS` | `true`, `false` | no | `false` | Allow webhook URLs that resolve to private addresses |
+| `CALL_CACHE_SIZE` | integer, 1 or more | no | `50` | Recent calls kept in memory to reject them |
+| `DELIVERY_RETENTION_DAYS` | integer, 1 or more | no | `14` | Days webhook deliveries are kept before they are deleted |
+| `MESSAGE_RETENTION_DAYS` | integer, 1 or more | no | `30` | Days messages are kept before they are deleted |
+| `STORE_MESSAGE_BODIES` | `true`, `false` | no | `true` | Store the text of messages, not only their metadata |

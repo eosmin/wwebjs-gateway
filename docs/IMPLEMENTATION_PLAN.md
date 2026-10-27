@@ -46,7 +46,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 1 — Foundation (`feat/foundation`) — TDD §6.1, §5.4, §6.8
 
-- [ ] **1.1** Full `env.schema.ts`, `AppConfig`, `.env.example`, `config-reference.md`. *Done when:* `validate:env` and `validate:docs` pass.
+- [x] **1.1** Full `env.schema.ts`, `AppConfig`, `.env.example`, `config-reference.md`. *Done when:* `validate:env` and `validate:docs` pass.
 - [ ] **1.2** `common/errors.ts` + `docs/errors.md` generator. *Done when:* every error code is in `errors.md`.
 - [ ] **1.3** `types/{events,dto}.ts`. *Done when:* every event of §2.5 and §5.4 has a payload schema.
 - [ ] **1.4** `common/lib/*` (crypto, wa-id, timeout, retry, throttle, token-bucket, humanize, ssrf). *Done when:* unit tests pass, SSRF cases included.
@@ -164,17 +164,17 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 | Step | Status | PR | Date |
 | ---- | ------ | -- | ---- |
-| 0.1 | done | local commit on `main` (not pushed yet) | 2026-10-27 |
-| 0.2 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.3 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.4 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.5 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.6 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.7 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.8 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.9 | done locally | `chore/tooling-foundation` (PR of Phase 0); the four CI jobs run when the PR opens | 2026-10-27 |
-| 0.10 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 1.1 | todo | - | - |
+| 0.1 | done | local commit on `main`, pushed once as the initial `main` | 2026-10-27 |
+| 0.2 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 0.3 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 0.4 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 0.5 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 0.6 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 0.7 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 0.8 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 0.9 | done | #1 (PR of Phase 0); the four CI jobs green | 2026-10-27 |
+| 0.10 | done | #1 (PR of Phase 0) | 2026-10-27 |
+| 1.1 | done | `feat/1-1-config-schema` | 2026-10-27 |
 | 1.2 | todo | - | - |
 | 1.3 | todo | - | - |
 | 1.4 | todo | - | - |

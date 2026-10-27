@@ -115,7 +115,7 @@ jobs:
         run: pnpm db:migrate
       - name: Integration suites
         run: pnpm test:integration
-      # The gateway listens on port 3000 until step 1.1 makes the port configurable
+      # The gateway listens on PORT, which .env.example sets to 3000
       - name: The built service starts and answers
         run: |
           pnpm build
@@ -187,7 +187,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       # The scan reads the OS and the base image; run the image too, in the mode it has where deployed.
-      # The gateway listens on port 3000 until step 1.1 makes the port configurable, and answers
+      # The gateway listens on PORT, which .env.example sets to 3000, and answers
       # /health until step 4.7 adds /ready.
       - name: The image starts and answers
         run: |
@@ -196,6 +196,7 @@ jobs:
             -e DATABASE_URL=postgresql://gateway:ci_password@localhost:5432/gateway_ci \
             -e REDIS_URL=redis://localhost:6379 \
             -e ADMIN_API_KEY="$(openssl rand -hex 24)" \
+            -e METRICS_TOKEN="$(openssl rand -hex 24)" \
             wwebjs-gateway:ci
           curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-connrefused \
             http://localhost:3000/health
