@@ -65,7 +65,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **3.2** `mappers.ts` (+ `extractOrigin`, `sanitizeRaw`). *Done when:* fixture tests pass.
 - [x] **3.3** `event-bus.service.ts`. *Done when:* typed publish/subscribe is unit-tested.
 - [x] **3.4** `tests/helpers/fake-whatsapp-client.ts`. *Done when:* it implements the whole port.
-- [ ] **3.5** `inbound-order-buffer.ts`. *Done when:* all ordering cases of §6.4 pass.
+- [x] **3.5** `inbound-order-buffer.ts`. *Done when:* all ordering cases of §6.4 pass.
 - [ ] **3.6** `event-pipeline.service.ts`. *Done when:* dedupe, order, monotonic `seq` and crash recovery tests pass.
 - [ ] **3.7** `session-manager.service.ts`. *Done when:* status machine, reconnect backoff, restore stagger and `MAX_SESSIONS` tests pass.
 - [ ] **3.8** `watchdog.service.ts`. *Done when:* stuck-start and blocking-state tests pass.
@@ -173,6 +173,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **10.2** The Redis restart test also checks the log: ioredis reports one error per retry (about every 2 s) and each becomes a log line; throttle it if it floods.
 - [ ] **5.4** An idempotency key whose process died between `claim` and `complete`/`fail` stays `pending` until the 24 h purge (step 2.4 repository). The service must treat a stale `pending` key as an unknown outcome (conflict, never resend) and may need a "mark stale" method.
 - [ ] **3.x, the order buffer** `MessagesRepository.updateAck` and the ack of `upsert` overwrite with whatever arrives; decide whether the ack is monotonic (a re-emitted older ack must not lower a newer one; -1 is an error) when the pipeline stores acks. `listUnemitted` has no limit: batch it if a long outage can leave thousands of held rows.
+- [ ] **3.6** `InboundOrderBuffer` (step 3.5) only orders: the pipeline must build one per session, pass `settings.ordering.enabled` / `INBOUND_ORDERING_ENABLED`, call `holdBehind` for `message_ack`/`message_edit`/`message_reaction`/`message_revoke_*` before publishing them, stamp `seq` inside `release`/`releaseFollowers` in call order, and `close()` it when the session stops. A non-held event published while `release` is still awaiting could overtake the batch: serialize publishing per session. `release` and `releaseFollowers` must not throw: catch per event, count it, and leave the rows with `emittedAt` null (the buffer logs a throw and carries on, it never retries because it cannot know what was already published). Add a per-chat replay of `emittedAt IS NULL` rows, the same path as the boot replay, and an integration test where Redis fails mid-batch and the rows are published in order afterwards. Build a new `InboundOrderBuffer` on every session start (`close()` is permanent), and make sure `fetchMessages` has the adapter timeout, since a fetch that never settles stalls that chat's queue.
 - [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
 ## Progress tracking
@@ -202,7 +203,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.2 | done | `feat/3-2-mappers` | 2026-10-27 |
 | 3.3 | done | `feat/3-3-event-bus` | 2026-10-27 |
 | 3.4 | done | `feat/3-4-fake-client` | 2026-10-27 |
-| 3.5 | todo | - | - |
+| 3.5 | done | `feat/3-5-order-buffer` | 2026-10-27 |
 | 3.6 | todo | - | - |
 | 3.7 | todo | - | - |
 | 3.8 | todo | - | - |
