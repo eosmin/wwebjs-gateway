@@ -61,7 +61,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 3 — WhatsApp core (`feat/whatsapp-core`) — TDD §6.3–§6.6
 
-- [ ] **3.1** `whatsapp-client.port.ts`. *Done when:* the port compiles and covers the inventory of §6.12.
+- [x] **3.1** `whatsapp-client.port.ts`. *Done when:* the port compiles and covers the inventory of §6.12.
 - [ ] **3.2** `mappers.ts` (+ `extractOrigin`, `sanitizeRaw`). *Done when:* fixture tests pass.
 - [ ] **3.3** `event-bus.service.ts`. *Done when:* typed publish/subscribe is unit-tested.
 - [ ] **3.4** `tests/helpers/fake-whatsapp-client.ts`. *Done when:* it implements the whole port.
@@ -198,7 +198,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 2.2 | done | `feat/2-2-first-migration` | 2026-10-27 |
 | 2.3 | done | `feat/2-3-prisma-service` | 2026-10-27 |
 | 2.4 | done | `feat/2-4-repositories` | 2026-10-27 |
-| 3.1 | todo | - | - |
+| 3.1 | done | `feat/3-1-client-port` | 2026-10-27 |
 | 3.2 | todo | - | - |
 | 3.3 | todo | - | - |
 | 3.4 | todo | - | - |
