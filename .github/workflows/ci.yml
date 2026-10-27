@@ -51,6 +51,7 @@ jobs:
       - run: pnpm validate:deprecations
       - run: pnpm validate:env
       - run: pnpm validate:rollbacks
+      - run: pnpm validate:pins
       - run: pnpm validate:docs
       - run: pnpm lint
       - run: pnpm type-check
