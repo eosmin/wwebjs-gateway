@@ -6,7 +6,11 @@ module.exports = {
   moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
   // Globs instead of `roots`: a directory that does not exist yet (tests/) is simply empty, so a spec
   // placed there later is found without touching this file
-  testMatch: ['<rootDir>/src/**/*.spec.ts', '<rootDir>/tests/**/*.spec.ts'],
+  testMatch: [
+    '<rootDir>/src/**/*.spec.ts',
+    '<rootDir>/tests/**/*.spec.ts',
+    '<rootDir>/scripts/**/*.spec.ts'
+  ],
   // Needs Postgres/Redis (integration job) or a real WhatsApp account (opt-in)
   testPathIgnorePatterns: [
     '/node_modules/',

@@ -1,0 +1,22 @@
+# What CI would fail on (lint, type-check, unit tests, format, validators), except the builds and the
+# suites that need Docker or a database: seconds to a minute and a half. A push that only touches
+# docs/ only runs the documentation checks.
+#
+# Git writes one line per pushed ref on stdin: <local ref> <local sha> <remote ref> <remote sha>.
+# The remote sha is all zeros for a branch that is not on the remote yet.
+zero=0000000000000000000000000000000000000000
+# pnpm reads from /dev/null so that it cannot consume the lines of the refs that follow. It checks
+# the checked-out commit, so deleting a branch (local sha all zeros) has nothing to check, and
+# pushing a ref that is not checked out is left to CI.
+while read -r local_ref local_sha _remote_ref remote_sha; do
+  if [ "$local_sha" = "$zero" ]; then
+    continue
+  elif [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+    echo "pre-push: $local_ref is not the checked-out commit, so it is not checked here (CI checks it)"
+    continue
+  elif [ "$remote_sha" = "$zero" ]; then
+    pnpm validate:affected </dev/null || exit 1
+  else
+    pnpm validate:affected -- --since "$remote_sha" </dev/null || exit 1
+  fi
+done

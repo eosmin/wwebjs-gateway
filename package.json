@@ -21,6 +21,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "type-check": "tsc --noEmit -p tsconfig.json",
+    "docs:gen": "tsx scripts/gen-docs.ts",
+    "validate:env": "tsx scripts/validate-env-example.ts",
+    "validate:deprecations": "tsx scripts/validate-deprecations.ts",
+    "validate:rollbacks": "tsx scripts/check-rollbacks.ts",
+    "validate:docs": "tsx scripts/gen-docs.ts --check",
+    "validate:all": "pnpm lint && pnpm type-check && pnpm format:check && pnpm validate:env && pnpm validate:deprecations && pnpm validate:rollbacks && pnpm validate:docs && pnpm test",
+    "validate:affected": "tsx scripts/validate-affected.ts",
     "prepare": "husky"
   },
   "lint-staged": {

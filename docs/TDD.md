@@ -263,7 +263,11 @@ module.exports = {
   moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
   // Globs instead of `roots`: a directory that does not exist yet (tests/) is simply empty, so a spec
   // placed there later is found without touching this file
-  testMatch: ['<rootDir>/src/**/*.spec.ts', '<rootDir>/tests/**/*.spec.ts'],
+  testMatch: [
+    '<rootDir>/src/**/*.spec.ts',
+    '<rootDir>/tests/**/*.spec.ts',
+    '<rootDir>/scripts/**/*.spec.ts'
+  ],
   // Needs Postgres/Redis (integration job) or a real WhatsApp account (opt-in)
   testPathIgnorePatterns: [
     '/node_modules/',
@@ -285,7 +289,7 @@ module.exports = {
   coverageThreshold: { global: { lines: 80, functions: 80, statements: 80, branches: 75 } }
 }
 ```
-**Jest on an ESM-only Nest 12 (decided in step 0.6):** the specs compile to CommonJS (`tsconfig.spec.json`), but `@nestjs/*` 12 is ESM-only, so Jest must `require()` ESM natively: Node runs it with `--experimental-vm-modules`, set once for every pnpm script by `nodeOptions` in `pnpm-workspace.yaml` (plus `--disable-warning=ExperimentalWarning`). `moduleNameMapper` strips the `.js` suffix of relative imports so Jest finds the `.ts` file. `testMatch` globs cover `src/` and `tests/` instead of `roots` (Jest refuses a root that does not exist, a glob over a missing directory is just empty). `.cts` files are plain CommonJS that Node loads as is: no `export =`, no type information in ESLint.
+**Jest on an ESM-only Nest 12 (decided in step 0.6):** the specs compile to CommonJS (`tsconfig.spec.json`), but `@nestjs/*` 12 is ESM-only, so Jest must `require()` ESM natively: Node runs it with `--experimental-vm-modules`, set once for every pnpm script by `nodeOptions` in `pnpm-workspace.yaml` (plus `--disable-warning=ExperimentalWarning`). `moduleNameMapper` strips the `.js` suffix of relative imports so Jest finds the `.ts` file. `testMatch` globs cover `src/`, `tests/` and `scripts/` instead of `roots` (Jest refuses a root that does not exist, a glob over a missing directory is just empty). `.cts` files are plain CommonJS that Node loads as is: no `export =`, no type information in ESLint.
 
 `jest.integration.config.cts` spreads the unit config and restates only the difference: `testMatch` for `*.integration.spec.ts` (it cannot use `testRegex` next to the inherited `testMatch`), `maxWorkers: 1`, coverage thresholds for the critical folders (`src/services/send-queue*` 90, `src/whatsapp/event-pipeline*` and `inbound-order-buffer*` 90).
 
@@ -958,32 +962,79 @@ export interface DeprecatedApi {
 
 export const DEPRECATED_APIS: readonly DeprecatedApi[] = [
   { name: 'prisma.$use(', pattern: /\.\$use\(/, replacement: '$extends (Prisma 7)' },
-  { name: 'prisma-client-js', pattern: /prisma-client-js/, replacement: 'the generator "prisma-client"' },
-  { name: 'datasourceUrl / datasources', pattern: /\bdatasourceUrl\s*:|\bdatasources\s*:\s*\{/, replacement: 'a driver adapter (PrismaPg)' },
-  { name: 'prisma db push', pattern: /prisma\s+db\s+push/, replacement: 'prisma migrate dev / deploy' },
+  {
+    name: 'prisma-client-js',
+    pattern: /prisma-client-js/,
+    replacement: 'the generator "prisma-client"'
+  },
+  {
+    name: 'datasourceUrl / datasources',
+    pattern: /\bdatasourceUrl\s*:|\bdatasources\s*:\s*\{/,
+    replacement: 'a driver adapter (PrismaPg)'
+  },
+  {
+    name: 'prisma db push',
+    pattern: /prisma\s+db\s+push/,
+    replacement: 'prisma migrate dev / deploy'
+  },
   { name: 'z.nativeEnum(', pattern: /\bz\.nativeEnum\(/, replacement: 'z.enum(Enum)' },
   {
     name: 'z.string().url() / .email() / .uuid()',
-    pattern: /\bz\.string\(\)(\s*\.\w+\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))*\s*\.(url|email|uuid)\(/,
+    pattern:
+      /\bz\.string\(\)(\s*\.\w+\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))*\s*\.(url|email|uuid)\(/,
     replacement: 'z.url() / z.email() / z.uuid()'
   },
   { name: 'z.coerce.boolean(', pattern: /\bz\.coerce\.boolean\(/, replacement: 'z.stringbool()' },
-  { name: 'z.object(...).strict() / .passthrough()', pattern: /\}\)\s*\.(strict|passthrough)\(/, replacement: 'z.strictObject() / z.looseObject()' },
-  { name: "from 'zod/v3'", pattern: /['"]zod\/v3['"]/, replacement: "import { z } from 'zod' (Zod 4)" },
-  { name: "from 'redis'", pattern: /(\bfrom\s+|\brequire\(\s*|\bimport\(\s*|\bimport\s+)['"]redis(\/[^'"]*)?['"]/, replacement: 'ioredis' },
+  {
+    name: 'z.object(...).strict() / .passthrough()',
+    pattern: /\}\)\s*\.(strict|passthrough)\(/,
+    replacement: 'z.strictObject() / z.looseObject()'
+  },
+  {
+    name: "from 'zod/v3'",
+    pattern: /['"]zod\/v3['"]/,
+    replacement: "import { z } from 'zod' (Zod 4)"
+  },
+  {
+    name: "from 'redis'",
+    pattern: /(\bfrom\s+|\brequire\(\s*|\bimport\(\s*|\bimport\s+)['"]redis(\/[^'"]*)?['"]/,
+    replacement: 'ioredis'
+  },
   { name: 'prom-client', pattern: /prom-client/, replacement: '@prometheus-io/client' },
-  { name: 'QueueScheduler', pattern: /\bQueueScheduler\b/, replacement: 'queue.upsertJobScheduler (BullMQ)' },
-  { name: '@nestjs/platform-express', pattern: /@nestjs\/platform-express/, replacement: '@nestjs/platform-fastify' },
-  { name: 'new Buttons( / new List(', pattern: /\bnew\s+(Buttons|List)\(/, replacement: 'polls; Buttons/List are unsupported (parity matrix)' },
-  { name: "'incoming_call' / 'code_received' events", pattern: /['"](incoming_call|code_received)['"]/, replacement: "the real wwebjs events 'call' / 'code'" }
+  {
+    name: 'QueueScheduler',
+    pattern: /\bQueueScheduler\b/,
+    replacement: 'queue.upsertJobScheduler (BullMQ)'
+  },
+  {
+    name: '@nestjs/platform-express',
+    pattern: /@nestjs\/platform-express/,
+    replacement: '@nestjs/platform-fastify'
+  },
+  {
+    name: 'new Buttons( / new List(',
+    pattern: /\bnew\s+(Buttons|List)\(/,
+    replacement: 'polls; Buttons/List are unsupported (parity matrix)'
+  },
+  {
+    name: "'incoming_call' / 'code_received' events",
+    pattern: /['"](incoming_call|code_received)['"]/,
+    replacement: "the real wwebjs events 'call' / 'code'"
+  }
 ]
 
-// Files that are not application code, or that are the list itself
+// Files that are not application code, or that are the list itself. The ESLint config names the
+// banned packages on purpose, to forbid them, so it is the list's twin.
 const NOT_SCANNED =
-  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|scripts\/lib\/deprecations(\.spec)?\.ts)$/
+  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|eslint\.config\.js|scripts\/lib\/deprecations(\.spec)?\.ts)$/
 const SCANNED_EXTENSIONS = /\.(ts|tsx|js|jsx|cjs|mjs|cts|mts|prisma)$|(^|\/)package\.json$/
 
-export interface Finding { file: string; line: number; api: string; replacement: string }
+export interface Finding {
+  file: string
+  line: number
+  api: string
+  replacement: string
+}
 
 export function isScanned(file: string): boolean {
   return !NOT_SCANNED.test(file) && SCANNED_EXTENSIONS.test(file)
@@ -1058,17 +1109,23 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, statSync } from 'node:fs'
 import { exit } from 'node:process'
 
-import { findDeprecations, isScanned } from './lib/deprecations'
+import { findDeprecations, isScanned } from './lib/deprecations.js'
 
 // What git sees, without what .gitignore hides. NUL-separated so that a name with accents is not quoted.
-const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-  encoding: 'utf8',
-  maxBuffer: 256 * 1024 * 1024
-})
+const listed = execFileSync(
+  'git',
+  ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+  {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024
+  }
+)
 const files = [...new Set(listed.split('\0'))].filter(
   file => file !== '' && statSync(file, { throwIfNoEntry: false })?.isFile() === true
 )
-const findings = files.flatMap(file => (isScanned(file) ? findDeprecations(file, readFileSync(file, 'utf8')) : []))
+const findings = files.flatMap(file =>
+  isScanned(file) ? findDeprecations(file, readFileSync(file, 'utf8')) : []
+)
 
 if (findings.length > 0) {
   console.error('Removed or renamed APIs are back in the code:')
@@ -1085,14 +1142,14 @@ console.log(`no deprecated API in ${files.filter(isScanned).length} files`)
 
 **A.4 `scripts/validate-affected.ts` + `scripts/lib/affected.ts`** (single package, so no Nx: "affected" means "is there anything besides docs to check"):
 ```ts
-// scripts/lib/affected.ts — a push that only touches docs/ has no code to lint, compile or test,
-// but the generated docs must still match their generator, so the docs checks still run.
+// A push that only touches docs/ has no code to lint, compile or test, but the generated docs must
+// still match their generator, so the docs checks still run.
 export function isDocsOnly(changedFiles: readonly string[]): boolean {
   return changedFiles.length > 0 && changedFiles.every(file => file.startsWith('docs/'))
 }
 ```
 ```ts
-// scripts/validate-affected.ts — What CI would fail on (pre-push hook). No Docker, no database.
+// What CI would fail on (pre-push hook). No Docker, no database.
 // Usage: tsx scripts/validate-affected.ts [--since <sha>]
 //   --since: the commit the remote branch is at, which the pre-push hook passes. What is pushed is
 //   then the commits after it, so a documentation commit on top of code that was already checked
@@ -1100,14 +1157,15 @@ export function isDocsOnly(changedFiles: readonly string[]): boolean {
 import { execFileSync, spawnSync } from 'node:child_process'
 import { argv, exit } from 'node:process'
 
-import { isDocsOnly } from './lib/affected'
+import { isDocsOnly } from './lib/affected.js'
 
 function git(...args: string[]): string {
   try {
     return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    const hint = args[0] === 'merge-base' ? '\nis this a shallow clone? try `git fetch --unshallow`' : ''
+    const hint =
+      args[0] === 'merge-base' ? '\nis this a shallow clone? try `git fetch --unshallow`' : ''
     console.error(`git ${args.join(' ')} failed: ${detail}${hint}`)
     exit(1)
   }
@@ -1169,6 +1227,8 @@ for (const { name, command } of steps) {
 console.log('\nall checks passed')
 ```
 **A.5 `scripts/smoke-http.ts <baseUrl>`:** waits up to 30 s for `GET /health` 200 (5 s per request); then expects `GET /health` 200, `GET /ready` 200, `GET /metrics` 200 with header `Authorization: Bearer <METRICS_TOKEN>` (token read from env; the response must contain `# TYPE gw_sessions `), `GET /metrics` without credentials 401, and an unknown route `GET /v1/unknown` 404 whose JSON body is the error contract `{ error: { code: 'NOT_FOUND', requestId } }`; collects problems, prints them and exits 1, otherwise prints `<baseUrl>: probes, metrics and the error contract are fine`.
+
+**Implementation notes (step 0.8):** the sources above are the committed files. They differ from the first draft of this appendix in three ways: relative imports carry the `.js` suffix that `nodenext` requires; `NOT_SCANNED` also lists `eslint.config.js`, which names the banned packages in order to forbid them; and the rules of A.2 and A.3 live in pure functions (`scripts/lib/env-example.ts`, `scripts/lib/rollbacks.ts`) with their own specs, the scripts only read the files and print. Specs of `scripts/lib/` run in the unit suite (`testMatch` includes `scripts/**/*.spec.ts`). `check-rollbacks` treats a missing `prisma/migrations` or `prisma/rollbacks` as empty. The `bootstrap` package script is added in step 0.9, together with the `docker-compose.yml` and the Prisma setup it runs.
 
 ---
 
