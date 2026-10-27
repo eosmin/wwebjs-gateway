@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  // The shipped code must not see test globals
+  "compilerOptions": { "rootDir": "./src", "types": ["node"] },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "tests", "**/*.spec.ts"]
+}

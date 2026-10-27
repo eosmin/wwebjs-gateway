@@ -1,0 +1,13 @@
+allowBuilds:
+  unrs-resolver: true
+  prisma: false
+  '@prisma/engines': false
+  '@nestjs/core': false
+  esbuild: false
+  '@swc/core': false
+  puppeteer: false
+  '@parcel/watcher': false
+
+# Jest 30 only require()s the ESM-only packages of Nest 12 when Node runs with
+# --experimental-vm-modules; set here once for every pnpm script instead of repeating it per script
+nodeOptions: '${NODE_OPTIONS:- } --experimental-vm-modules --disable-warning=ExperimentalWarning'

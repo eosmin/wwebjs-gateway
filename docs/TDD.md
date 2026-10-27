@@ -55,8 +55,8 @@ Versions verified against the npm registry on 2026-10-26.
 | Package manager | `pnpm` through corepack (`packageManager` field of `package.json`) | 11.25.0 |
 | Language | TypeScript (`strict`, `noImplicitAny`, `noUncheckedIndexedAccess`) | **5.9.3** (stay on 5.9 until typescript-eslint, ts-jest and Nest certify the next major — same policy as `omnichannel-platform`) |
 | WhatsApp | `whatsapp-web.js` | 1.34.7 |
-| Framework | NestJS: `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-fastify` (Fastify 5 adapter), `@nestjs/cli`, `@nestjs/testing` | 12.0.1 / 12.0.1 / 12.0.1 / 12.0.10 / 12.0.1 (the pins `omnichannel-platform` runs with; bump deliberately, one area per PR) |
-| HTTP engine | `fastify` (via adapter; use the version `@nestjs/platform-fastify` requires) | 5.12.7 |
+| Framework | NestJS: `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-fastify` (Fastify 5 adapter), `@nestjs/cli`, `@nestjs/testing` | 12.0.2 / 12.0.2 / 12.0.2 / 12.0.10 / 12.0.2 (12.0.2 of the Fastify adapter fixes GHSA-9c5c-9qcx-q35q and brings `fastify` 5.12.4, which fixes four high advisories in 5.12.1; every other Nest package keeps the 12.0.1 pin that `omnichannel-platform` runs with, which is compatible because their peer ranges accept any 12.x core; bump deliberately, one area per PR) |
+| HTTP engine | `fastify` (via adapter; use the version `@nestjs/platform-fastify` requires: `@nestjs/platform-fastify@12.0.2` pins fastify `5.12.4` exactly; 5.12.7 belongs to adapter 12.2.0. 5.12.1, the pin of adapter 12.0.1, has four high advisories: an authentication bypass through malformed URLs and three validation bypasses) | 5.12.4 |
 | Validation | `zod` (v4, import from `"zod"`) + `nestjs-zod` | 4.6.7 / 5.5.0 |
 | OpenAPI | `@nestjs/swagger` | 12.0.4 |
 | Config / health / throttling | `@nestjs/config` 12.0.1, `@nestjs/terminus` 12.1.0, `@nestjs/throttler` 6.7.1 | — |
@@ -65,13 +65,13 @@ Versions verified against the npm registry on 2026-10-26.
 | Queue | `@nestjs/bullmq` + `bullmq` + `ioredis` | 12.0.0 / 6.3.4 / 6.0.0 |
 | Queue dashboard | `@bull-board/api` + `@bull-board/fastify` + `@bull-board/ui` (flag `BULL_BOARD_ENABLED`, default false; the Fastify adapter exists at 9.10.5, verified) | 9.10.5 |
 | Scheduling | `@nestjs/schedule` (watchdog, reconciliation timers) | 12.0.2 |
-| Database | PostgreSQL (image `postgres:18.6-alpine`) via `prisma` (CLI, dev) + `@prisma/client` + `@prisma/adapter-pg` + `pg` | **7.10.1** for the three Prisma packages (do NOT use `prisma@8.0.0-rc.*`, release candidate); `pg` 8.16.3 |
+| Database | PostgreSQL (image `postgres:18.6-alpine`) via `prisma` (CLI; a RUNTIME dependency, because the image runs `prisma migrate deploy` before starting and `prisma.config.ts` imports `prisma/config`) + `@prisma/client` + `@prisma/adapter-pg` + `pg` | **7.10.1** for the three Prisma packages (do NOT use `prisma@8.0.0-rc.*`, release candidate); `pg` 8.16.3 |
 | Cache/queue store | Redis (image `redis:8.10.1-alpine`, AOF enabled: `appendonly yes`) | 8.10.1 |
 | Logging | `nestjs-pino` + `pino` + `pino-http` (dev: `pino-pretty`) | 5.1.0 / 10.3.1 / 11.0.0 / 13.1.3 |
 | Metrics | `@prometheus-io/client` (`prom-client` is deprecated upstream: "replaced by @prometheus-io/client"; verify its API with Context7) | 0.16.1 |
 | QR rendering | `qrcode` + `@types/qrcode` | 1.5.4 / 1.5.6 |
 | Tests | `jest` + `ts-jest` + `@types/jest` + `jest-environment-node`; `supertest` + `@types/supertest`; `@nestjs/testing`; `socket.io-client` | 30.5.1 / 29.4.12 / 30.0.0 / 30.5.1; 7.2.2 / 7.2.1; 12.0.1; 4.8.4 |
-| Lint | `eslint`, `@eslint/js`, `typescript-eslint`, `eslint-plugin-import-x`, `eslint-import-resolver-typescript` | 10.9.1 / 10.0.1 / 8.69.0 / 4.16.1 / 4.4.5 |
+| Lint | `eslint`, `@eslint/js`, `typescript-eslint`, `eslint-plugin-import-x`, `eslint-import-resolver-typescript` | 10.9.1 / 10.0.1 / 8.69.0 / 4.17.1 (4.16.x does not declare ESLint 10 as a peer) / 4.4.5 |
 | Format | `prettier` | 3.9.6 |
 | Git hooks / commits | `husky` 9.1.7, `lint-staged` 17.4.1, `@commitlint/cli` + `@commitlint/config-conventional` 21.2.2 | — |
 | Secret scanning | `gitleaks` (Go binary, NOT an npm package: `brew install gitleaks`; CI downloads pinned release 8.28.0) | 8.28.0 |
@@ -81,7 +81,7 @@ Versions verified against the npm registry on 2026-10-26.
 
 **Notes:**
 - **Toolchain alignment:** every tool and version above that is not specific to this gateway (pnpm, Node, TypeScript 5.9.3, ESLint 10, Prettier, Jest 30 + ts-jest, Husky, lint-staged, commitlint, gitleaks, Prisma 7.10.1, BullMQ, pino, Postgres/Redis images) mirrors `omnichannel-platform` on purpose, so both projects share tooling behavior. NestJS needs `experimentalDecorators` + `emitDecoratorMetadata`. §2.6 specifies the whole toolchain and automation, which is installed in Phase 0 BEFORE any feature code.
-- **Module format:** Nest 12 + Prisma 7 + Jest: confirm via Context7 whether ESM or CJS output is recommended and configure `tsconfig`/`nest-cli.json` accordingly (`omnichannel-platform` runs jest with `module: commonjs`, `moduleResolution: node10`, `verbatimModuleSyntax: false` in `tsconfig.spec.json`); whatever is chosen, only `src/whatsapp/wwebjs-adapter.ts` imports `whatsapp-web.js` (CommonJS; if named ESM imports fail use `import wwebjs from 'whatsapp-web.js'; const { Client, LocalAuth, MessageMedia, Poll, Location, ScheduledEvent } = wwebjs;`).
+- **Module format (decided in step 0.3): ESM.** `"type": "module"`, `module`/`moduleResolution: nodenext`, relative imports carry the `.js` suffix. `@nestjs/core`, `@nestjs/common` and `@nestjs/platform-fastify` 12 are ESM-only (`type: module`), and `nest new` defaults to ESM; CommonJS only type-checks under `moduleResolution: node10` and runs through Node 24's `require(esm)`, which breaks on top-level await and is removed from TypeScript 7. Jest runs from `.cts` configs with `tsconfig.spec.json` set to `module: commonjs`/`moduleResolution: node10`/`verbatimModuleSyntax: false`, as in `omnichannel-platform`. whatever is chosen, only `src/whatsapp/wwebjs-adapter.ts` imports `whatsapp-web.js` (CommonJS; if named ESM imports fail use `import wwebjs from 'whatsapp-web.js'; const { Client, LocalAuth, MessageMedia, Poll, Location, ScheduledEvent } = wwebjs;`).
 - **Logging:** `nestjs-pino` 5.1.0 + `pino` 10.3.1 are what `omnichannel-platform` runs with on Nest 12; reuse that setup (request-id correlation, redaction).
 - **Do NOT add `puppeteer` as a direct dependency** (whatsapp-web.js depends on it). In Docker install system Chromium and set `PUPPETEER_SKIP_DOWNLOAD=true` + `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`.
 - Before pinning any version re-run `npm view <pkg> version` and re-verify with Context7 (§8). If it differs from this table, update this TDD first.
@@ -164,8 +164,8 @@ Everything here is proven in `omnichannel-platform` and is reproduced on purpose
     "test:integration": "jest -c jest.integration.config.cts --runInBand --passWithNoTests",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write \"**/*.{ts,js,cjs,mjs,cts,json,md,yml,yaml}\"",
-    "format:check": "prettier --check \"**/*.{ts,js,cjs,mjs,cts,json,md,yml,yaml}\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "type-check": "tsc --noEmit -p tsconfig.json",
     "infra:up": "docker compose up -d --wait postgres redis",
     "infra:down": "docker compose down",
@@ -177,8 +177,9 @@ Everything here is proven in `omnichannel-platform` and is reproduced on purpose
     "validate:env": "tsx scripts/validate-env-example.ts",
     "validate:deprecations": "tsx scripts/validate-deprecations.ts",
     "validate:rollbacks": "tsx scripts/check-rollbacks.ts",
+    "validate:pins": "tsx scripts/validate-pins.ts",
     "validate:docs": "tsx scripts/gen-docs.ts --check",
-    "validate:all": "pnpm lint && pnpm type-check && pnpm format:check && pnpm validate:env && pnpm validate:deprecations && pnpm validate:rollbacks && pnpm validate:docs && pnpm test",
+    "validate:all": "pnpm lint && pnpm type-check && pnpm format:check && pnpm validate:env && pnpm validate:deprecations && pnpm validate:rollbacks && pnpm validate:pins && pnpm validate:docs && pnpm test",
     "validate:affected": "tsx scripts/validate-affected.ts",
     "prepare": "husky"
   },
@@ -190,7 +191,7 @@ Everything here is proven in `omnichannel-platform` and is reproduced on purpose
   }
 }
 ```
-Pinned `devDependencies` (tooling): `@commitlint/cli` 21.2.2, `@commitlint/config-conventional` 21.2.2, `@eslint/js` 10.0.1, `@nestjs/cli` 12.0.10, `@nestjs/testing` 12.0.1, `@types/jest` 30.0.0, `@types/node` 24.19.2, `@types/supertest` 7.2.1, `eslint` 10.9.1, `eslint-import-resolver-typescript` 4.4.5, `eslint-plugin-import-x` 4.16.1, `husky` 9.1.7, `jest` 30.5.1, `jest-environment-node` 30.5.1, `lint-staged` 17.4.1, `pino-pretty` 13.1.3, `prettier` 3.9.6, `supertest` 7.2.2, `ts-jest` 29.4.12, `tsx` 4.20.5, `typescript` 5.9.3, `typescript-eslint` 8.69.0. Runtime dependency versions are in the §2 table; pin ALL versions exactly (no `^`/`~`). `pnpm-workspace.yaml` holds the build-script allow-list that pnpm 11 requires (`allowBuilds`): `unrs-resolver: true` (needed by the TypeScript import resolver); `prisma`, `@prisma/engines`, `@nestjs/core`, `esbuild`, `@swc/core`, `puppeteer`: `false` (Chromium comes from the system, `PUPPETEER_SKIP_DOWNLOAD=true`). Verify the exact pnpm 11 syntax with Context7 before writing it; keep the list minimal.
+Pinned `devDependencies` (tooling): `@commitlint/cli` 21.2.2, `@commitlint/config-conventional` 21.2.2, `@eslint/js` 10.0.1, `@nestjs/cli` 12.0.10, `@nestjs/testing` 12.0.2, `@types/jest` 30.0.0, `@types/node` 24.19.2, `@types/supertest` 7.2.1, `eslint` 10.9.1, `eslint-import-resolver-typescript` 4.4.5, `eslint-plugin-import-x` 4.17.1, `husky` 9.1.7, `jest` 30.5.1, `jest-environment-node` 30.5.1, `lint-staged` 17.4.1, `pino-pretty` 13.1.3, `prettier` 3.9.6, `supertest` 7.2.2, `ts-jest` 29.4.12, `tsx` 4.20.5, `typescript` 5.9.3, `typescript-eslint` 8.69.0. Runtime dependency versions are in the §2 table; pin ALL versions exactly (no `^`/`~`). `pnpm-workspace.yaml` holds the build-script allow-list that pnpm 11 requires (`allowBuilds`): `unrs-resolver: true` (needed by the TypeScript import resolver); `prisma`, `@prisma/engines`, `@nestjs/core`, `esbuild`, `@swc/core`, `puppeteer`: `false` (Chromium comes from the system, `PUPPETEER_SKIP_DOWNLOAD=true`). Verify the exact pnpm 11 syntax with Context7 before writing it; keep the list minimal.
 
 #### 2.6.3 Config files
 `.nvmrc`: `24.20.0`
@@ -251,17 +252,29 @@ src/generated/
 ```
 `.vscode/settings.json`: `{ "js/ts.tsdk.path": "node_modules/typescript/lib" }`
 
-`tsconfig.json` (type-check everything: src, tests, scripts, configs): `extends` nothing; options `target es2022`, `lib ["es2023"]`, `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `forceConsistentCasingInFileNames`, `experimentalDecorators`, `emitDecoratorMetadata`, `esModuleInterop`, `skipLibCheck`, `declaration`, `sourceMap`, `isolatedModules`, `resolveJsonModule`, `noEmit: true`, `types ["node","jest"]`, `include ["src","tests","scripts","jest.config.cts","jest.integration.config.cts","prisma.config.ts"]`; `module`/`moduleResolution` per the Context7 decision of §2 notes. `tsconfig.build.json` extends it with `noEmit: false`, `outDir: dist`, `include ["src"]`, `exclude ["tests","**/*.spec.ts"]`. `tsconfig.spec.json` extends it with `module: commonjs`, `moduleResolution: node10`, `verbatimModuleSyntax: false`, `types ["jest","node"]`.
+`tsconfig.json` (type-check everything: src, tests, scripts, configs): `extends` nothing; options `target es2022`, `lib ["es2023"]`, `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `forceConsistentCasingInFileNames`, `experimentalDecorators`, `emitDecoratorMetadata`, `esModuleInterop`, `skipLibCheck`, `declaration`, `sourceMap`, `isolatedModules`, `resolveJsonModule`, `noEmit: true`, `types ["node","jest"]`, `include ["src","tests","scripts","jest.config.cts","jest.integration.config.cts","prisma.config.ts"]`; `module`/`moduleResolution` per the Context7 decision of §2 notes. `tsconfig.build.json` extends it with `noEmit: false`, `outDir: dist`, `include ["src"]`, `exclude ["tests","**/*.spec.ts"]` and `types ["node"]` (test globals must not type-check in shipped code). `tsconfig.spec.json` extends it with `module: commonjs`, `moduleResolution: node10`, `verbatimModuleSyntax: false`, `types ["jest","node"]`.
 
 `jest.config.cts`:
 ```ts
 module.exports = {
   testEnvironment: 'node',
   transform: { '^.+\\.[tj]sx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.spec.json' }] },
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx'],
-  roots: ['<rootDir>/src', '<rootDir>/tests'],
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
+  // Sources import siblings with the ESM `.js` suffix; Jest resolves the `.ts` file behind it
+  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+  // Globs instead of `roots`: a directory that does not exist yet (tests/) is simply empty, so a spec
+  // placed there later is found without touching this file
+  testMatch: [
+    '<rootDir>/src/**/*.spec.ts',
+    '<rootDir>/tests/**/*.spec.ts',
+    '<rootDir>/scripts/**/*.spec.ts'
+  ],
   // Needs Postgres/Redis (integration job) or a real WhatsApp account (opt-in)
-  testPathIgnorePatterns: ['/node_modules/', '\\.integration\\.spec\\.ts$', '\\.e2e-real\\.spec\\.ts$'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '\\.integration\\.spec\\.ts$',
+    '\\.e2e-real\\.spec\\.ts$'
+  ],
   coverageDirectory: 'coverage',
   // Count every source file, not only the ones a test happens to load: a file nobody tests must
   // lower the number, or a threshold means nothing
@@ -271,13 +284,15 @@ module.exports = {
     '!**/*.d.ts',
     '!**/index.ts',
     '!src/generated/**',
-    '!src/main.ts',                    // bootstrap: exercised by the boot smoke test in CI
-    '!src/whatsapp/wwebjs-adapter.ts'  // needs a real WhatsApp account: covered by the opt-in E2E_REAL suite
+    '!src/main.ts', // bootstrap: exercised by the boot smoke test in CI
+    '!src/whatsapp/wwebjs-adapter.ts' // needs a real WhatsApp account: covered by the opt-in E2E_REAL suite
   ],
   coverageThreshold: { global: { lines: 80, functions: 80, statements: 80, branches: 75 } }
 }
 ```
-`jest.integration.config.cts` extends the same transform, `testRegex: '\\.integration\\.spec\\.ts$'`, `maxWorkers: 1`, coverage thresholds for the critical folders (`src/services/send-queue*` 90, `src/whatsapp/event-pipeline*` and `inbound-order-buffer*` 90).
+**Jest on an ESM-only Nest 12 (decided in step 0.6):** the specs compile to CommonJS (`tsconfig.spec.json`), but `@nestjs/*` 12 is ESM-only, so Jest must `require()` ESM natively: Node runs it with `--experimental-vm-modules`, set once for every pnpm script by `nodeOptions` in `pnpm-workspace.yaml` (plus `--disable-warning=ExperimentalWarning`). `moduleNameMapper` strips the `.js` suffix of relative imports so Jest finds the `.ts` file. `testMatch` globs cover `src/`, `tests/` and `scripts/` instead of `roots` (Jest refuses a root that does not exist, a glob over a missing directory is just empty). `.cts` files are plain CommonJS that Node loads as is: no `export =`, no type information in ESLint.
+
+`jest.integration.config.cts` spreads the unit config and restates only the difference: `testMatch` for `*.integration.spec.ts` (it cannot use `testRegex` next to the inherited `testMatch`), `maxWorkers: 1`, coverage thresholds for the critical folders (`src/services/send-queue*` 90, `src/whatsapp/event-pipeline*` and `inbound-order-buffer*` 90).
 
 #### 2.6.4 ESLint flat config (`eslint.config.js`) — adapted from `omnichannel-platform`
 ESLint 10 supports flat config only. Never create `.eslintrc.*`.
@@ -317,11 +332,36 @@ const deepRelativeImport = {
 }
 // Boundaries of the architecture (SOLID: everything depends on the port / the repositories)
 const restrictedPaths = [
-  { name: 'whatsapp-web.js', message: 'Only src/whatsapp/wwebjs-adapter.ts may import whatsapp-web.js' },
-  { name: '@prisma/client', message: 'Only src/database/** may use the Prisma client (use a repository)' },
+  {
+    name: 'whatsapp-web.js',
+    message: 'Only src/whatsapp/wwebjs-adapter.ts may import whatsapp-web.js'
+  },
+  {
+    name: '@prisma/client',
+    message: 'Only src/database/** may use the Prisma client (use a repository)'
+  },
   { name: '@nestjs/platform-express', message: 'This project runs on @nestjs/platform-fastify' },
   { name: 'prom-client', message: 'Use @prometheus-io/client' },
   { name: 'redis', message: 'Use ioredis' }
+]
+
+// The generator writes the Prisma client into src/generated/prisma, so the code imports it by a
+// relative path and never as '@prisma/client': the package name alone would not catch it
+const prismaClientImport = {
+  group: ['**/generated/prisma', '**/generated/prisma/**'],
+  message: 'Only src/database/** may use the Prisma client (use a repository)'
+}
+
+// Every block restates the whole option object, so the shared parts live in one place
+const restrictImports = exceptName => [
+  'error',
+  {
+    paths: restrictedPaths.filter(p => p.name !== exceptName),
+    patterns:
+      exceptName === '@prisma/client'
+        ? [deepRelativeImport]
+        : [deepRelativeImport, prismaClientImport]
+  }
 ]
 
 export default defineConfig([
@@ -342,7 +382,14 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_'
+        }
+      ],
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
@@ -355,7 +402,7 @@ export default defineConfig([
       ],
 
       'no-console': 'error',
-      'no-restricted-imports': ['error', { paths: restrictedPaths, patterns: [deepRelativeImport] }],
+      'no-restricted-imports': restrictImports(),
       'no-restricted-syntax': ['error', processEnvBan, ...httpStatusBans],
 
       'import-x/order': [
@@ -373,25 +420,25 @@ export default defineConfig([
   {
     files: ['src/whatsapp/wwebjs-adapter.ts'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        { paths: restrictedPaths.filter(p => p.name !== 'whatsapp-web.js'), patterns: [deepRelativeImport] }
-      ]
+      'no-restricted-imports': restrictImports('whatsapp-web.js')
     }
   },
   // The database layer is the only code that may use the Prisma client
   {
     files: ['src/database/**/*.ts', 'prisma.config.ts', 'scripts/**/*.ts', 'tests/**/*.ts'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        { paths: restrictedPaths.filter(p => p.name !== '@prisma/client'), patterns: [deepRelativeImport] }
-      ]
+      'no-restricted-imports': restrictImports('@prisma/client')
     }
   },
   // The single files allowed to read process.env
   {
-    files: ['src/config/**/*.ts', 'prisma.config.ts', 'scripts/**/*.ts', 'tests/helpers/env.ts', 'jest*.cts'],
+    files: [
+      'src/config/**/*.ts',
+      'prisma.config.ts',
+      'scripts/**/*.ts',
+      'tests/helpers/env.ts',
+      'jest*.cts'
+    ],
     rules: { 'no-restricted-syntax': ['error', ...httpStatusBans] }
   },
   // Scripts print; everything else uses Pino
@@ -401,14 +448,27 @@ export default defineConfig([
     files: ['**/*.spec.ts', 'tests/**/*.ts'],
     rules: { 'no-restricted-syntax': ['error', processEnvBan] }
   },
-  // Plain CommonJS configs: no type information
+  // The env helper of the tests sets process.env, and specs state statuses on purpose: no bans at all
+  // (it must come after the block above, which would otherwise ban process.env again)
+  { files: ['tests/helpers/env.ts'], rules: { 'no-restricted-syntax': 'off' } },
+  // Plain JavaScript files (eslint.config.js itself) are outside tsconfig: no type information
+  // The documented default-import style of the config packages trips two import-x heuristics
   {
-    files: ['**/*.cjs'],
+    files: ['**/*.js', '**/*.mjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    rules: { 'import-x/no-named-as-default': 'off', 'import-x/no-named-as-default-member': 'off' }
+  },
+  // Plain CommonJS configs (every .cts file is a tool config that Node loads as is): no type information
+  {
+    files: ['**/*.cjs', '**/*.cts'],
     languageOptions: {
       ...tseslint.configs.disableTypeChecked.languageOptions,
       sourceType: 'commonjs'
     },
-    rules: { ...tseslint.configs.disableTypeChecked.rules, '@typescript-eslint/no-require-imports': 'off' }
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      '@typescript-eslint/no-require-imports': 'off'
+    }
   },
   { ignores: ['**/dist/**', '**/generated/**', '**/coverage/**', 'docs/**'] }
 ])
@@ -460,18 +520,36 @@ gitleaks git --pre-commit --staged --no-banner --redact
 # suites that need Docker or a database: seconds to a minute and a half. A push that only touches
 # docs/ only runs the documentation checks.
 #
+# The repository is public, so a secret that leaves this machine in a pushed commit is already
+# published. Before anything else, every ref that is pushed gets its new commits scanned by
+# gitleaks, checked out or not (CI scans the history too, but only after the push).
+#
 # Git writes one line per pushed ref on stdin: <local ref> <local sha> <remote ref> <remote sha>.
 # The remote sha is all zeros for a branch that is not on the remote yet.
 zero=0000000000000000000000000000000000000000
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks is not installed, and the push cannot be checked for secrets without it."
+  echo "Install it with: brew install gitleaks   (other systems: https://github.com/gitleaks/gitleaks)"
+  exit 1
+fi
 # pnpm reads from /dev/null so that it cannot consume the lines of the refs that follow. It checks
 # the checked-out commit, so deleting a branch (local sha all zeros) has nothing to check, and
-# pushing a ref that is not checked out is left to CI.
+# pushing a ref that is not checked out is left to CI, except for the secret scan.
 while read -r local_ref local_sha _remote_ref remote_sha; do
   if [ "$local_sha" = "$zero" ]; then
     continue
-  elif [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+  fi
+
+  # A new branch has no remote commit to start from: its whole history is scanned
+  if [ "$remote_sha" = "$zero" ]; then
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  gitleaks git --no-banner --redact --log-opts="$range" || exit 1
+
+  if [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
     echo "pre-push: $local_ref is not the checked-out commit, so it is not checked here (CI checks it)"
-    continue
   elif [ "$remote_sha" = "$zero" ]; then
     pnpm validate:affected </dev/null || exit 1
   else
@@ -486,6 +564,7 @@ Hook files are committed (`.husky/*`); the generated `.husky/_` folder is ignore
 |---|---|---|
 | `validate:deprecations` | removed/renamed APIs of the libraries in §2.5 never come back; each hit prints file:line, the API and its replacement | Appendix A.1 |
 | `validate:env` | `.env.example` ⇄ `src/config/env.schema.ts`: every schema key declared, none extra, no duplicates, a commented-out key only if the schema accepts it missing | Appendix A.2 |
+| `validate:pins` | every dependency of `package.json` (dependencies, devDependencies, optionalDependencies) is an exact version: no `^`, no `~`, no tag, no range; peer ranges are not checked | `scripts/lib/pins.ts` |
 | `validate:rollbacks` | every `prisma/migrations/<name>/` has `prisma/rollbacks/<name>.rollback.sql` and vice versa (kept outside `migrations/` because Prisma treats each subfolder there as a migration) | Appendix A.3 |
 | `validate:docs` | generated docs (`events.md`, `parity-matrix.md`, operations list) equal a fresh generation; docs mention every env var and error code (§6.13) | `scripts/gen-docs.ts --check` |
 | `validate:affected` | the pre-push composition of all of the above plus lint, type-check, tests | Appendix A.4 |
@@ -546,6 +625,7 @@ jobs:
       - run: pnpm validate:deprecations
       - run: pnpm validate:env
       - run: pnpm validate:rollbacks
+      - run: pnpm validate:pins
       - run: pnpm validate:docs
       - run: pnpm lint
       - run: pnpm type-check
@@ -696,6 +776,11 @@ jobs:
 ```
 (The image runs migrations in `docker-entrypoint.sh`, so the `security-scan` run must provide `DATABASE_URL` as above. The YAML shows the final form; until step 4.7 the boot and image checks curl `/health` instead of `/ready`, and `smoke-http` only checks `/health`. `.env.example` must hold values that pass the schema, because the `integration-tests` job sources it. The deploy/publish job — GHCR push and optional deploy — is added in Phase 11, on `main` only, after these four.)
 
+**Implementation notes (step 0.9):** the workflow is the committed `.github/workflows/ci.yml`, checked with `actionlint`; its six action SHAs were checked against their release tags and the gitleaks checksum against the release. It differs from the draft above in four ways. (1) Until step 1.1 makes the port configurable the gateway listens on 3000, so the boot and image checks use `http://localhost:3000` and `/health` (the draft's 8081 and 8080 return in 1.1, when the port becomes configurable; `/ready` returns in 4.7). (2) The rollbacks loop uses a Bash glob with `nullglob`, newest first, instead of `ls | sort -r` (it survives names with spaces and an empty folder). (3) `prisma.config.ts` loads `.env.local` when it exists, because the Prisma CLI does not read `.env` files; that file is what `pnpm bootstrap` creates, and CI and the image use the environment instead. (4) The image keeps only production dependencies and removes the `npm` that ships with the base image, which bundles its own `tar`, `undici`, `ip-address` and `brace-expansion`; with them, Trivy fails the job on high advisories that have a fix. The base image also runs `apt-get upgrade`, and `openssl` is installed in the build stage too, because the Prisma schema engine is downloaded for the OpenSSL it finds. Verified locally with a real `docker compose up`, a real `pnpm bootstrap` and `trivy image --severity CRITICAL,HIGH --ignore-unfixed` (exit 0). The published ports of the compose file are `API_PORT`, `POSTGRES_PORT` and `REDIS_PORT` (defaults 3000, 5432, 6379), so the stack can start next to others. They are published on `127.0.0.1` only, because the stack runs with the placeholder credentials of `.env.example`.
+
+**Review of the whole pull request (end of Phase 0).** Three independent reviewers, one per batch, read it before it was opened; what they found and was confirmed by running it: (1) the `@prisma/client` import ban never fired, because the generator writes the client to `src/generated/prisma` and the code imports it by a relative path, so `restrictImports` now also bans `**/generated/prisma` outside `src/database`, and `tests/parity/lint-boundaries.spec.ts` reads the effective rules to keep it that way; (2) `.dockerignore` patterns without `**/` only match in the root of the context, so a `.env`, a `.wwebjs_auth` or a `*.pem` inside `src/` would have been copied into the image (checked with a throwaway build); (3) the `pre-push` hook scans the commits that are pushed with gitleaks, for every ref and before anything else, because the repository is public and CI scans only after the push (the range logic was checked in a scratch repository); (4) the four checkouts use `persist-credentials: false`, and the boot check runs `node --env-file=.env.example`, which parses the file instead of sourcing it and never overrides a variable the job already sets; (5) `bootstrap` writes random `ADMIN_API_KEY` and `METRICS_TOKEN` to `.env.local`; (6) the required checks of the ruleset carry the id of the GitHub Actions app, 15368; (7) the runtime stage sets `CHECKPOINT_DISABLE=1`, which the installed CLI reads (found in its code); (8) `validate-affected` only accepts a commit hash after `--since`, and `smoke-http` follows no redirect and prints only the keys of an unexpected body. A reviewer also said the schema engine is not fetched by `prisma --version`; it is, there are zero engine files before it and one after.
+
+
 #### 2.6.8 Dependabot, PR template, repository ruleset
 `.github/dependabot.yml` (the TDD pins every version, so routine bumps are done on purpose, one area per PR after reading the changelog; security alerts are unaffected by `ignore`):
 ```yaml
@@ -751,6 +836,7 @@ updates:
 <!-- Which TDD section does this implement? e.g. §6.4 -->
 
 ## Checklist
+- [ ] The title is a Conventional Commit, lowercase, 72 characters or fewer (it becomes the squash commit)
 - [ ] Only `wwebjs-adapter.ts` imports whatsapp-web.js; only `src/database/**` uses Prisma
 - [ ] New/changed capability is ONE `@WaOperation` with summary, description, examples, errors, `scope` and `wwebjs` links
 - [ ] New env vars are in `env.schema.ts`, `.env.example` AND the docs
@@ -759,6 +845,7 @@ updates:
 - [ ] Migration includes a rollback script in `prisma/rollbacks/`
 - [ ] Sends stay idempotent; events keep `seq` order; nothing blocks the event pipeline
 - [ ] No secrets, QR codes or WhatsApp session data in code, logs or fixtures
+- [ ] The step's checkbox and progress row in `docs/IMPLEMENTATION_PLAN.md` are updated
 
 ## Migration notes
 <!-- Deployment steps, breaking changes, or "none" -->
@@ -791,17 +878,17 @@ updates:
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "lint-and-types" },
-          { "context": "unit-tests" },
-          { "context": "integration-tests" },
-          { "context": "security-scan" }
+          { "context": "lint-and-types", "integration_id": 15368 },
+          { "context": "unit-tests", "integration_id": 15368 },
+          { "context": "integration-tests", "integration_id": 15368 },
+          { "context": "security-scan", "integration_id": 15368 }
         ]
       }
     }
   ]
 }
 ```
-Apply with `gh api -X POST repos/<owner>/<repo>/rulesets --input deploy/github-ruleset.json` (verify the payload schema against the current GitHub REST docs for repository rulesets at apply time). Notes: (1) **0 required approvals on purpose** — this is a solo-owner repo and GitHub does not let an author approve their own PR; the PR itself, the four green checks, resolved conversations, squash-only and linear history are the gate (raise it to 1 when a second person joins). (2) `bypass_actors` is empty, so not even the admin pushes straight to `main`. (3) **Decision (2026-10-27): the repository is PUBLIC — `eosmin/wwebjs-gateway`** (the name was checked and is free). Rulesets and branch protection are enforced by GitHub only on public repositories or with Pro/Team (on a free private repo the API answers `403 Upgrade to GitHub Pro or make this repository public`, which is the case of `omnichannel-platform` today), so being public makes `protect-main` real at no cost. Record this in the README "Repository settings" section and in `docs/repository-settings.md`, together with the public-repository rules of §10 and the settings the owner enables once: Dependabot alerts and security updates, secret scanning with push protection, private vulnerability reporting, "automatically delete head branches", squash-only merges. Trunk-based: short-lived `feat/*`, `fix/*`, `chore/*` branches; squash-merge by the owner; the PR title follows Conventional Commits because it becomes the squash commit.
+Every required check carries `"integration_id": 15368`, the id of the GitHub Actions app (`gh api /apps/github-actions --jq .id`), so a check of the same name reported by another app does not satisfy the rule. Apply with `gh api -X POST repos/<owner>/<repo>/rulesets --input deploy/github-ruleset.json` (verify the payload schema against the current GitHub REST docs for repository rulesets at apply time). Notes: (1) **0 required approvals on purpose** — this is a solo-owner repo and GitHub does not let an author approve their own PR; the PR itself, the four green checks, resolved conversations, squash-only and linear history are the gate (raise it to 1 when a second person joins). (2) `bypass_actors` is empty, so not even the admin pushes straight to `main`. (3) **Decision (2026-10-27): the repository is PUBLIC — `eosmin/wwebjs-gateway`** (the name was checked and is free). Rulesets and branch protection are enforced by GitHub only on public repositories or with Pro/Team (on a free private repo the API answers `403 Upgrade to GitHub Pro or make this repository public`, which is the case of `omnichannel-platform` today), so being public makes `protect-main` real at no cost. Record this in the README "Repository settings" section and in `docs/repository-settings.md`, together with the public-repository rules of §10 and the settings the owner enables once: Dependabot alerts and security updates, secret scanning with push protection, private vulnerability reporting, "automatically delete head branches", squash-only merges. Trunk-based: short-lived `feat/*`, `fix/*`, `chore/*` branches; squash-merge by the owner; the PR title follows Conventional Commits because it becomes the squash commit.
 
 #### 2.6.9 Claude Code automation (the hooks that fire during AI sessions)
 `.claude/settings.json` (committed; per-machine overrides go in the git-ignored `.claude/settings.local.json`):
@@ -814,34 +901,46 @@ Apply with `gh api -X POST repos/<owner>/<repo>/rulesets --input deploy/github-r
       "Read(!**/.env.example)",
       "Read(**/.wwebjs_auth/**)",
       "Read(**/.wwebjs_cache/**)",
-      "Edit(docs/events.md)", "Write(docs/events.md)",
-      "Edit(docs/parity-matrix.md)", "Write(docs/parity-matrix.md)",
-      "Edit(docs/operations-list.md)", "Write(docs/operations-list.md)",
-      "Edit(docs/websocket-commands.md)", "Write(docs/websocket-commands.md)",
-      "Edit(docs/openapi.json)", "Write(docs/openapi.json)",
-      "Edit(docs/metrics.md)", "Write(docs/metrics.md)",
-      "Edit(docs/errors.md)", "Write(docs/errors.md)",
-      "Edit(docs/config-reference.md)", "Write(docs/config-reference.md)"
+      "Edit(docs/events.md)",
+      "Edit(docs/parity-matrix.md)",
+      "Edit(docs/operations-list.md)",
+      "Edit(docs/websocket-commands.md)",
+      "Edit(docs/openapi.json)",
+      "Edit(docs/metrics.md)",
+      "Edit(docs/errors.md)",
+      "Edit(docs/config-reference.md)"
     ]
   },
   "hooks": {
     "PostToolUse": [
       {
         "matcher": "Edit|Write|Bash",
-        "hooks": [{ "type": "command", "command": "code-review-graph update --skip-flows", "timeout": 30 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v code-review-graph >/dev/null 2>&1 || exit 0; code-review-graph update --skip-flows",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "SessionStart": [
       {
         "matcher": "",
-        "hooks": [{ "type": "command", "command": "code-review-graph status", "timeout": 10 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v code-review-graph >/dev/null 2>&1 || exit 0; code-review-graph status",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
 }
 ```
-- **PostToolUse** (after every Edit/Write/Bash) incrementally updates the `code-review-graph` knowledge graph; **SessionStart** prints its status. The first two lines of `permissions.deny` keep secrets out of the model's context; the `.wwebjs_*` lines protect account credentials; the generated docs can only change through `pnpm docs:gen`.
-- `.mcp.json` (committed): `{ "mcpServers": { "code-review-graph": { "command": "uvx", "args": ["code-review-graph", "serve"], "type": "stdio" } } }`.
+- **PostToolUse** (after every Edit/Write/Bash) incrementally updates the `code-review-graph` knowledge graph; **SessionStart** prints its status. The first two lines of `permissions.deny` keep secrets out of the model's context; the `.wwebjs_*` lines protect account credentials; the generated docs can only change through `pnpm docs:gen`. Only `Edit(...)` rules are listed for them: in Claude Code an `Edit(path)` rule governs every tool that writes files, `Write` included, and a `Write(path)` rule is never matched. The `Read(!**/.env.example)` negation is honored because it comes after the rules it carves out of. These rules govern Claude's file tools only: a `Bash` command such as `cat .env` is not matched by a `Read` rule, so they are a guard against accidents, not a sandbox. Both hooks start with `command -v code-review-graph >/dev/null 2>&1 || exit 0`, so a machine without the tool gets no hook error on every call.
+- `.mcp.json` (committed): `{ "mcpServers": { "code-review-graph": { "command": "uvx", "args": ["code-review-graph==2.3.2", "serve"], "type": "stdio" } } }`. The version is pinned like every other tool of the project: an unpinned `uvx` would run whatever is newest on PyPI, with the owner's privileges, on a machine that holds WhatsApp credentials. Bump it on purpose.
 - `.claude/skills/` (`explore-codebase.md`, `review-changes.md`, `debug-issue.md`, `refactor-safely.md`) come from running `code-review-graph install` in the repo (they are the same four skills `omnichannel-platform` has); then build the graph once with `code-review-graph build` (or the command its `status` suggests). Prerequisites on the machine: `uv`/`uvx` and `code-review-graph` (already installed on the owner's machine), `gitleaks`, `gh`, `pnpm` (corepack).
 - **Reviewer subagent** `.claude/agents/code-reviewer.md` (committed, read-only): independent "fresh eyes" review of ONE batch of at most 10 files through ONE lens. It never edits files and never writes to git. It is invoked only when the owner asks for a review (the agent offers one at the end of a step; see the procedure in the project `CLAUDE.md`). File content:
 ```markdown
@@ -850,11 +949,13 @@ name: code-reviewer
 description: Read-only reviewer for wwebjs-gateway. Reviews ONE batch of at most 10 files through ONE lens (correctness, security, tests, or config-ci-docker) and reports findings, one line each. Never edits files, never writes to git.
 tools: Read, Grep, Glob, Bash
 ---
+
 You review code of the wwebjs-gateway repository. You receive: a step number, a list of at most 10 files, ONE lens, and the TDD sections that apply. Read every listed file IN FULL (and the files it imports when needed to judge it). Do not review files you were not given, except to confirm a call chain.
 
 Lenses: correctness (logic, races, error paths, boundary values, resource cleanup), security (secrets, permissions, SSRF, injection, credential and personal-data exposure, public-repository hygiene), tests (missing cases, tests that cannot fail, mocks hiding behavior, coverage of failure paths), config-ci-docker (env schema vs .env.example, CI jobs, Dockerfile, hooks, scripts, docs drift).
 
 Project invariants to check on every pass (a violation is at least HIGH):
+
 1. Only src/whatsapp/wwebjs-adapter.ts imports whatsapp-web.js; only src/database/** uses the Prisma client; no process.env outside src/config; no console, any, @ts-ignore.
 2. Every wwebjs call goes through the adapter's timeout and error translation; no floating promise; a Puppeteer rejection is attributed to a session, never crashes the process.
 3. Event pipeline order is dedupe, store, order buffer, seq, publish; seq is assigned AFTER ordering; held messages stay crash-safe (emittedAt).
@@ -879,6 +980,7 @@ command -v node   >/dev/null || { echo "Node.js 24 required"; exit 1; }
 command -v docker >/dev/null || { echo "Docker required"; exit 1; }
 corepack enable >/dev/null 2>&1 || true          # pnpm version comes from package.json "packageManager"
 command -v gitleaks >/dev/null || { echo "gitleaks required by the pre-commit hook: brew install gitleaks (other systems: https://github.com/gitleaks/gitleaks)"; exit 1; }
+command -v openssl >/dev/null || { echo "openssl required: it generates the local secrets"; exit 1; }
 command -v pnpm   >/dev/null || { echo "pnpm required: run 'corepack enable' (it may need elevated permissions)"; exit 1; }
 node_major=$(node -v | sed 's/v\([0-9]*\).*/\1/')
 [ "$node_major" -ge 24 ] || { echo "Node.js 24+ required, found $(node -v)"; exit 1; }
@@ -887,7 +989,14 @@ echo "→ Installing dependencies (also installs the Git hooks)"
 pnpm install --frozen-lockfile
 
 echo "→ Creating the local environment file"
-[ -f .env.local ] || cp .env.example .env.local
+if [ ! -f .env.local ]; then
+  # The secrets of the example are public placeholders: the local file gets its own random ones
+  admin_api_key=$(openssl rand -hex 24)
+  metrics_token=$(openssl rand -hex 24)
+  sed -e "s|^ADMIN_API_KEY=.*|ADMIN_API_KEY=${admin_api_key}|" \
+      -e "s|^METRICS_TOKEN=.*|METRICS_TOKEN=${metrics_token}|" \
+      .env.example > .env.local
+fi
 
 echo "→ Starting infrastructure (postgres, redis)"
 docker compose up -d --wait postgres redis
@@ -910,32 +1019,80 @@ export interface DeprecatedApi {
 
 export const DEPRECATED_APIS: readonly DeprecatedApi[] = [
   { name: 'prisma.$use(', pattern: /\.\$use\(/, replacement: '$extends (Prisma 7)' },
-  { name: 'prisma-client-js', pattern: /prisma-client-js/, replacement: 'the generator "prisma-client"' },
-  { name: 'datasourceUrl / datasources', pattern: /\bdatasourceUrl\s*:|\bdatasources\s*:\s*\{/, replacement: 'a driver adapter (PrismaPg)' },
-  { name: 'prisma db push', pattern: /prisma\s+db\s+push/, replacement: 'prisma migrate dev / deploy' },
+  {
+    name: 'prisma-client-js',
+    pattern: /prisma-client-js/,
+    replacement: 'the generator "prisma-client"'
+  },
+  {
+    name: 'datasourceUrl / datasources',
+    pattern: /\bdatasourceUrl\s*:|\bdatasources\s*:\s*\{/,
+    replacement: 'a driver adapter (PrismaPg)'
+  },
+  {
+    name: 'prisma db push',
+    pattern: /prisma\s+db\s+push/,
+    replacement: 'prisma migrate dev / deploy'
+  },
   { name: 'z.nativeEnum(', pattern: /\bz\.nativeEnum\(/, replacement: 'z.enum(Enum)' },
   {
     name: 'z.string().url() / .email() / .uuid()',
-    pattern: /\bz\.string\(\)(\s*\.\w+\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))*\s*\.(url|email|uuid)\(/,
+    pattern:
+      /\bz\.string\(\)(\s*\.\w+\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))*\s*\.(url|email|uuid)\(/,
     replacement: 'z.url() / z.email() / z.uuid()'
   },
   { name: 'z.coerce.boolean(', pattern: /\bz\.coerce\.boolean\(/, replacement: 'z.stringbool()' },
-  { name: 'z.object(...).strict() / .passthrough()', pattern: /\}\)\s*\.(strict|passthrough)\(/, replacement: 'z.strictObject() / z.looseObject()' },
-  { name: "from 'zod/v3'", pattern: /['"]zod\/v3['"]/, replacement: "import { z } from 'zod' (Zod 4)" },
-  { name: "from 'redis'", pattern: /(\bfrom\s+|\brequire\(\s*|\bimport\(\s*|\bimport\s+)['"]redis(\/[^'"]*)?['"]/, replacement: 'ioredis' },
+  {
+    name: 'z.object(...).strict() / .passthrough()',
+    pattern: /\}\)\s*\.(strict|passthrough)\(/,
+    replacement: 'z.strictObject() / z.looseObject()'
+  },
+  {
+    name: "from 'zod/v3'",
+    pattern: /['"]zod\/v3['"]/,
+    replacement: "import { z } from 'zod' (Zod 4)"
+  },
+  {
+    name: "from 'redis'",
+    pattern: /(\bfrom\s+|\brequire\(\s*|\bimport\(\s*|\bimport\s+)['"]redis(\/[^'"]*)?['"]/,
+    replacement: 'ioredis'
+  },
   { name: 'prom-client', pattern: /prom-client/, replacement: '@prometheus-io/client' },
-  { name: 'QueueScheduler', pattern: /\bQueueScheduler\b/, replacement: 'queue.upsertJobScheduler (BullMQ)' },
-  { name: '@nestjs/platform-express', pattern: /@nestjs\/platform-express/, replacement: '@nestjs/platform-fastify' },
-  { name: 'new Buttons( / new List(', pattern: /\bnew\s+(Buttons|List)\(/, replacement: 'polls; Buttons/List are unsupported (parity matrix)' },
-  { name: "'incoming_call' / 'code_received' events", pattern: /['"](incoming_call|code_received)['"]/, replacement: "the real wwebjs events 'call' / 'code'" }
+  {
+    name: 'QueueScheduler',
+    pattern: /\bQueueScheduler\b/,
+    replacement: 'queue.upsertJobScheduler (BullMQ)'
+  },
+  {
+    name: '@nestjs/platform-express',
+    pattern: /@nestjs\/platform-express/,
+    replacement: '@nestjs/platform-fastify'
+  },
+  {
+    name: 'new Buttons( / new List(',
+    pattern: /\bnew\s+(Buttons|List)\(/,
+    replacement: 'polls; Buttons/List are unsupported (parity matrix)'
+  },
+  {
+    name: "'incoming_call' / 'code_received' events",
+    pattern: /['"](incoming_call|code_received)['"]/,
+    replacement: "the real wwebjs events 'call' / 'code'"
+  }
 ]
 
-// Files that are not application code, or that are the list itself
+// Files that are not application code, or that are the list itself. The ESLint config names the
+// banned packages on purpose, to forbid them, and so does the test that guards those bans: they
+// are the list's twins.
 const NOT_SCANNED =
-  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|scripts\/lib\/deprecations(\.spec)?\.ts)$/
+  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|eslint\.config\.js|tests\/parity\/lint-boundaries\.spec\.ts|scripts\/lib\/deprecations(\.spec)?\.ts)$/
 const SCANNED_EXTENSIONS = /\.(ts|tsx|js|jsx|cjs|mjs|cts|mts|prisma)$|(^|\/)package\.json$/
 
-export interface Finding { file: string; line: number; api: string; replacement: string }
+export interface Finding {
+  file: string
+  line: number
+  api: string
+  replacement: string
+}
 
 export function isScanned(file: string): boolean {
   return !NOT_SCANNED.test(file) && SCANNED_EXTENSIONS.test(file)
@@ -1010,17 +1167,23 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, statSync } from 'node:fs'
 import { exit } from 'node:process'
 
-import { findDeprecations, isScanned } from './lib/deprecations'
+import { findDeprecations, isScanned } from './lib/deprecations.js'
 
 // What git sees, without what .gitignore hides. NUL-separated so that a name with accents is not quoted.
-const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-  encoding: 'utf8',
-  maxBuffer: 256 * 1024 * 1024
-})
+const listed = execFileSync(
+  'git',
+  ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+  {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024
+  }
+)
 const files = [...new Set(listed.split('\0'))].filter(
   file => file !== '' && statSync(file, { throwIfNoEntry: false })?.isFile() === true
 )
-const findings = files.flatMap(file => (isScanned(file) ? findDeprecations(file, readFileSync(file, 'utf8')) : []))
+const findings = files.flatMap(file =>
+  isScanned(file) ? findDeprecations(file, readFileSync(file, 'utf8')) : []
+)
 
 if (findings.length > 0) {
   console.error('Removed or renamed APIs are back in the code:')
@@ -1037,14 +1200,14 @@ console.log(`no deprecated API in ${files.filter(isScanned).length} files`)
 
 **A.4 `scripts/validate-affected.ts` + `scripts/lib/affected.ts`** (single package, so no Nx: "affected" means "is there anything besides docs to check"):
 ```ts
-// scripts/lib/affected.ts — a push that only touches docs/ has no code to lint, compile or test,
-// but the generated docs must still match their generator, so the docs checks still run.
+// A push that only touches docs/ has no code to lint, compile or test, but the generated docs must
+// still match their generator, so the docs checks still run.
 export function isDocsOnly(changedFiles: readonly string[]): boolean {
   return changedFiles.length > 0 && changedFiles.every(file => file.startsWith('docs/'))
 }
 ```
 ```ts
-// scripts/validate-affected.ts — What CI would fail on (pre-push hook). No Docker, no database.
+// What CI would fail on (pre-push hook). No Docker, no database.
 // Usage: tsx scripts/validate-affected.ts [--since <sha>]
 //   --since: the commit the remote branch is at, which the pre-push hook passes. What is pushed is
 //   then the commits after it, so a documentation commit on top of code that was already checked
@@ -1052,14 +1215,15 @@ export function isDocsOnly(changedFiles: readonly string[]): boolean {
 import { execFileSync, spawnSync } from 'node:child_process'
 import { argv, exit } from 'node:process'
 
-import { isDocsOnly } from './lib/affected'
+import { isCommitSha, isDocsOnly } from './lib/affected.js'
 
 function git(...args: string[]): string {
   try {
     return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    const hint = args[0] === 'merge-base' ? '\nis this a shallow clone? try `git fetch --unshallow`' : ''
+    const hint =
+      args[0] === 'merge-base' ? '\nis this a shallow clone? try `git fetch --unshallow`' : ''
     console.error(`git ${args.join(' ')} failed: ${detail}${hint}`)
     exit(1)
   }
@@ -1089,7 +1253,11 @@ if (changed.length === 0) {
 // A remote commit that this clone does not have, or that is no longer behind HEAD (a rebased
 // branch), cannot tell what is pushed: then the whole branch is checked
 const sinceIndex = argv.indexOf('--since')
-const since = sinceIndex === -1 ? undefined : argv[sinceIndex + 1]
+const sinceArgument = sinceIndex === -1 ? undefined : argv[sinceIndex + 1]
+if (sinceIndex !== -1 && !isCommitSha(sinceArgument)) {
+  console.error('--since needs a commit hash: ignoring it, the whole branch is checked')
+}
+const since = isCommitSha(sinceArgument) ? sinceArgument : undefined
 const pushed = since !== undefined && isAncestorOfHead(since) ? changedSince(since) : changed
 if (pushed.length === 0) {
   console.log('nothing new is pushed: nothing to check')
@@ -1105,6 +1273,7 @@ const CODE_STEPS = [
   { name: 'validate:env', command: ['validate:env'] },
   { name: 'validate:deprecations', command: ['validate:deprecations'] },
   { name: 'validate:rollbacks', command: ['validate:rollbacks'] },
+  { name: 'validate:pins', command: ['validate:pins'] },
   ...DOCS_STEPS
 ]
 const steps = isDocsOnly(pushed) ? DOCS_STEPS : CODE_STEPS
@@ -1121,6 +1290,8 @@ for (const { name, command } of steps) {
 console.log('\nall checks passed')
 ```
 **A.5 `scripts/smoke-http.ts <baseUrl>`:** waits up to 30 s for `GET /health` 200 (5 s per request); then expects `GET /health` 200, `GET /ready` 200, `GET /metrics` 200 with header `Authorization: Bearer <METRICS_TOKEN>` (token read from env; the response must contain `# TYPE gw_sessions `), `GET /metrics` without credentials 401, and an unknown route `GET /v1/unknown` 404 whose JSON body is the error contract `{ error: { code: 'NOT_FOUND', requestId } }`; collects problems, prints them and exits 1, otherwise prints `<baseUrl>: probes, metrics and the error contract are fine`.
+
+**Implementation notes (step 0.8):** the sources above are the committed files. They differ from the first draft of this appendix in three ways: relative imports carry the `.js` suffix that `nodenext` requires; `NOT_SCANNED` also lists `eslint.config.js`, which names the banned packages in order to forbid them; and the rules of A.2 and A.3 live in pure functions (`scripts/lib/env-example.ts`, `scripts/lib/rollbacks.ts`) with their own specs, the scripts only read the files and print. Specs of `scripts/lib/` run in the unit suite (`testMatch` includes `scripts/**/*.spec.ts`). `check-rollbacks` treats a missing `prisma/migrations` or `prisma/rollbacks` as empty. The `bootstrap` package script is added in step 0.9, together with the `docker-compose.yml` and the Prisma setup it runs.
 
 ---
 
@@ -1764,6 +1935,7 @@ Before writing code that touches a library fetch current docs: (1) load skill `c
 - **Production instance, demo and visuals:** PRIVATE. No live demo, no public Swagger UI in production (`ENABLE_DOCS=false`), no screenshots in the README. This is an intentional deviation from the portfolio-wide standards "Live Demo" and "README screenshots" in the root `CLAUDE.md`; every other quality standard (tests > 70% — here 80%, CI/CD, Docker, `.env.example`, no secrets, Conventional Commits, protected `main`) is met.
 - **Repository name:** `wwebjs-gateway`.
 - **License:** all rights reserved (decided 2026-10-27). A root `LICENSE` file states "Copyright (c) 2026 Erick Monjaras (eosmin). All rights reserved." with no grant of rights; `package.json` uses `"license": "UNLICENSED"` and `"private": true`.
+- **Module format:** ESM (decided 2026-10-27, step 0.3); see the note in §2.
 - Technology and design decisions (NestJS + Fastify adapter, Prisma 7, single instance, `whatsapp-web.js` over Baileys, ordering buffer + `message_batch`, persistent send queue, send policy, WA Web version pinning, toolchain mirrored from `omnichannel-platform`) are in §2, §6 and become ADRs (§6.13).
 
 **PENDING — ask the owner at the stated moment:**

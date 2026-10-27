@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(!**/.env.example)",
+      "Read(**/.wwebjs_auth/**)",
+      "Read(**/.wwebjs_cache/**)",
+      "Edit(docs/events.md)",
+      "Edit(docs/parity-matrix.md)",
+      "Edit(docs/operations-list.md)",
+      "Edit(docs/websocket-commands.md)",
+      "Edit(docs/openapi.json)",
+      "Edit(docs/metrics.md)",
+      "Edit(docs/errors.md)",
+      "Edit(docs/config-reference.md)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v code-review-graph >/dev/null 2>&1 || exit 0; code-review-graph update --skip-flows",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v code-review-graph >/dev/null 2>&1 || exit 0; code-review-graph status",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+# What CI would fail on (lint, type-check, unit tests, format, validators), except the builds and the
+# suites that need Docker or a database: seconds to a minute and a half. A push that only touches
+# docs/ only runs the documentation checks.
+#
+# The repository is public, so a secret that leaves this machine in a pushed commit is already
+# published. Before anything else, every ref that is pushed gets its new commits scanned by
+# gitleaks, checked out or not (CI scans the history too, but only after the push).
+#
+# Git writes one line per pushed ref on stdin: <local ref> <local sha> <remote ref> <remote sha>.
+# The remote sha is all zeros for a branch that is not on the remote yet.
+zero=0000000000000000000000000000000000000000
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks is not installed, and the push cannot be checked for secrets without it."
+  echo "Install it with: brew install gitleaks   (other systems: https://github.com/gitleaks/gitleaks)"
+  exit 1
+fi
+# pnpm reads from /dev/null so that it cannot consume the lines of the refs that follow. It checks
+# the checked-out commit, so deleting a branch (local sha all zeros) has nothing to check, and
+# pushing a ref that is not checked out is left to CI, except for the secret scan.
+while read -r local_ref local_sha _remote_ref remote_sha; do
+  if [ "$local_sha" = "$zero" ]; then
+    continue
+  fi
+
+  # A new branch has no remote commit to start from: its whole history is scanned
+  if [ "$remote_sha" = "$zero" ]; then
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  gitleaks git --no-banner --redact --log-opts="$range" || exit 1
+
+  if [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+    echo "pre-push: $local_ref is not the checked-out commit, so it is not checked here (CI checks it)"
+  elif [ "$remote_sha" = "$zero" ]; then
+    pnpm validate:affected </dev/null || exit 1
+  else
+    pnpm validate:affected -- --since "$remote_sha" </dev/null || exit 1
+  fi
+done

@@ -1,0 +1,81 @@
+{
+  "name": "wwebjs-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "bootstrap": "bash scripts/bootstrap.sh",
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "test:integration": "jest -c jest.integration.config.cts --runInBand --passWithNoTests",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "infra:up": "docker compose up -d --wait postgres redis",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "docs:gen": "tsx scripts/gen-docs.ts",
+    "validate:env": "tsx scripts/validate-env-example.ts",
+    "validate:deprecations": "tsx scripts/validate-deprecations.ts",
+    "validate:rollbacks": "tsx scripts/check-rollbacks.ts",
+    "validate:pins": "tsx scripts/validate-pins.ts",
+    "validate:docs": "tsx scripts/gen-docs.ts --check",
+    "validate:all": "pnpm lint && pnpm type-check && pnpm format:check && pnpm validate:env && pnpm validate:deprecations && pnpm validate:rollbacks && pnpm validate:pins && pnpm validate:docs && pnpm test",
+    "validate:affected": "tsx scripts/validate-affected.ts",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix --max-warnings=0",
+      "prettier --write"
+    ],
+    "*.{js,cjs,mjs,cts,mts,json,md,yml,yaml}": "prettier --write --ignore-unknown",
+    "prisma/schema.prisma": "prisma format",
+    "prisma/migrations/**/migration.sql": "pnpm validate:rollbacks"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.0.2",
+    "@nestjs/core": "12.0.2",
+    "@nestjs/platform-fastify": "12.0.2",
+    "@prisma/client": "7.10.1",
+    "fastify": "5.12.4",
+    "prisma": "7.10.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.2.2",
+    "@commitlint/config-conventional": "21.2.2",
+    "@eslint/js": "10.0.1",
+    "@nestjs/cli": "12.0.10",
+    "@nestjs/testing": "12.0.2",
+    "@types/jest": "30.0.0",
+    "@types/node": "24.19.2",
+    "eslint": "10.9.1",
+    "eslint-import-resolver-typescript": "4.4.5",
+    "eslint-plugin-import-x": "4.17.1",
+    "husky": "9.1.7",
+    "jest": "30.5.1",
+    "lint-staged": "17.4.1",
+    "prettier": "3.9.6",
+    "ts-jest": "29.4.12",
+    "tsx": "4.20.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0"
+  }
+}

@@ -34,15 +34,15 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 ## Milestone 0 — Setup and toolchain (branch `chore/tooling-foundation`, one PR) — TDD §2.6, §7
 
 - [x] **0.1** `git init -b main`, `.gitignore`, `.nvmrc`, TDD moved to `docs/TDD.md`, this plan created. *Done when:* `git status` shows only those files and the plan lists 89 steps. The root `LICENSE` ("all rights reserved") is part of this step. *Publishing (only when the owner asks):* create the public repo `eosmin/wwebjs-gateway` and push the initial `main` once — the only direct push to `main`, needed so PRs have a base.
-- [ ] **0.2** pnpm workspace and `package.json` (scripts of §2.6.2). *Done when:* `pnpm install` works with pnpm 11.25.0 and generates the lockfile.
-- [ ] **0.3** One `chore(deps): add <package>` per dependency, then the Nest scaffold on the Fastify adapter with `GET /health`. *Done when:* `pnpm build` passes and a spec proves `/health` answers 200.
-- [ ] **0.4** Prettier and editor settings. *Done when:* `pnpm format:check` passes.
-- [ ] **0.5** ESLint flat config. *Done when:* `pnpm lint` passes with zero warnings on the scaffold.
-- [ ] **0.6** Jest with coverage gates (unit and integration configs). *Done when:* `pnpm test` and `pnpm test:cov` pass.
-- [ ] **0.7** Husky, lint-staged, commitlint, gitleaks. *Done when:* `commitlint` rejects a bad message and accepts a good one, and `gitleaks dir` flags a fake secret in a temporary directory (no commit is made to test this; the owner's first requested commit exercises `pre-commit` and `commit-msg` end to end).
-- [ ] **0.8** Validators (`validate-deprecations`, `validate-env-example`, `check-rollbacks`, `validate-affected`, `smoke-http`, `bootstrap.sh`), minimal env schema and `gen-docs`, `pre-push` wired. *Done when:* `pnpm validate:all` is green and `pre-push` runs `validate:affected`.
-- [ ] **0.9** CI pipeline, Dependabot, PR template, `deploy/github-ruleset.json`, `README.md` skeleton, `SECURITY.md`, minimal Prisma schema (+ `prisma`, `@prisma/client`), minimal Docker files (api + postgres + redis). *Done when:* the four CI jobs are green on the PR.
-- [ ] **0.10** Claude Code hooks, settings, MCP config, skills and the `code-reviewer` subagent. The same PR carries ADRs 0001–0004. *Done when:* `.claude/settings.json` is valid, `code-review-graph status` runs, the agent file exists and the four ADRs follow the template.
+- [x] **0.2** pnpm workspace and `package.json` (scripts of §2.6.2). *Done when:* `pnpm install` works with pnpm 11.25.0 and generates the lockfile.
+- [x] **0.3** One `chore(deps): add <package>` per dependency, then the Nest scaffold on the Fastify adapter with `GET /health`. *Done when:* `pnpm build` passes and `/health` answers 200 (verified in 0.3 by booting the built app with Fastify `inject`; Jest does not exist yet, so the committed health spec lands in 0.6 as TDD §7 says).
+- [x] **0.4** Prettier and editor settings. *Done when:* `pnpm format:check` passes.
+- [x] **0.5** ESLint flat config. *Done when:* `pnpm lint` passes with zero warnings on the scaffold.
+- [x] **0.6** Jest with coverage gates (unit and integration configs). *Done when:* `pnpm test` and `pnpm test:cov` pass.
+- [x] **0.7** Husky, lint-staged, commitlint, gitleaks. *Done when:* `commitlint` rejects a bad message and accepts a good one, and `gitleaks dir` flags a fake secret in a temporary directory (no commit is made to test this; the owner's first requested commit exercises `pre-commit` and `commit-msg` end to end).
+- [x] **0.8** Validators (`validate-deprecations`, `validate-env-example`, `check-rollbacks`, `validate-affected`, `smoke-http`, `bootstrap.sh`), minimal env schema and `gen-docs`, `pre-push` wired. *Done when:* `pnpm validate:all` is green and `pre-push` runs `validate:affected`.
+- [x] **0.9** CI pipeline, Dependabot, PR template, `deploy/github-ruleset.json`, `README.md` skeleton, `SECURITY.md`, minimal Prisma schema (+ `prisma`, `@prisma/client`), minimal Docker files (api + postgres + redis). *Done when:* the four CI jobs are green on the PR.
+- [x] **0.10** Claude Code hooks, settings, MCP config, skills and the `code-reviewer` subagent. The same PR carries ADRs 0001–0004. *Done when:* `.claude/settings.json` is valid, `code-review-graph status` runs, the agent file exists and the four ADRs follow the template.
 
 ## Milestone 1 — Foundation (`feat/foundation`) — TDD §6.1, §5.4, §6.8
 
@@ -165,15 +165,15 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 | Step | Status | PR | Date |
 | ---- | ------ | -- | ---- |
 | 0.1 | done | local commit on `main` (not pushed yet) | 2026-10-27 |
-| 0.2 | todo | - | - |
-| 0.3 | todo | - | - |
-| 0.4 | todo | - | - |
-| 0.5 | todo | - | - |
-| 0.6 | todo | - | - |
-| 0.7 | todo | - | - |
-| 0.8 | todo | - | - |
-| 0.9 | todo | - | - |
-| 0.10 | todo | - | - |
+| 0.2 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
+| 0.3 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
+| 0.4 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
+| 0.5 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
+| 0.6 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
+| 0.7 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
+| 0.8 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
+| 0.9 | done locally | `chore/tooling-foundation` (PR of Phase 0); the four CI jobs run when the PR opens | 2026-10-27 |
+| 0.10 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
 | 1.1 | todo | - | - |
 | 1.2 | todo | - | - |
 | 1.3 | todo | - | - |

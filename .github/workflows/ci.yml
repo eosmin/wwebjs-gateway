@@ -1,0 +1,211 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push cancels the superseded pull-request run; main runs must finish
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_ENV: test
+  # The Git hooks are for laptops: CI runs the same checks itself, as jobs
+  HUSKY: '0'
+
+jobs:
+  lint-and-types:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm db:generate
+      - run: pnpm format:check
+      # The commits of the pull request and its title (it becomes the squash commit on main)
+      - name: Commit messages follow Conventional Commits
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm exec commitlint --from "$BASE_SHA" --to "$HEAD_SHA"
+      # Dependabot titles can pass 72 characters
+      - name: Pull request title follows Conventional Commits
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
+      - run: pnpm validate:deprecations
+      - run: pnpm validate:env
+      - run: pnpm validate:rollbacks
+      - run: pnpm validate:pins
+      - run: pnpm validate:docs
+      - run: pnpm lint
+      - run: pnpm type-check
+      # build too: a project that type-checks can still fail to compile
+      - run: pnpm build
+
+  # Unit tests with coverage gates (jest.config.cts thresholds; `--coverage` makes jest enforce them).
+  # Includes tests/parity and the docs drift tests.
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm db:generate
+      - run: pnpm test:cov
+
+  # The suites that need a real database and Redis, plus a boot of the built service
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: gateway
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: gateway_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gateway -d gateway_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:8.10.1-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://gateway:ci_password@localhost:5432/gateway_ci
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm db:generate
+      - name: Migrate an empty database
+        run: pnpm db:migrate
+      - name: Integration suites
+        run: pnpm test:integration
+      # The gateway listens on port 3000 until step 1.1 makes the port configurable
+      - name: The built service starts and answers
+        run: |
+          pnpm build
+          touch api.log
+          trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
+          # The rest of the env is the one of .env.example. Node does not override a variable that is
+          # already set, so the services and NODE_ENV of this job win over the file, and the file is
+          # parsed, never executed as shell
+          node --env-file=.env.example dist/main.js > api.log 2>&1 &
+          pnpm exec tsx scripts/smoke-http.ts http://localhost:3000
+      - name: Service log
+        if: failure()
+        run: tail -n 60 api.log
+      # Last, because it empties the database: every rollback must run cleanly, newest first
+      - name: Rollbacks run
+        run: |
+          shopt -s nullglob
+          files=(prisma/rollbacks/*.rollback.sql)
+          for ((i = ${#files[@]} - 1; i >= 0; i--)); do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "${files[i]}"
+          done
+
+  # Builds the image and scans it. A critical or high vulnerability that has a fix fails the job.
+  security-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: gateway
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: gateway_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gateway -d gateway_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:8.10.1-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # gitleaks reads the whole history
+          persist-credentials: false
+      # A secret that was ever committed stays in the history, so the whole history is scanned
+      - name: Scan the history for secrets
+        env:
+          GITLEAKS_VERSION: 8.28.0
+          GITLEAKS_SHA256: a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
+        run: |
+          curl --fail --silent --show-error --location --output gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git --no-banner --redact --verbose
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          tags: wwebjs-gateway:ci
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # The scan reads the OS and the base image; run the image too, in the mode it has where deployed.
+      # The gateway listens on port 3000 until step 1.1 makes the port configurable, and answers
+      # /health until step 4.7 adds /ready.
+      - name: The image starts and answers
+        run: |
+          docker run -d --name service --network host --env-file .env.example \
+            -e NODE_ENV=production \
+            -e DATABASE_URL=postgresql://gateway:ci_password@localhost:5432/gateway_ci \
+            -e REDIS_URL=redis://localhost:6379 \
+            -e ADMIN_API_KEY="$(openssl rand -hex 24)" \
+            wwebjs-gateway:ci
+          curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-connrefused \
+            http://localhost:3000/health
+      - name: Service log
+        if: failure()
+        run: docker logs service
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: wwebjs-gateway:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
