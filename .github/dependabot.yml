@@ -1,0 +1,42 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    commit-message: { prefix: chore(deps) }
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-minor', 'version-update:semver-patch']
+      # TypeScript stays on 5.9 until typescript-eslint, ts-jest and Nest certify the next major
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # The runtime is Node 24, so the types follow the Node major
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # Upgrading the WhatsApp library is a deliberate act with its own runbook (docs/upgrading.md)
+      - dependency-name: whatsapp-web.js
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    commit-message: { prefix: ci(deps) }
+    groups:
+      actions-minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+    commit-message: { prefix: chore(deps) }
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-minor', 'version-update:semver-patch']
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: { interval: weekly }
+    commit-message: { prefix: chore(deps) }
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-minor', 'version-update:semver-patch']
