@@ -1,6 +1,6 @@
 # Debian, not Alpine: the WhatsApp library drives a Chromium that needs glibc. Chromium itself is
 # installed in the step that adds the library; this image only runs the gateway for now.
-FROM node:24.20.0-bookworm-slim AS base
+FROM node:26.12.1-bookworm-slim AS base
 # upgrade: the base image is pinned to a Node release, so the Debian fixes published since then are
 # applied here. OpenSSL is installed because the Prisma engines are picked by the OpenSSL they find,
 # in the stage that downloads them and in the one that loads them.
