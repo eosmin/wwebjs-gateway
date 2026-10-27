@@ -41,9 +41,13 @@ Or the whole stack in containers, which builds the image and migrates the databa
 docker compose up
 ```
 
+The compose stack runs with the development credentials of `.env.example` and publishes its ports on
+`127.0.0.1` only: it is for a development machine, never for a server.
+
 If a default port is taken, move it: `API_PORT=3001 POSTGRES_PORT=5433 REDIS_PORT=6380 docker compose up`.
 
-`pnpm bootstrap` creates `.env.local` from `.env.example`. It is git-ignored, and it is the file the
+`pnpm bootstrap` creates `.env.local` from `.env.example`, with a random `ADMIN_API_KEY` and
+`METRICS_TOKEN` instead of the public placeholders. It is git-ignored, and it is the file the
 Prisma CLI reads (`pnpm db:migrate` needs it, or a `DATABASE_URL` in your environment).
 
 The environment variables are listed in [`docs/config-reference.md`](docs/config-reference.md),
@@ -68,11 +72,12 @@ bypassed. Commits follow [Conventional Commits](https://www.conventionalcommits.
 The repository is **public**: everything committed is world-readable, forever. Never commit phone
 numbers, message text, session data, hostnames or secrets; fixtures are redacted first.
 
-`main` is protected by a repository ruleset, committed as
+`main` is meant to be protected by a repository ruleset, committed as
 [`deploy/github-ruleset.json`](deploy/github-ruleset.json): changes arrive through pull requests
 that are squash-merged, with linear history, resolved conversations and the four CI checks
 (`lint-and-types`, `unit-tests`, `integration-tests`, `security-scan`) green and up to date. Nobody
-bypasses it. The owner applies it once, after the checks have run at least once:
+bypasses it. **Nothing is enforced until the owner applies it**, once, after the checks have run at least
+once:
 
 ```bash
 gh api -X POST repos/eosmin/wwebjs-gateway/rulesets --input deploy/github-ruleset.json

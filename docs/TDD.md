@@ -177,8 +177,9 @@ Everything here is proven in `omnichannel-platform` and is reproduced on purpose
     "validate:env": "tsx scripts/validate-env-example.ts",
     "validate:deprecations": "tsx scripts/validate-deprecations.ts",
     "validate:rollbacks": "tsx scripts/check-rollbacks.ts",
+    "validate:pins": "tsx scripts/validate-pins.ts",
     "validate:docs": "tsx scripts/gen-docs.ts --check",
-    "validate:all": "pnpm lint && pnpm type-check && pnpm format:check && pnpm validate:env && pnpm validate:deprecations && pnpm validate:rollbacks && pnpm validate:docs && pnpm test",
+    "validate:all": "pnpm lint && pnpm type-check && pnpm format:check && pnpm validate:env && pnpm validate:deprecations && pnpm validate:rollbacks && pnpm validate:pins && pnpm validate:docs && pnpm test",
     "validate:affected": "tsx scripts/validate-affected.ts",
     "prepare": "husky"
   },
@@ -344,12 +345,22 @@ const restrictedPaths = [
   { name: 'redis', message: 'Use ioredis' }
 ]
 
+// The generator writes the Prisma client into src/generated/prisma, so the code imports it by a
+// relative path and never as '@prisma/client': the package name alone would not catch it
+const prismaClientImport = {
+  group: ['**/generated/prisma', '**/generated/prisma/**'],
+  message: 'Only src/database/** may use the Prisma client (use a repository)'
+}
+
 // Every block restates the whole option object, so the shared parts live in one place
 const restrictImports = exceptName => [
   'error',
   {
     paths: restrictedPaths.filter(p => p.name !== exceptName),
-    patterns: [deepRelativeImport]
+    patterns:
+      exceptName === '@prisma/client'
+        ? [deepRelativeImport]
+        : [deepRelativeImport, prismaClientImport]
   }
 ]
 
@@ -391,10 +402,7 @@ export default defineConfig([
       ],
 
       'no-console': 'error',
-      'no-restricted-imports': [
-        'error',
-        { paths: restrictedPaths, patterns: [deepRelativeImport] }
-      ],
+      'no-restricted-imports': restrictImports(),
       'no-restricted-syntax': ['error', processEnvBan, ...httpStatusBans],
 
       'import-x/order': [
@@ -512,18 +520,36 @@ gitleaks git --pre-commit --staged --no-banner --redact
 # suites that need Docker or a database: seconds to a minute and a half. A push that only touches
 # docs/ only runs the documentation checks.
 #
+# The repository is public, so a secret that leaves this machine in a pushed commit is already
+# published. Before anything else, every ref that is pushed gets its new commits scanned by
+# gitleaks, checked out or not (CI scans the history too, but only after the push).
+#
 # Git writes one line per pushed ref on stdin: <local ref> <local sha> <remote ref> <remote sha>.
 # The remote sha is all zeros for a branch that is not on the remote yet.
 zero=0000000000000000000000000000000000000000
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks is not installed, and the push cannot be checked for secrets without it."
+  echo "Install it with: brew install gitleaks   (other systems: https://github.com/gitleaks/gitleaks)"
+  exit 1
+fi
 # pnpm reads from /dev/null so that it cannot consume the lines of the refs that follow. It checks
 # the checked-out commit, so deleting a branch (local sha all zeros) has nothing to check, and
-# pushing a ref that is not checked out is left to CI.
+# pushing a ref that is not checked out is left to CI, except for the secret scan.
 while read -r local_ref local_sha _remote_ref remote_sha; do
   if [ "$local_sha" = "$zero" ]; then
     continue
-  elif [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+  fi
+
+  # A new branch has no remote commit to start from: its whole history is scanned
+  if [ "$remote_sha" = "$zero" ]; then
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  gitleaks git --no-banner --redact --log-opts="$range" || exit 1
+
+  if [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
     echo "pre-push: $local_ref is not the checked-out commit, so it is not checked here (CI checks it)"
-    continue
   elif [ "$remote_sha" = "$zero" ]; then
     pnpm validate:affected </dev/null || exit 1
   else
@@ -538,6 +564,7 @@ Hook files are committed (`.husky/*`); the generated `.husky/_` folder is ignore
 |---|---|---|
 | `validate:deprecations` | removed/renamed APIs of the libraries in §2.5 never come back; each hit prints file:line, the API and its replacement | Appendix A.1 |
 | `validate:env` | `.env.example` ⇄ `src/config/env.schema.ts`: every schema key declared, none extra, no duplicates, a commented-out key only if the schema accepts it missing | Appendix A.2 |
+| `validate:pins` | every dependency of `package.json` (dependencies, devDependencies, optionalDependencies) is an exact version: no `^`, no `~`, no tag, no range; peer ranges are not checked | `scripts/lib/pins.ts` |
 | `validate:rollbacks` | every `prisma/migrations/<name>/` has `prisma/rollbacks/<name>.rollback.sql` and vice versa (kept outside `migrations/` because Prisma treats each subfolder there as a migration) | Appendix A.3 |
 | `validate:docs` | generated docs (`events.md`, `parity-matrix.md`, operations list) equal a fresh generation; docs mention every env var and error code (§6.13) | `scripts/gen-docs.ts --check` |
 | `validate:affected` | the pre-push composition of all of the above plus lint, type-check, tests | Appendix A.4 |
@@ -598,6 +625,7 @@ jobs:
       - run: pnpm validate:deprecations
       - run: pnpm validate:env
       - run: pnpm validate:rollbacks
+      - run: pnpm validate:pins
       - run: pnpm validate:docs
       - run: pnpm lint
       - run: pnpm type-check
@@ -748,7 +776,10 @@ jobs:
 ```
 (The image runs migrations in `docker-entrypoint.sh`, so the `security-scan` run must provide `DATABASE_URL` as above. The YAML shows the final form; until step 4.7 the boot and image checks curl `/health` instead of `/ready`, and `smoke-http` only checks `/health`. `.env.example` must hold values that pass the schema, because the `integration-tests` job sources it. The deploy/publish job — GHCR push and optional deploy — is added in Phase 11, on `main` only, after these four.)
 
-**Implementation notes (step 0.9):** the workflow is the committed `.github/workflows/ci.yml`, checked with `actionlint`; its six action SHAs were checked against their release tags and the gitleaks checksum against the release. It differs from the draft above in four ways. (1) Until step 1.1 makes the port configurable the gateway listens on 3000, so the boot and image checks use `http://localhost:3000` and `/health` (the draft's 8081 and 8080 return in 1.1, when the port becomes configurable; `/ready` returns in 4.7). (2) The rollbacks loop uses a Bash glob with `nullglob`, newest first, instead of `ls | sort -r` (it survives names with spaces and an empty folder). (3) `prisma.config.ts` loads `.env.local` when it exists, because the Prisma CLI does not read `.env` files; that file is what `pnpm bootstrap` creates, and CI and the image use the environment instead. (4) The image keeps only production dependencies and removes the `npm` that ships with the base image, which bundles its own `tar`, `undici`, `ip-address` and `brace-expansion`; with them, Trivy fails the job on high advisories that have a fix. The base image also runs `apt-get upgrade`, and `openssl` is installed in the build stage too, because the Prisma schema engine is downloaded for the OpenSSL it finds. Verified locally with a real `docker compose up`, a real `pnpm bootstrap` and `trivy image --severity CRITICAL,HIGH --ignore-unfixed` (exit 0). The published ports of the compose file are `API_PORT`, `POSTGRES_PORT` and `REDIS_PORT` (defaults 3000, 5432, 6379), so the stack can start next to others.
+**Implementation notes (step 0.9):** the workflow is the committed `.github/workflows/ci.yml`, checked with `actionlint`; its six action SHAs were checked against their release tags and the gitleaks checksum against the release. It differs from the draft above in four ways. (1) Until step 1.1 makes the port configurable the gateway listens on 3000, so the boot and image checks use `http://localhost:3000` and `/health` (the draft's 8081 and 8080 return in 1.1, when the port becomes configurable; `/ready` returns in 4.7). (2) The rollbacks loop uses a Bash glob with `nullglob`, newest first, instead of `ls | sort -r` (it survives names with spaces and an empty folder). (3) `prisma.config.ts` loads `.env.local` when it exists, because the Prisma CLI does not read `.env` files; that file is what `pnpm bootstrap` creates, and CI and the image use the environment instead. (4) The image keeps only production dependencies and removes the `npm` that ships with the base image, which bundles its own `tar`, `undici`, `ip-address` and `brace-expansion`; with them, Trivy fails the job on high advisories that have a fix. The base image also runs `apt-get upgrade`, and `openssl` is installed in the build stage too, because the Prisma schema engine is downloaded for the OpenSSL it finds. Verified locally with a real `docker compose up`, a real `pnpm bootstrap` and `trivy image --severity CRITICAL,HIGH --ignore-unfixed` (exit 0). The published ports of the compose file are `API_PORT`, `POSTGRES_PORT` and `REDIS_PORT` (defaults 3000, 5432, 6379), so the stack can start next to others. They are published on `127.0.0.1` only, because the stack runs with the placeholder credentials of `.env.example`.
+
+**Review of the whole pull request (end of Phase 0).** Three independent reviewers, one per batch, read it before it was opened; what they found and was confirmed by running it: (1) the `@prisma/client` import ban never fired, because the generator writes the client to `src/generated/prisma` and the code imports it by a relative path, so `restrictImports` now also bans `**/generated/prisma` outside `src/database`, and `tests/parity/lint-boundaries.spec.ts` reads the effective rules to keep it that way; (2) `.dockerignore` patterns without `**/` only match in the root of the context, so a `.env`, a `.wwebjs_auth` or a `*.pem` inside `src/` would have been copied into the image (checked with a throwaway build); (3) the `pre-push` hook scans the commits that are pushed with gitleaks, for every ref and before anything else, because the repository is public and CI scans only after the push (the range logic was checked in a scratch repository); (4) the four checkouts use `persist-credentials: false`, and the boot check runs `node --env-file=.env.example`, which parses the file instead of sourcing it and never overrides a variable the job already sets; (5) `bootstrap` writes random `ADMIN_API_KEY` and `METRICS_TOKEN` to `.env.local`; (6) the required checks of the ruleset carry the id of the GitHub Actions app, 15368; (7) the runtime stage sets `CHECKPOINT_DISABLE=1`, which the installed CLI reads (found in its code); (8) `validate-affected` only accepts a commit hash after `--since`, and `smoke-http` follows no redirect and prints only the keys of an unexpected body. A reviewer also said the schema engine is not fetched by `prisma --version`; it is, there are zero engine files before it and one after.
+
 
 #### 2.6.8 Dependabot, PR template, repository ruleset
 `.github/dependabot.yml` (the TDD pins every version, so routine bumps are done on purpose, one area per PR after reading the changelog; security alerts are unaffected by `ignore`):
@@ -847,17 +878,17 @@ updates:
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "lint-and-types" },
-          { "context": "unit-tests" },
-          { "context": "integration-tests" },
-          { "context": "security-scan" }
+          { "context": "lint-and-types", "integration_id": 15368 },
+          { "context": "unit-tests", "integration_id": 15368 },
+          { "context": "integration-tests", "integration_id": 15368 },
+          { "context": "security-scan", "integration_id": 15368 }
         ]
       }
     }
   ]
 }
 ```
-Apply with `gh api -X POST repos/<owner>/<repo>/rulesets --input deploy/github-ruleset.json` (verify the payload schema against the current GitHub REST docs for repository rulesets at apply time). Notes: (1) **0 required approvals on purpose** — this is a solo-owner repo and GitHub does not let an author approve their own PR; the PR itself, the four green checks, resolved conversations, squash-only and linear history are the gate (raise it to 1 when a second person joins). (2) `bypass_actors` is empty, so not even the admin pushes straight to `main`. (3) **Decision (2026-10-27): the repository is PUBLIC — `eosmin/wwebjs-gateway`** (the name was checked and is free). Rulesets and branch protection are enforced by GitHub only on public repositories or with Pro/Team (on a free private repo the API answers `403 Upgrade to GitHub Pro or make this repository public`, which is the case of `omnichannel-platform` today), so being public makes `protect-main` real at no cost. Record this in the README "Repository settings" section and in `docs/repository-settings.md`, together with the public-repository rules of §10 and the settings the owner enables once: Dependabot alerts and security updates, secret scanning with push protection, private vulnerability reporting, "automatically delete head branches", squash-only merges. Trunk-based: short-lived `feat/*`, `fix/*`, `chore/*` branches; squash-merge by the owner; the PR title follows Conventional Commits because it becomes the squash commit.
+Every required check carries `"integration_id": 15368`, the id of the GitHub Actions app (`gh api /apps/github-actions --jq .id`), so a check of the same name reported by another app does not satisfy the rule. Apply with `gh api -X POST repos/<owner>/<repo>/rulesets --input deploy/github-ruleset.json` (verify the payload schema against the current GitHub REST docs for repository rulesets at apply time). Notes: (1) **0 required approvals on purpose** — this is a solo-owner repo and GitHub does not let an author approve their own PR; the PR itself, the four green checks, resolved conversations, squash-only and linear history are the gate (raise it to 1 when a second person joins). (2) `bypass_actors` is empty, so not even the admin pushes straight to `main`. (3) **Decision (2026-10-27): the repository is PUBLIC — `eosmin/wwebjs-gateway`** (the name was checked and is free). Rulesets and branch protection are enforced by GitHub only on public repositories or with Pro/Team (on a free private repo the API answers `403 Upgrade to GitHub Pro or make this repository public`, which is the case of `omnichannel-platform` today), so being public makes `protect-main` real at no cost. Record this in the README "Repository settings" section and in `docs/repository-settings.md`, together with the public-repository rules of §10 and the settings the owner enables once: Dependabot alerts and security updates, secret scanning with push protection, private vulnerability reporting, "automatically delete head branches", squash-only merges. Trunk-based: short-lived `feat/*`, `fix/*`, `chore/*` branches; squash-merge by the owner; the PR title follows Conventional Commits because it becomes the squash commit.
 
 #### 2.6.9 Claude Code automation (the hooks that fire during AI sessions)
 `.claude/settings.json` (committed; per-machine overrides go in the git-ignored `.claude/settings.local.json`):
@@ -949,6 +980,7 @@ command -v node   >/dev/null || { echo "Node.js 24 required"; exit 1; }
 command -v docker >/dev/null || { echo "Docker required"; exit 1; }
 corepack enable >/dev/null 2>&1 || true          # pnpm version comes from package.json "packageManager"
 command -v gitleaks >/dev/null || { echo "gitleaks required by the pre-commit hook: brew install gitleaks (other systems: https://github.com/gitleaks/gitleaks)"; exit 1; }
+command -v openssl >/dev/null || { echo "openssl required: it generates the local secrets"; exit 1; }
 command -v pnpm   >/dev/null || { echo "pnpm required: run 'corepack enable' (it may need elevated permissions)"; exit 1; }
 node_major=$(node -v | sed 's/v\([0-9]*\).*/\1/')
 [ "$node_major" -ge 24 ] || { echo "Node.js 24+ required, found $(node -v)"; exit 1; }
@@ -957,7 +989,14 @@ echo "→ Installing dependencies (also installs the Git hooks)"
 pnpm install --frozen-lockfile
 
 echo "→ Creating the local environment file"
-[ -f .env.local ] || cp .env.example .env.local
+if [ ! -f .env.local ]; then
+  # The secrets of the example are public placeholders: the local file gets its own random ones
+  admin_api_key=$(openssl rand -hex 24)
+  metrics_token=$(openssl rand -hex 24)
+  sed -e "s|^ADMIN_API_KEY=.*|ADMIN_API_KEY=${admin_api_key}|" \
+      -e "s|^METRICS_TOKEN=.*|METRICS_TOKEN=${metrics_token}|" \
+      .env.example > .env.local
+fi
 
 echo "→ Starting infrastructure (postgres, redis)"
 docker compose up -d --wait postgres redis
@@ -1042,9 +1081,10 @@ export const DEPRECATED_APIS: readonly DeprecatedApi[] = [
 ]
 
 // Files that are not application code, or that are the list itself. The ESLint config names the
-// banned packages on purpose, to forbid them, so it is the list's twin.
+// banned packages on purpose, to forbid them, and so does the test that guards those bans: they
+// are the list's twins.
 const NOT_SCANNED =
-  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|eslint\.config\.js|scripts\/lib\/deprecations(\.spec)?\.ts)$/
+  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|eslint\.config\.js|tests\/parity\/lint-boundaries\.spec\.ts|scripts\/lib\/deprecations(\.spec)?\.ts)$/
 const SCANNED_EXTENSIONS = /\.(ts|tsx|js|jsx|cjs|mjs|cts|mts|prisma)$|(^|\/)package\.json$/
 
 export interface Finding {
@@ -1175,7 +1215,7 @@ export function isDocsOnly(changedFiles: readonly string[]): boolean {
 import { execFileSync, spawnSync } from 'node:child_process'
 import { argv, exit } from 'node:process'
 
-import { isDocsOnly } from './lib/affected.js'
+import { isCommitSha, isDocsOnly } from './lib/affected.js'
 
 function git(...args: string[]): string {
   try {
@@ -1213,7 +1253,11 @@ if (changed.length === 0) {
 // A remote commit that this clone does not have, or that is no longer behind HEAD (a rebased
 // branch), cannot tell what is pushed: then the whole branch is checked
 const sinceIndex = argv.indexOf('--since')
-const since = sinceIndex === -1 ? undefined : argv[sinceIndex + 1]
+const sinceArgument = sinceIndex === -1 ? undefined : argv[sinceIndex + 1]
+if (sinceIndex !== -1 && !isCommitSha(sinceArgument)) {
+  console.error('--since needs a commit hash: ignoring it, the whole branch is checked')
+}
+const since = isCommitSha(sinceArgument) ? sinceArgument : undefined
 const pushed = since !== undefined && isAncestorOfHead(since) ? changedSince(since) : changed
 if (pushed.length === 0) {
   console.log('nothing new is pushed: nothing to check')
@@ -1229,6 +1273,7 @@ const CODE_STEPS = [
   { name: 'validate:env', command: ['validate:env'] },
   { name: 'validate:deprecations', command: ['validate:deprecations'] },
   { name: 'validate:rollbacks', command: ['validate:rollbacks'] },
+  { name: 'validate:pins', command: ['validate:pins'] },
   ...DOCS_STEPS
 ]
 const steps = isDocsOnly(pushed) ? DOCS_STEPS : CODE_STEPS
