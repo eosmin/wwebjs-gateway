@@ -251,17 +251,25 @@ src/generated/
 ```
 `.vscode/settings.json`: `{ "js/ts.tsdk.path": "node_modules/typescript/lib" }`
 
-`tsconfig.json` (type-check everything: src, tests, scripts, configs): `extends` nothing; options `target es2022`, `lib ["es2023"]`, `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `forceConsistentCasingInFileNames`, `experimentalDecorators`, `emitDecoratorMetadata`, `esModuleInterop`, `skipLibCheck`, `declaration`, `sourceMap`, `isolatedModules`, `resolveJsonModule`, `noEmit: true`, `types ["node","jest"]`, `include ["src","tests","scripts","jest.config.cts","jest.integration.config.cts","prisma.config.ts"]`; `module`/`moduleResolution` per the Context7 decision of §2 notes. `tsconfig.build.json` extends it with `noEmit: false`, `outDir: dist`, `include ["src"]`, `exclude ["tests","**/*.spec.ts"]`. `tsconfig.spec.json` extends it with `module: commonjs`, `moduleResolution: node10`, `verbatimModuleSyntax: false`, `types ["jest","node"]`.
+`tsconfig.json` (type-check everything: src, tests, scripts, configs): `extends` nothing; options `target es2022`, `lib ["es2023"]`, `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `forceConsistentCasingInFileNames`, `experimentalDecorators`, `emitDecoratorMetadata`, `esModuleInterop`, `skipLibCheck`, `declaration`, `sourceMap`, `isolatedModules`, `resolveJsonModule`, `noEmit: true`, `types ["node","jest"]`, `include ["src","tests","scripts","jest.config.cts","jest.integration.config.cts","prisma.config.ts"]`; `module`/`moduleResolution` per the Context7 decision of §2 notes. `tsconfig.build.json` extends it with `noEmit: false`, `outDir: dist`, `include ["src"]`, `exclude ["tests","**/*.spec.ts"]` and `types ["node"]` (test globals must not type-check in shipped code). `tsconfig.spec.json` extends it with `module: commonjs`, `moduleResolution: node10`, `verbatimModuleSyntax: false`, `types ["jest","node"]`.
 
 `jest.config.cts`:
 ```ts
 module.exports = {
   testEnvironment: 'node',
   transform: { '^.+\\.[tj]sx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.spec.json' }] },
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx'],
-  roots: ['<rootDir>/src', '<rootDir>/tests'],
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
+  // Sources import siblings with the ESM `.js` suffix; Jest resolves the `.ts` file behind it
+  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+  // Globs instead of `roots`: a directory that does not exist yet (tests/) is simply empty, so a spec
+  // placed there later is found without touching this file
+  testMatch: ['<rootDir>/src/**/*.spec.ts', '<rootDir>/tests/**/*.spec.ts'],
   // Needs Postgres/Redis (integration job) or a real WhatsApp account (opt-in)
-  testPathIgnorePatterns: ['/node_modules/', '\\.integration\\.spec\\.ts$', '\\.e2e-real\\.spec\\.ts$'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '\\.integration\\.spec\\.ts$',
+    '\\.e2e-real\\.spec\\.ts$'
+  ],
   coverageDirectory: 'coverage',
   // Count every source file, not only the ones a test happens to load: a file nobody tests must
   // lower the number, or a threshold means nothing
@@ -271,13 +279,15 @@ module.exports = {
     '!**/*.d.ts',
     '!**/index.ts',
     '!src/generated/**',
-    '!src/main.ts',                    // bootstrap: exercised by the boot smoke test in CI
-    '!src/whatsapp/wwebjs-adapter.ts'  // needs a real WhatsApp account: covered by the opt-in E2E_REAL suite
+    '!src/main.ts', // bootstrap: exercised by the boot smoke test in CI
+    '!src/whatsapp/wwebjs-adapter.ts' // needs a real WhatsApp account: covered by the opt-in E2E_REAL suite
   ],
   coverageThreshold: { global: { lines: 80, functions: 80, statements: 80, branches: 75 } }
 }
 ```
-`jest.integration.config.cts` extends the same transform, `testRegex: '\\.integration\\.spec\\.ts$'`, `maxWorkers: 1`, coverage thresholds for the critical folders (`src/services/send-queue*` 90, `src/whatsapp/event-pipeline*` and `inbound-order-buffer*` 90).
+**Jest on an ESM-only Nest 12 (decided in step 0.6):** the specs compile to CommonJS (`tsconfig.spec.json`), but `@nestjs/*` 12 is ESM-only, so Jest must `require()` ESM natively: Node runs it with `--experimental-vm-modules`, set once for every pnpm script by `nodeOptions` in `pnpm-workspace.yaml` (plus `--disable-warning=ExperimentalWarning`). `moduleNameMapper` strips the `.js` suffix of relative imports so Jest finds the `.ts` file. `testMatch` globs cover `src/` and `tests/` instead of `roots` (Jest refuses a root that does not exist, a glob over a missing directory is just empty). `.cts` files are plain CommonJS that Node loads as is: no `export =`, no type information in ESLint.
+
+`jest.integration.config.cts` spreads the unit config and restates only the difference: `testMatch` for `*.integration.spec.ts` (it cannot use `testRegex` next to the inherited `testMatch`), `maxWorkers: 1`, coverage thresholds for the critical folders (`src/services/send-queue*` 90, `src/whatsapp/event-pipeline*` and `inbound-order-buffer*` 90).
 
 #### 2.6.4 ESLint flat config (`eslint.config.js`) — adapted from `omnichannel-platform`
 ESLint 10 supports flat config only. Never create `.eslintrc.*`.
@@ -436,9 +446,9 @@ export default defineConfig([
     extends: [tseslint.configs.disableTypeChecked],
     rules: { 'import-x/no-named-as-default': 'off', 'import-x/no-named-as-default-member': 'off' }
   },
-  // Plain CommonJS configs: no type information
+  // Plain CommonJS configs (every .cts file is a tool config that Node loads as is): no type information
   {
-    files: ['**/*.cjs'],
+    files: ['**/*.cjs', '**/*.cts'],
     languageOptions: {
       ...tseslint.configs.disableTypeChecked.languageOptions,
       sourceType: 'commonjs'

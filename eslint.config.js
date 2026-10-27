@@ -152,9 +152,9 @@ export default defineConfig([
     extends: [tseslint.configs.disableTypeChecked],
     rules: { 'import-x/no-named-as-default': 'off', 'import-x/no-named-as-default-member': 'off' }
   },
-  // Plain CommonJS configs: no type information
+  // Plain CommonJS configs (every .cts file is a tool config that Node loads as is): no type information
   {
-    files: ['**/*.cjs'],
+    files: ['**/*.cjs', '**/*.cts'],
     languageOptions: {
       ...tseslint.configs.disableTypeChecked.languageOptions,
       sourceType: 'commonjs'
