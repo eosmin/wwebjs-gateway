@@ -6,3 +6,203 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// Mirrors SESSION_STATUSES in src/types/dto.ts
+enum SessionStatus {
+  created
+  starting
+  qr
+  pairing_code
+  authenticating
+  ready
+  disconnected
+  stopped
+  failed
+}
+
+enum WebhookMediaMode {
+  none
+  reference
+  inline
+}
+
+enum DeliveryStatus {
+  pending
+  success
+  failed
+}
+
+enum MessageDirection {
+  in
+  out
+}
+
+enum IdempotencyStatus {
+  pending
+  done
+  failed
+}
+
+enum SuppressionReason {
+  manual
+  opt_out
+}
+
+model Session {
+  id              String        @id
+  name            String?
+  status          SessionStatus @default(created)
+  phoneNumber     String?
+  pushName        String?
+  autoStart       Boolean       @default(true)
+  // Per-session defaults: humanize, sendJitterMs, auto-download flags, ordering overrides, sendPolicy
+  settings        Json          @default("{}")
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+  lastConnectedAt DateTime?     @db.Timestamptz(3)
+  lastEventAt     DateTime?     @db.Timestamptz(3)
+  // First successful `ready` after linking; drives the warm-up of the send policy
+  linkedAt        DateTime?     @db.Timestamptz(3)
+  lastError       String?
+
+  apiKeys      ApiKey[]
+  webhooks     Webhook[]
+  inboundHooks InboundHook[]
+  messages     StoredMessage[]
+  suppressions Suppression[]
+
+  @@map("sessions")
+}
+
+model ApiKey {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String
+  // sha256 hex of the raw key; the raw key is returned once and never stored
+  keyHash       String    @unique
+  keyPrefix     String
+  // Null = admin key
+  sessionId     String?
+  session       Session?  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  scopes        String[]
+  // Empty = any address
+  allowedCidrs  String[]
+  expiresAt     DateTime? @db.Timestamptz(3)
+  // The key this one replaced
+  rotatedFromId String?   @db.Uuid
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt    DateTime? @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+
+  @@index([sessionId])
+  @@map("api_keys")
+}
+
+model Webhook {
+  id        String           @id @default(uuid()) @db.Uuid
+  // Null = every session
+  sessionId String?
+  session   Session?         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  url       String
+  // Stored in clear because it signs the deliveries; never returned after creation
+  secret    String
+  events    String[]         @default(["*"])
+  enabled   Boolean          @default(true)
+  mediaMode WebhookMediaMode @default(reference)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+
+  deliveries WebhookDelivery[]
+
+  @@index([sessionId])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id             String         @id @default(uuid()) @db.Uuid
+  webhookId      String         @db.Uuid
+  webhook        Webhook        @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  sessionId      String
+  event          String
+  seq            BigInt
+  // QR redacted
+  payload        Json
+  status         DeliveryStatus @default(pending)
+  attempts       Int            @default(0)
+  lastStatusCode Int?
+  lastError      String?
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  deliveredAt    DateTime?      @db.Timestamptz(3)
+
+  @@index([webhookId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("webhook_deliveries")
+}
+
+model InboundHook {
+  id        String    @id @default(uuid()) @db.Uuid
+  sessionId String
+  session   Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  name      String
+  // sha256 hex of the raw token
+  tokenHash String    @unique
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  revokedAt DateTime? @db.Timestamptz(3)
+
+  @@index([sessionId])
+  @@map("inbound_hooks")
+}
+
+model StoredMessage {
+  // Serialized wwebjs id
+  id         String
+  sessionId  String
+  session    Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  chatId     String
+  direction  MessageDirection
+  fromMe     Boolean
+  type       String
+  // Null when STORE_MESSAGE_BODIES=false
+  body       String?
+  hasMedia   Boolean
+  ack        Int
+  // Sender timestamp
+  sentAt     DateTime         @db.Timestamptz(3)
+  // Gateway arrival
+  receivedAt DateTime         @db.Timestamptz(3)
+  // Set when the event was published; null = still pending or held (crash recovery)
+  emittedAt  DateTime?        @db.Timestamptz(3)
+  origin     Json?
+  dto        Json
+  createdAt  DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@id([sessionId, id])
+  @@index([sessionId, chatId, sentAt(sort: Desc)])
+  @@index([sessionId, emittedAt])
+  @@map("messages")
+}
+
+model IdempotencyKey {
+  sessionId   String
+  key         String
+  requestHash String
+  messageId   String?
+  status      IdempotencyStatus @default(pending)
+  response    Json?
+  createdAt   DateTime          @default(now()) @db.Timestamptz(3)
+
+  // Rows are purged after 24 h
+  @@id([sessionId, key])
+  @@index([createdAt])
+  @@map("idempotency_keys")
+}
+
+model Suppression {
+  sessionId String
+  session   Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  chatId    String
+  reason    SuppressionReason
+  createdAt DateTime          @default(now()) @db.Timestamptz(3)
+  note      String?
+
+  @@id([sessionId, chatId])
+  @@map("suppressions")
+}
