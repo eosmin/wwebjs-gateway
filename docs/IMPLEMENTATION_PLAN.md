@@ -39,7 +39,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **0.4** Prettier and editor settings. *Done when:* `pnpm format:check` passes.
 - [x] **0.5** ESLint flat config. *Done when:* `pnpm lint` passes with zero warnings on the scaffold.
 - [x] **0.6** Jest with coverage gates (unit and integration configs). *Done when:* `pnpm test` and `pnpm test:cov` pass.
-- [ ] **0.7** Husky, lint-staged, commitlint, gitleaks. *Done when:* `commitlint` rejects a bad message and accepts a good one, and `gitleaks dir` flags a fake secret in a temporary directory (no commit is made to test this; the owner's first requested commit exercises `pre-commit` and `commit-msg` end to end).
+- [x] **0.7** Husky, lint-staged, commitlint, gitleaks. *Done when:* `commitlint` rejects a bad message and accepts a good one, and `gitleaks dir` flags a fake secret in a temporary directory (no commit is made to test this; the owner's first requested commit exercises `pre-commit` and `commit-msg` end to end).
 - [ ] **0.8** Validators (`validate-deprecations`, `validate-env-example`, `check-rollbacks`, `validate-affected`, `smoke-http`, `bootstrap.sh`), minimal env schema and `gen-docs`, `pre-push` wired. *Done when:* `pnpm validate:all` is green and `pre-push` runs `validate:affected`.
 - [ ] **0.9** CI pipeline, Dependabot, PR template, `deploy/github-ruleset.json`, `README.md` skeleton, `SECURITY.md`, minimal Prisma schema (+ `prisma`, `@prisma/client`), minimal Docker files (api + postgres + redis). *Done when:* the four CI jobs are green on the PR.
 - [ ] **0.10** Claude Code hooks, settings, MCP config, skills and the `code-reviewer` subagent. The same PR carries ADRs 0001–0004. *Done when:* `.claude/settings.json` is valid, `code-review-graph status` runs, the agent file exists and the four ADRs follow the template.
@@ -170,7 +170,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 | 0.4 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
 | 0.5 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
 | 0.6 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
-| 0.7 | todo | - | - |
+| 0.7 | done | `chore/tooling-foundation` (PR of Phase 0) | 2026-10-27 |
 | 0.8 | todo | - | - |
 | 0.9 | todo | - | - |
 | 0.10 | todo | - | - |

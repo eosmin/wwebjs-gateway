@@ -1,0 +1,13 @@
+# Blocks committed secrets. gitleaks is a local binary, not an npm package. Checked first, so that
+# a commit that cannot be checked is refused before anything is rewritten.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks is not installed, and the commit cannot be checked for secrets without it."
+  echo "Install it with: brew install gitleaks   (other systems: https://github.com/gitleaks/gitleaks)"
+  exit 1
+fi
+
+# Fixes and re-stages what it can (ESLint, Prettier, prisma format), and runs the validators of the
+# files that are staged
+pnpm exec lint-staged
+
+gitleaks git --pre-commit --staged --no-banner --redact

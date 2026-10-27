@@ -20,7 +20,17 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "type-check": "tsc --noEmit -p tsconfig.json"
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix --max-warnings=0",
+      "prettier --write"
+    ],
+    "*.{js,cjs,mjs,cts,mts,json,md,yml,yaml}": "prettier --write --ignore-unknown",
+    "prisma/schema.prisma": "prisma format",
+    "prisma/migrations/**/migration.sql": "pnpm validate:rollbacks"
   },
   "dependencies": {
     "@nestjs/common": "12.0.1",
