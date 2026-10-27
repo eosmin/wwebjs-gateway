@@ -7,8 +7,17 @@ interface Restriction {
   patterns: { group: string[] }[]
 }
 
+// Loading the whole config (typescript-eslint, import-x, every plugin) is the slow part, and it is
+// paid once: a slow or busy machine must not make the first test of the file time out
+const eslint = new ESLint()
+const CONFIG_LOAD_TIMEOUT_MS = 60_000
+
+beforeAll(async () => {
+  await eslint.calculateConfigForFile('src/main.ts')
+}, CONFIG_LOAD_TIMEOUT_MS)
+
 async function restrictionsFor(file: string): Promise<Restriction> {
-  const config = (await new ESLint().calculateConfigForFile(file)) as {
+  const config = (await eslint.calculateConfigForFile(file)) as {
     rules: Record<string, [unknown, Restriction]>
   }
   return config.rules['no-restricted-imports']?.[1] as Restriction
