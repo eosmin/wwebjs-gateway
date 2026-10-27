@@ -64,7 +64,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **3.1** `whatsapp-client.port.ts`. *Done when:* the port compiles and covers the inventory of §6.12.
 - [x] **3.2** `mappers.ts` (+ `extractOrigin`, `sanitizeRaw`). *Done when:* fixture tests pass.
 - [x] **3.3** `event-bus.service.ts`. *Done when:* typed publish/subscribe is unit-tested.
-- [ ] **3.4** `tests/helpers/fake-whatsapp-client.ts`. *Done when:* it implements the whole port.
+- [x] **3.4** `tests/helpers/fake-whatsapp-client.ts`. *Done when:* it implements the whole port.
 - [ ] **3.5** `inbound-order-buffer.ts`. *Done when:* all ordering cases of §6.4 pass.
 - [ ] **3.6** `event-pipeline.service.ts`. *Done when:* dedupe, order, monotonic `seq` and crash recovery tests pass.
 - [ ] **3.7** `session-manager.service.ts`. *Done when:* status machine, reconnect backoff, restore stagger and `MAX_SESSIONS` tests pass.
@@ -201,7 +201,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.1 | done | `feat/3-1-client-port` | 2026-10-27 |
 | 3.2 | done | `feat/3-2-mappers` | 2026-10-27 |
 | 3.3 | done | `feat/3-3-event-bus` | 2026-10-27 |
-| 3.4 | todo | - | - |
+| 3.4 | done | `feat/3-4-fake-client` | 2026-10-27 |
 | 3.5 | todo | - | - |
 | 3.6 | todo | - | - |
 | 3.7 | todo | - | - |
