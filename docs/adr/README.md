@@ -34,3 +34,4 @@ The other options and why each was not chosen.
 | [0002](0002-toolchain-mirrored-from-omnichannel.md) | Toolchain mirrored from `omnichannel-platform`          |
 | [0003](0003-public-repository-and-protect-main.md)  | Public repository and the `protect-main` ruleset        |
 | [0004](0004-whatsapp-web-js-over-baileys.md)        | `whatsapp-web.js` over Baileys                          |
+| [0005](0005-prisma-7-with-the-pg-driver-adapter.md) | Prisma 7 with the `pg` driver adapter, `cjs` generator |

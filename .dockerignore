@@ -19,6 +19,8 @@
 
 node_modules
 dist
+# Generated inside the image by `pnpm db:generate`, never taken from the local checkout
+src/generated
 coverage
 docs
 deploy

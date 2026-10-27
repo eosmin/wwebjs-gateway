@@ -1,6 +1,10 @@
+// The CJS output has no import.meta, so the Jest suites (compiled as CJS) load the same generated
+// client as the ESM build; the ESM output breaks under Jest. The ".js" suffix is what nodenext needs.
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  importFileExtension = "js"
 }
 
 datasource db {

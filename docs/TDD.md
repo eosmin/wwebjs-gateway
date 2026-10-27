@@ -65,7 +65,7 @@ Versions verified against the npm registry on 2026-10-26.
 | Queue | `@nestjs/bullmq` + `bullmq` + `ioredis` | 12.0.0 / 6.3.4 / 6.0.0 |
 | Queue dashboard | `@bull-board/api` + `@bull-board/fastify` + `@bull-board/ui` (flag `BULL_BOARD_ENABLED`, default false; the Fastify adapter exists at 9.10.5, verified) | 9.10.5 |
 | Scheduling | `@nestjs/schedule` (watchdog, reconciliation timers) | 12.0.2 |
-| Database | PostgreSQL (image `postgres:18.6-alpine`) via `prisma` (CLI; a RUNTIME dependency, because the image runs `prisma migrate deploy` before starting and `prisma.config.ts` imports `prisma/config`) + `@prisma/client` + `@prisma/adapter-pg` + `pg` | **7.10.1** for the three Prisma packages (do NOT use `prisma@8.0.0-rc.*`, release candidate); `pg` 8.16.3 |
+| Database | PostgreSQL (image `postgres:18.6-alpine`) via `prisma` (CLI; a RUNTIME dependency, because the image runs `prisma migrate deploy` before starting and `prisma.config.ts` imports `prisma/config`) + `@prisma/client` + `@prisma/adapter-pg` + `pg` | **7.10.1** for the three Prisma packages (do NOT use `prisma@8.0.0-rc.*`, release candidate); `pg` 8.23.1 (the version `@prisma/adapter-pg` resolves; a lower pin made pnpm install two copies) |
 | Cache/queue store | Redis (image `redis:8.10.1-alpine`, AOF enabled: `appendonly yes`) | 8.10.1 |
 | Logging | `nestjs-pino` + `pino` + `pino-http` (dev: `pino-pretty`) | 5.1.0 / 10.3.1 / 11.0.0 / 13.1.3 |
 | Metrics | `@prometheus-io/client` (`prom-client` is deprecated upstream: "replaced by @prometheus-io/client"; verify its API with Context7) | 0.16.1 |
@@ -99,7 +99,7 @@ Versions verified against the npm registry on 2026-10-26.
 
 **Prisma 7**
 - Use the driver-adapter setup (`@prisma/adapter-pg`) and the generator/config layout Prisma 7 requires (`prisma.config.ts`, generator output path) — **fetch the exact current setup from Context7 before writing `schema.prisma`**; do not rely on Prisma ≤6 snippets.
-- `PrismaService` extends/wraps `PrismaClient`, connects in `onModuleInit`, disconnects in `onModuleDestroy`.
+- `PrismaService` extends/wraps `PrismaClient`, connects in `onModuleInit`, disconnects in `onApplicationShutdown` (bounded; it runs after the queues and workers that write through it have closed, which `onModuleDestroy` would not guarantee).
 - Migrations: `prisma migrate dev` locally (commit the generated SQL in `prisma/migrations/`), `prisma migrate deploy` in the container entrypoint BEFORE starting Node. Never `prisma db push` outside throwaway local experiments.
 - `BigInt` columns (e.g. `seq`) are not JSON-serializable: convert at the repository boundary to `number` (safe range) or `string`; never leak `bigint` into DTOs.
 - Partial/functional indexes are not expressible in `schema.prisma`; add them as raw SQL inside a migration if needed and document it in the migration folder README.
