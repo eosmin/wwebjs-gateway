@@ -1,36 +1,14 @@
-import { Global, Module } from '@nestjs/common'
-import { Test, type TestingModule } from '@nestjs/testing'
+import { Logger } from '@nestjs/common'
+import type { TestingModule } from '@nestjs/testing'
 
-import { APP_CONFIG } from '../../src/config/config.module.js'
-import { parseEnv } from '../../src/config/env.schema.js'
-import { DatabaseModule } from '../../src/database/database.module.js'
 import { PrismaService } from '../../src/database/prisma.service.js'
-import { REAL_ENV, TEST_ENV } from '../helpers/env.js'
-
-// Needs the Postgres of `pnpm infra:up` (or of CI) in DATABASE_URL, with the migrations applied
-function databaseUrl(): URL {
-  const url = REAL_ENV.DATABASE_URL
-  if (url === undefined) throw new Error('DATABASE_URL is required by the integration suites')
-  return new URL(url)
-}
-
-// Stands in for the global ConfigModule, so DatabaseModule resolves APP_CONFIG as it does in the app
-const configFor = (url: URL): { provide: symbol; useFactory: () => unknown } => ({
-  provide: APP_CONFIG,
-  useFactory: () => parseEnv({ ...TEST_ENV, DATABASE_URL: url.toString() })
-})
+import { buildDatabaseModule, databaseUrl } from '../helpers/database.js'
 
 describe('PrismaService (integration)', () => {
   let module: TestingModule | undefined
 
   const build = async (url: URL): Promise<TestingModule> => {
-    @Global()
-    @Module({ providers: [configFor(url)], exports: [APP_CONFIG] })
-    class TestConfigModule {}
-
-    module = await Test.createTestingModule({
-      imports: [TestConfigModule, DatabaseModule]
-    }).compile()
+    module = await buildDatabaseModule(url)
     return module
   }
 
@@ -57,14 +35,17 @@ describe('PrismaService (integration)', () => {
   })
 
   it('fails the boot at once, without retrying, when the password is wrong', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
     const url = databaseUrl()
     url.password = 'not-the-password'
     const built = await build(url)
-    const started = Date.now()
 
     await expect(built.init()).rejects.toThrow(/28P01|password authentication failed/)
 
-    // Eight retries would take seconds of backoff; a permanent failure stops on the first attempt
-    expect(Date.now() - started).toBeLessThan(2000)
+    // A retry would log a second attempt; the one line never carries the password
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/attempt 1 failed/)
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain('not-the-password')
+    warn.mockRestore()
   })
 })

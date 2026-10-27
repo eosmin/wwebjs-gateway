@@ -57,7 +57,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **2.1** `prisma/schema.prisma` with every model. *Done when:* `prisma validate` and `pnpm db:generate` pass.
 - [x] **2.2** First migration and its rollback script. *Done when:* `validate:rollbacks` passes and the migration applies to an empty database.
 - [x] **2.3** `prisma.service.ts`. *Done when:* an integration test connects and disconnects cleanly.
-- [ ] **2.4** Repositories (api-keys, sessions, webhooks, deliveries, inbound-hooks, messages, idempotency, suppressions). *Done when:* integration tests pass against Postgres.
+- [x] **2.4** Repositories (api-keys, sessions, webhooks, deliveries, inbound-hooks, messages, idempotency, suppressions). *Done when:* integration tests pass against Postgres.
 
 ## Milestone 3 — WhatsApp core (`feat/whatsapp-core`) — TDD §6.3–§6.6
 
@@ -171,6 +171,9 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **7.4** Decide and implement the production guard for `ALLOW_PRIVATE_WEBHOOK_TARGETS` (see TDD §11 PENDING).
 - [ ] **3.x, the first step that logs message data** Decide which keys count as message content beyond `body`, `text` and `caption` (see TDD §11 PENDING), and never pass a secret as a `child()` logger binding: bindings bypass redaction.
 - [ ] **10.2** The Redis restart test also checks the log: ioredis reports one error per retry (about every 2 s) and each becomes a log line; throttle it if it floods.
+- [ ] **5.4** An idempotency key whose process died between `claim` and `complete`/`fail` stays `pending` until the 24 h purge (step 2.4 repository). The service must treat a stale `pending` key as an unknown outcome (conflict, never resend) and may need a "mark stale" method.
+- [ ] **3.x, the order buffer** `MessagesRepository.updateAck` and the ack of `upsert` overwrite with whatever arrives; decide whether the ack is monotonic (a re-emitted older ack must not lower a newer one; -1 is an error) when the pipeline stores acks. `listUnemitted` has no limit: batch it if a long outage can leave thousands of held rows.
+- [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
 ## Progress tracking
 
@@ -194,7 +197,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 2.1 | done | `feat/2-1-prisma-schema` | 2026-10-27 |
 | 2.2 | done | `feat/2-2-first-migration` | 2026-10-27 |
 | 2.3 | done | `feat/2-3-prisma-service` | 2026-10-27 |
-| 2.4 | todo | - | - |
+| 2.4 | done | `feat/2-4-repositories` | 2026-10-27 |
 | 3.1 | todo | - | - |
 | 3.2 | todo | - | - |
 | 3.3 | todo | - | - |
