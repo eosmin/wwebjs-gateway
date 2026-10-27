@@ -870,34 +870,46 @@ Apply with `gh api -X POST repos/<owner>/<repo>/rulesets --input deploy/github-r
       "Read(!**/.env.example)",
       "Read(**/.wwebjs_auth/**)",
       "Read(**/.wwebjs_cache/**)",
-      "Edit(docs/events.md)", "Write(docs/events.md)",
-      "Edit(docs/parity-matrix.md)", "Write(docs/parity-matrix.md)",
-      "Edit(docs/operations-list.md)", "Write(docs/operations-list.md)",
-      "Edit(docs/websocket-commands.md)", "Write(docs/websocket-commands.md)",
-      "Edit(docs/openapi.json)", "Write(docs/openapi.json)",
-      "Edit(docs/metrics.md)", "Write(docs/metrics.md)",
-      "Edit(docs/errors.md)", "Write(docs/errors.md)",
-      "Edit(docs/config-reference.md)", "Write(docs/config-reference.md)"
+      "Edit(docs/events.md)",
+      "Edit(docs/parity-matrix.md)",
+      "Edit(docs/operations-list.md)",
+      "Edit(docs/websocket-commands.md)",
+      "Edit(docs/openapi.json)",
+      "Edit(docs/metrics.md)",
+      "Edit(docs/errors.md)",
+      "Edit(docs/config-reference.md)"
     ]
   },
   "hooks": {
     "PostToolUse": [
       {
         "matcher": "Edit|Write|Bash",
-        "hooks": [{ "type": "command", "command": "code-review-graph update --skip-flows", "timeout": 30 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v code-review-graph >/dev/null 2>&1 || exit 0; code-review-graph update --skip-flows",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "SessionStart": [
       {
         "matcher": "",
-        "hooks": [{ "type": "command", "command": "code-review-graph status", "timeout": 10 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v code-review-graph >/dev/null 2>&1 || exit 0; code-review-graph status",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
 }
 ```
-- **PostToolUse** (after every Edit/Write/Bash) incrementally updates the `code-review-graph` knowledge graph; **SessionStart** prints its status. The first two lines of `permissions.deny` keep secrets out of the model's context; the `.wwebjs_*` lines protect account credentials; the generated docs can only change through `pnpm docs:gen`.
-- `.mcp.json` (committed): `{ "mcpServers": { "code-review-graph": { "command": "uvx", "args": ["code-review-graph", "serve"], "type": "stdio" } } }`.
+- **PostToolUse** (after every Edit/Write/Bash) incrementally updates the `code-review-graph` knowledge graph; **SessionStart** prints its status. The first two lines of `permissions.deny` keep secrets out of the model's context; the `.wwebjs_*` lines protect account credentials; the generated docs can only change through `pnpm docs:gen`. Only `Edit(...)` rules are listed for them: in Claude Code an `Edit(path)` rule governs every tool that writes files, `Write` included, and a `Write(path)` rule is never matched. The `Read(!**/.env.example)` negation is honored because it comes after the rules it carves out of. These rules govern Claude's file tools only: a `Bash` command such as `cat .env` is not matched by a `Read` rule, so they are a guard against accidents, not a sandbox. Both hooks start with `command -v code-review-graph >/dev/null 2>&1 || exit 0`, so a machine without the tool gets no hook error on every call.
+- `.mcp.json` (committed): `{ "mcpServers": { "code-review-graph": { "command": "uvx", "args": ["code-review-graph==2.3.2", "serve"], "type": "stdio" } } }`. The version is pinned like every other tool of the project: an unpinned `uvx` would run whatever is newest on PyPI, with the owner's privileges, on a machine that holds WhatsApp credentials. Bump it on purpose.
 - `.claude/skills/` (`explore-codebase.md`, `review-changes.md`, `debug-issue.md`, `refactor-safely.md`) come from running `code-review-graph install` in the repo (they are the same four skills `omnichannel-platform` has); then build the graph once with `code-review-graph build` (or the command its `status` suggests). Prerequisites on the machine: `uv`/`uvx` and `code-review-graph` (already installed on the owner's machine), `gitleaks`, `gh`, `pnpm` (corepack).
 - **Reviewer subagent** `.claude/agents/code-reviewer.md` (committed, read-only): independent "fresh eyes" review of ONE batch of at most 10 files through ONE lens. It never edits files and never writes to git. It is invoked only when the owner asks for a review (the agent offers one at the end of a step; see the procedure in the project `CLAUDE.md`). File content:
 ```markdown
@@ -906,11 +918,13 @@ name: code-reviewer
 description: Read-only reviewer for wwebjs-gateway. Reviews ONE batch of at most 10 files through ONE lens (correctness, security, tests, or config-ci-docker) and reports findings, one line each. Never edits files, never writes to git.
 tools: Read, Grep, Glob, Bash
 ---
+
 You review code of the wwebjs-gateway repository. You receive: a step number, a list of at most 10 files, ONE lens, and the TDD sections that apply. Read every listed file IN FULL (and the files it imports when needed to judge it). Do not review files you were not given, except to confirm a call chain.
 
 Lenses: correctness (logic, races, error paths, boundary values, resource cleanup), security (secrets, permissions, SSRF, injection, credential and personal-data exposure, public-repository hygiene), tests (missing cases, tests that cannot fail, mocks hiding behavior, coverage of failure paths), config-ci-docker (env schema vs .env.example, CI jobs, Dockerfile, hooks, scripts, docs drift).
 
 Project invariants to check on every pass (a violation is at least HIGH):
+
 1. Only src/whatsapp/wwebjs-adapter.ts imports whatsapp-web.js; only src/database/** uses the Prisma client; no process.env outside src/config; no console, any, @ts-ignore.
 2. Every wwebjs call goes through the adapter's timeout and error translation; no floating promise; a Puppeteer rejection is attributed to a session, never crashes the process.
 3. Event pipeline order is dedupe, store, order buffer, seq, publish; seq is assigned AFTER ordering; held messages stay crash-safe (emittedAt).
