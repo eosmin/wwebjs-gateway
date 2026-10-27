@@ -5,7 +5,7 @@ import { GENERATED_DOCS } from '../../scripts/lib/generated-docs.js'
 
 // The guides every phase has to have written by its end. It starts with the ones that exist and
 // grows with each phase until it is complete in Phase 9 (TDD §6.13).
-const REQUIRED_GUIDES = ['docs/config-reference.md', 'docs/errors.md']
+const REQUIRED_GUIDES = ['docs/config-reference.md', 'docs/errors.md', 'docs/events.md']
 
 const read = (path: string): string => readFileSync(path, 'utf8')
 
