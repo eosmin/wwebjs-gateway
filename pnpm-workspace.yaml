@@ -6,3 +6,4 @@ allowBuilds:
   esbuild: false
   '@swc/core': false
   puppeteer: false
+  '@parcel/watcher': false
