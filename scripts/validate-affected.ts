@@ -6,7 +6,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { argv, exit } from 'node:process'
 
-import { isDocsOnly } from './lib/affected.js'
+import { isCommitSha, isDocsOnly } from './lib/affected.js'
 
 function git(...args: string[]): string {
   try {
@@ -44,7 +44,11 @@ if (changed.length === 0) {
 // A remote commit that this clone does not have, or that is no longer behind HEAD (a rebased
 // branch), cannot tell what is pushed: then the whole branch is checked
 const sinceIndex = argv.indexOf('--since')
-const since = sinceIndex === -1 ? undefined : argv[sinceIndex + 1]
+const sinceArgument = sinceIndex === -1 ? undefined : argv[sinceIndex + 1]
+if (sinceIndex !== -1 && !isCommitSha(sinceArgument)) {
+  console.error('--since needs a commit hash: ignoring it, the whole branch is checked')
+}
+const since = isCommitSha(sinceArgument) ? sinceArgument : undefined
 const pushed = since !== undefined && isAncestorOfHead(since) ? changedSince(since) : changed
 if (pushed.length === 0) {
   console.log('nothing new is pushed: nothing to check')

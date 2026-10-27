@@ -15,7 +15,11 @@ if (baseUrl === undefined || !/^https?:\/\//.test(baseUrl) || !URL.canParse(base
 }
 
 async function get(path: string): Promise<Response> {
-  return fetch(new URL(path, baseUrl), { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+  // A redirect is a failure: a probe must not be sent to a host it was not pointed at
+  return fetch(new URL(path, baseUrl), {
+    redirect: 'error',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  })
 }
 
 async function waitForHealth(): Promise<Response> {
@@ -40,7 +44,10 @@ const health = await waitForHealth()
 const problems: string[] = []
 const body: unknown = await health.json().catch(() => undefined)
 if (typeof body !== 'object' || body === null || !('status' in body) || body.status !== 'ok') {
-  problems.push(`GET /health body is ${JSON.stringify(body)}, expected { "status": "ok" }`)
+  // Only the shape: a later step may put a version or a hostname in this body, and CI logs are public
+  const shape =
+    typeof body === 'object' && body !== null ? Object.keys(body).join(', ') : typeof body
+  problems.push(`GET /health body is not { "status": "ok" } (it has: ${shape || 'no keys'})`)
 }
 
 if (problems.length > 0) {
