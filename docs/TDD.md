@@ -71,7 +71,7 @@ Versions verified against the npm registry on 2026-10-26.
 | Metrics | `@prometheus-io/client` (`prom-client` is deprecated upstream: "replaced by @prometheus-io/client"; verify its API with Context7) | 0.16.1 |
 | QR rendering | `qrcode` + `@types/qrcode` | 1.5.4 / 1.5.6 |
 | Tests | `jest` + `ts-jest` + `@types/jest` + `jest-environment-node`; `supertest` + `@types/supertest`; `@nestjs/testing`; `socket.io-client` | 30.5.1 / 29.4.12 / 30.0.0 / 30.5.1; 7.2.2 / 7.2.1; 12.0.1; 4.8.4 |
-| Lint | `eslint`, `@eslint/js`, `typescript-eslint`, `eslint-plugin-import-x`, `eslint-import-resolver-typescript` | 10.9.1 / 10.0.1 / 8.69.0 / 4.16.1 / 4.4.5 |
+| Lint | `eslint`, `@eslint/js`, `typescript-eslint`, `eslint-plugin-import-x`, `eslint-import-resolver-typescript` | 10.9.1 / 10.0.1 / 8.69.0 / 4.17.1 (4.16.x does not declare ESLint 10 as a peer) / 4.4.5 |
 | Format | `prettier` | 3.9.6 |
 | Git hooks / commits | `husky` 9.1.7, `lint-staged` 17.4.1, `@commitlint/cli` + `@commitlint/config-conventional` 21.2.2 | — |
 | Secret scanning | `gitleaks` (Go binary, NOT an npm package: `brew install gitleaks`; CI downloads pinned release 8.28.0) | 8.28.0 |
@@ -190,7 +190,7 @@ Everything here is proven in `omnichannel-platform` and is reproduced on purpose
   }
 }
 ```
-Pinned `devDependencies` (tooling): `@commitlint/cli` 21.2.2, `@commitlint/config-conventional` 21.2.2, `@eslint/js` 10.0.1, `@nestjs/cli` 12.0.10, `@nestjs/testing` 12.0.1, `@types/jest` 30.0.0, `@types/node` 24.19.2, `@types/supertest` 7.2.1, `eslint` 10.9.1, `eslint-import-resolver-typescript` 4.4.5, `eslint-plugin-import-x` 4.16.1, `husky` 9.1.7, `jest` 30.5.1, `jest-environment-node` 30.5.1, `lint-staged` 17.4.1, `pino-pretty` 13.1.3, `prettier` 3.9.6, `supertest` 7.2.2, `ts-jest` 29.4.12, `tsx` 4.20.5, `typescript` 5.9.3, `typescript-eslint` 8.69.0. Runtime dependency versions are in the §2 table; pin ALL versions exactly (no `^`/`~`). `pnpm-workspace.yaml` holds the build-script allow-list that pnpm 11 requires (`allowBuilds`): `unrs-resolver: true` (needed by the TypeScript import resolver); `prisma`, `@prisma/engines`, `@nestjs/core`, `esbuild`, `@swc/core`, `puppeteer`: `false` (Chromium comes from the system, `PUPPETEER_SKIP_DOWNLOAD=true`). Verify the exact pnpm 11 syntax with Context7 before writing it; keep the list minimal.
+Pinned `devDependencies` (tooling): `@commitlint/cli` 21.2.2, `@commitlint/config-conventional` 21.2.2, `@eslint/js` 10.0.1, `@nestjs/cli` 12.0.10, `@nestjs/testing` 12.0.1, `@types/jest` 30.0.0, `@types/node` 24.19.2, `@types/supertest` 7.2.1, `eslint` 10.9.1, `eslint-import-resolver-typescript` 4.4.5, `eslint-plugin-import-x` 4.17.1, `husky` 9.1.7, `jest` 30.5.1, `jest-environment-node` 30.5.1, `lint-staged` 17.4.1, `pino-pretty` 13.1.3, `prettier` 3.9.6, `supertest` 7.2.2, `ts-jest` 29.4.12, `tsx` 4.20.5, `typescript` 5.9.3, `typescript-eslint` 8.69.0. Runtime dependency versions are in the §2 table; pin ALL versions exactly (no `^`/`~`). `pnpm-workspace.yaml` holds the build-script allow-list that pnpm 11 requires (`allowBuilds`): `unrs-resolver: true` (needed by the TypeScript import resolver); `prisma`, `@prisma/engines`, `@nestjs/core`, `esbuild`, `@swc/core`, `puppeteer`: `false` (Chromium comes from the system, `PUPPETEER_SKIP_DOWNLOAD=true`). Verify the exact pnpm 11 syntax with Context7 before writing it; keep the list minimal.
 
 #### 2.6.3 Config files
 `.nvmrc`: `24.20.0`
@@ -317,11 +317,26 @@ const deepRelativeImport = {
 }
 // Boundaries of the architecture (SOLID: everything depends on the port / the repositories)
 const restrictedPaths = [
-  { name: 'whatsapp-web.js', message: 'Only src/whatsapp/wwebjs-adapter.ts may import whatsapp-web.js' },
-  { name: '@prisma/client', message: 'Only src/database/** may use the Prisma client (use a repository)' },
+  {
+    name: 'whatsapp-web.js',
+    message: 'Only src/whatsapp/wwebjs-adapter.ts may import whatsapp-web.js'
+  },
+  {
+    name: '@prisma/client',
+    message: 'Only src/database/** may use the Prisma client (use a repository)'
+  },
   { name: '@nestjs/platform-express', message: 'This project runs on @nestjs/platform-fastify' },
   { name: 'prom-client', message: 'Use @prometheus-io/client' },
   { name: 'redis', message: 'Use ioredis' }
+]
+
+// Every block restates the whole option object, so the shared parts live in one place
+const restrictImports = exceptName => [
+  'error',
+  {
+    paths: restrictedPaths.filter(p => p.name !== exceptName),
+    patterns: [deepRelativeImport]
+  }
 ]
 
 export default defineConfig([
@@ -342,7 +357,14 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_'
+        }
+      ],
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
@@ -355,7 +377,10 @@ export default defineConfig([
       ],
 
       'no-console': 'error',
-      'no-restricted-imports': ['error', { paths: restrictedPaths, patterns: [deepRelativeImport] }],
+      'no-restricted-imports': [
+        'error',
+        { paths: restrictedPaths, patterns: [deepRelativeImport] }
+      ],
       'no-restricted-syntax': ['error', processEnvBan, ...httpStatusBans],
 
       'import-x/order': [
@@ -373,25 +398,25 @@ export default defineConfig([
   {
     files: ['src/whatsapp/wwebjs-adapter.ts'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        { paths: restrictedPaths.filter(p => p.name !== 'whatsapp-web.js'), patterns: [deepRelativeImport] }
-      ]
+      'no-restricted-imports': restrictImports('whatsapp-web.js')
     }
   },
   // The database layer is the only code that may use the Prisma client
   {
     files: ['src/database/**/*.ts', 'prisma.config.ts', 'scripts/**/*.ts', 'tests/**/*.ts'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        { paths: restrictedPaths.filter(p => p.name !== '@prisma/client'), patterns: [deepRelativeImport] }
-      ]
+      'no-restricted-imports': restrictImports('@prisma/client')
     }
   },
   // The single files allowed to read process.env
   {
-    files: ['src/config/**/*.ts', 'prisma.config.ts', 'scripts/**/*.ts', 'tests/helpers/env.ts', 'jest*.cts'],
+    files: [
+      'src/config/**/*.ts',
+      'prisma.config.ts',
+      'scripts/**/*.ts',
+      'tests/helpers/env.ts',
+      'jest*.cts'
+    ],
     rules: { 'no-restricted-syntax': ['error', ...httpStatusBans] }
   },
   // Scripts print; everything else uses Pino
@@ -401,6 +426,16 @@ export default defineConfig([
     files: ['**/*.spec.ts', 'tests/**/*.ts'],
     rules: { 'no-restricted-syntax': ['error', processEnvBan] }
   },
+  // The env helper of the tests sets process.env, and specs state statuses on purpose: no bans at all
+  // (it must come after the block above, which would otherwise ban process.env again)
+  { files: ['tests/helpers/env.ts'], rules: { 'no-restricted-syntax': 'off' } },
+  // Plain JavaScript files (eslint.config.js itself) are outside tsconfig: no type information
+  // The documented default-import style of the config packages trips two import-x heuristics
+  {
+    files: ['**/*.js', '**/*.mjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    rules: { 'import-x/no-named-as-default': 'off', 'import-x/no-named-as-default-member': 'off' }
+  },
   // Plain CommonJS configs: no type information
   {
     files: ['**/*.cjs'],
@@ -408,7 +443,10 @@ export default defineConfig([
       ...tseslint.configs.disableTypeChecked.languageOptions,
       sourceType: 'commonjs'
     },
-    rules: { ...tseslint.configs.disableTypeChecked.rules, '@typescript-eslint/no-require-imports': 'off' }
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      '@typescript-eslint/no-require-imports': 'off'
+    }
   },
   { ignores: ['**/dist/**', '**/generated/**', '**/coverage/**', 'docs/**'] }
 ])
