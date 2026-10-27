@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { isValidAllowlistEntry } from '../common/lib/ssrf.js'
+
 // Environment variables arrive as strings: numbers are coerced, and booleans are spelled
 // exactly "true" or "false" (z.coerce.boolean would read the string "false" as true)
 const flag = (fallback: boolean) =>
@@ -254,9 +256,11 @@ export const envSchema = z
     WEBHOOK_INLINE_MEDIA_MAX_BYTES: count(5242880).describe(
       'Largest media in bytes a webhook carries inline; larger media goes by URL'
     ),
-    WEBHOOK_PRIVATE_HOST_ALLOWLIST: list().describe(
-      'Comma-separated hosts exempt from the private-address check of webhook URLs'
-    ),
+    WEBHOOK_PRIVATE_HOST_ALLOWLIST: list()
+      .refine(items => items.every(isValidAllowlistEntry), {
+        message: 'Every entry must be a hostname, an IP address or a CIDR such as 10.0.0.0/8'
+      })
+      .describe('Comma-separated hosts exempt from the private-address check of webhook URLs'),
     ALLOW_PRIVATE_WEBHOOK_TARGETS: flag(false).describe(
       'Allow webhook URLs that resolve to private addresses'
     ),

@@ -264,6 +264,24 @@ describe('envSchema bounds and edges', () => {
     expect(env.WEBHOOK_PRIVATE_HOST_ALLOWLIST).toEqual(expected)
   })
 
+  it.each(['10.0.0.0/99', 'bad host', '10.0.0.0/x'])(
+    'rejects %j in WEBHOOK_PRIVATE_HOST_ALLOWLIST',
+    entry => {
+      expect(envSchema.safeParse({ ...valid, WEBHOOK_PRIVATE_HOST_ALLOWLIST: entry }).success).toBe(
+        false
+      )
+    }
+  )
+
+  it('accepts hostnames, addresses and CIDRs in WEBHOOK_PRIVATE_HOST_ALLOWLIST', () => {
+    const env = envSchema.parse({
+      ...valid,
+      WEBHOOK_PRIVATE_HOST_ALLOWLIST: 'bot,10.0.0.0/8,fd00::/8'
+    })
+
+    expect(env.WEBHOOK_PRIVATE_HOST_ALLOWLIST).toEqual(['bot', '10.0.0.0/8', 'fd00::/8'])
+  })
+
   it.each([
     [
       'the remote cache without a path',
