@@ -34,6 +34,9 @@ RUN pnpm install --prod --frozen-lockfile --ignore-scripts \
 
 FROM base AS runtime
 ENV NODE_ENV=production
+# The Prisma CLI checks for updates and reports telemetry unless told not to; the migration that runs
+# at start has no business calling out
+ENV CHECKPOINT_DISABLE=1
 # npm ships with the base image, bundles its own copies of tar, undici and others that get
 # vulnerabilities, and nothing here runs it: the entrypoint calls node directly
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx

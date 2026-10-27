@@ -4,11 +4,19 @@
 .claude
 .vscode
 .code-review-graph
-.env
-.env.*
-!.env.example
-.wwebjs_auth
-.wwebjs_cache
+
+# Credentials and secrets, at any depth: a pattern without **/ only matches in the root of the
+# context, and the image copies whole folders such as src/
+**/.env
+**/.env.*
+!**/.env.example
+**/.wwebjs_auth
+**/.wwebjs_cache
+**/secrets
+**/.npmrc
+**/*.pem
+**/*.key
+
 node_modules
 dist
 coverage
