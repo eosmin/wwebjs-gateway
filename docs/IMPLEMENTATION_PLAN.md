@@ -47,7 +47,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 ## Milestone 1 — Foundation (`feat/foundation`) — TDD §6.1, §5.4, §6.8
 
 - [x] **1.1** Full `env.schema.ts`, `AppConfig`, `.env.example`, `config-reference.md`. *Done when:* `validate:env` and `validate:docs` pass.
-- [ ] **1.2** `common/errors.ts` + `docs/errors.md` generator. *Done when:* every error code is in `errors.md`.
+- [x] **1.2** `common/errors.ts` + `docs/errors.md` generator. *Done when:* every error code is in `errors.md`.
 - [ ] **1.3** `types/{events,dto}.ts`. *Done when:* every event of §2.5 and §5.4 has a payload schema.
 - [ ] **1.4** `common/lib/*` (crypto, wa-id, timeout, retry, throttle, token-bucket, humanize, ssrf). *Done when:* unit tests pass, SSRF cases included.
 - [ ] **1.5** `infra/*` (Redis factory, logger with redaction, metrics + `metrics.md` generator). *Done when:* redaction is unit-tested and every metric is in `metrics.md`.
@@ -175,7 +175,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 | 0.9 | done | #1 (PR of Phase 0); the four CI jobs green | 2026-10-27 |
 | 0.10 | done | #1 (PR of Phase 0) | 2026-10-27 |
 | 1.1 | done | `feat/1-1-config-schema` | 2026-10-27 |
-| 1.2 | todo | - | - |
+| 1.2 | done | `feat/1-2-errors` | 2026-10-27 |
 | 1.3 | todo | - | - |
 | 1.4 | todo | - | - |
 | 1.5 | todo | - | - |

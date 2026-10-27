@@ -23,6 +23,7 @@ module.exports = {
   // lower the number, or a threshold means nothing
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
+    'scripts/lib/**/*.ts',
     '!**/*.spec.{ts,tsx}',
     '!**/*.d.ts',
     '!**/index.ts',
