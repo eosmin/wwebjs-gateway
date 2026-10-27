@@ -56,7 +56,9 @@ if (pushed.length === 0) {
 }
 
 const DOCS_STEPS = [{ name: 'validate:docs', command: ['validate:docs'] }]
+// The generated Prisma client is git-ignored and `pnpm install` does not create it; it needs no database
 const CODE_STEPS = [
+  { name: 'db:generate', command: ['db:generate'] },
   { name: 'lint', command: ['lint'] },
   { name: 'type-check', command: ['type-check'] },
   { name: 'test (unit)', command: ['test'] },
