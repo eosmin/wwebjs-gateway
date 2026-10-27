@@ -8,12 +8,14 @@ function describeType(property: JsonSchema): string {
   if (property.enum !== undefined)
     return property.enum.map(value => `\`${String(value)}\``).join(', ')
   if (property.format === 'uri') return 'URL'
-  if (
-    property.type === 'integer' &&
-    property.minimum !== undefined &&
-    property.maximum !== undefined
-  ) {
-    return `integer, ${property.minimum} to ${property.maximum}`
+  if (property.type === 'integer' || property.type === 'number') {
+    const kind = property.type === 'integer' ? 'integer' : 'number'
+    // Zod bounds every integer to the safe range; that is not a limit the operator needs to read
+    const bounded = property.maximum !== undefined && property.maximum < Number.MAX_SAFE_INTEGER
+    if (property.minimum !== undefined && property.maximum !== undefined && bounded) {
+      return `${kind}, ${property.minimum} to ${property.maximum}`
+    }
+    if (property.minimum !== undefined) return `${kind}, ${property.minimum} or more`
   }
   if (property.type === 'string' && property.minLength !== undefined) {
     const unit = property.minLength === 1 ? 'character' : 'characters'
@@ -44,7 +46,7 @@ export function renderConfigReference(): string {
     '',
     '# Configuration reference',
     '',
-    'Every environment variable the gateway reads. `.env.example` declares the same set.',
+    'Every environment variable the gateway reads. `.env.example` declares the same set. A variable set to an empty value counts as unset.',
     '',
     '| Variable | Type | Required | Default | Description |',
     '| --- | --- | --- | --- | --- |',

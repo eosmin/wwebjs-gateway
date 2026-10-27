@@ -1,5 +1,6 @@
 module.exports = {
   testEnvironment: 'node',
+  setupFiles: ['<rootDir>/tests/helpers/env.ts'],
   transform: { '^.+\\.[tj]sx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.spec.json' }] },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   // Sources import siblings with the ESM `.js` suffix; Jest resolves the `.ts` file behind it
