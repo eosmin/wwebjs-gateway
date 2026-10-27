@@ -50,7 +50,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **1.2** `common/errors.ts` + `docs/errors.md` generator. *Done when:* every error code is in `errors.md`.
 - [x] **1.3** `types/{events,dto}.ts`. *Done when:* every event of §2.5 and §5.4 has a payload schema.
 - [x] **1.4** `common/lib/*` (crypto, wa-id, timeout, retry, throttle, token-bucket, humanize, ssrf). *Done when:* unit tests pass, SSRF cases included.
-- [ ] **1.5** `infra/*` (Redis factory, logger with redaction, metrics + `metrics.md` generator). *Done when:* redaction is unit-tested and every metric is in `metrics.md`.
+- [x] **1.5** `infra/*` (Redis factory, logger with redaction, metrics + `metrics.md` generator). *Done when:* redaction is unit-tested and every metric is in `metrics.md`.
 
 ## Milestone 2 — Database (`feat/database`) — TDD §5.3
 
@@ -160,6 +160,18 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [ ] **12.4** Record the Buttons/List decision; finalize the README.
 ---
 
+## Follow-ups carried to later steps
+
+Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the step that owns them. Tick each one in that step's PR; the two that need an owner decision are also in the PENDING table of TDD §11.
+
+- [ ] **4.2** The request-id interceptor writes the `x-request-id` RESPONSE header with the id Fastify already chose (`createFastifyAdapter`, step 1.5). Today the id reaches the logs but not the response.
+- [ ] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
+- [ ] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
+- [ ] **5.5 and 7.4** Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
+- [ ] **7.4** Decide and implement the production guard for `ALLOW_PRIVATE_WEBHOOK_TARGETS` (see TDD §11 PENDING).
+- [ ] **3.x, the first step that logs message data** Decide which keys count as message content beyond `body`, `text` and `caption` (see TDD §11 PENDING), and never pass a secret as a `child()` logger binding: bindings bypass redaction.
+- [ ] **10.2** The Redis restart test also checks the log: ioredis reports one error per retry (about every 2 s) and each becomes a log line; throttle it if it floods.
+
 ## Progress tracking
 
 | Step | Status | PR | Date |
@@ -178,7 +190,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 | 1.2 | done | `feat/1-2-errors` | 2026-10-27 |
 | 1.3 | done | `feat/1-3-types` | 2026-10-27 |
 | 1.4 | done | `feat/1-4-common-lib` | 2026-10-27 |
-| 1.5 | todo | - | - |
+| 1.5 | done | `feat/1-5-infra` | 2026-10-27 |
 | 2.1 | todo | - | - |
 | 2.2 | todo | - | - |
 | 2.3 | todo | - | - |
