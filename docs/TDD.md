@@ -55,8 +55,8 @@ Versions verified against the npm registry on 2026-10-26.
 | Package manager | `pnpm` through corepack (`packageManager` field of `package.json`) | 11.25.0 |
 | Language | TypeScript (`strict`, `noImplicitAny`, `noUncheckedIndexedAccess`) | **5.9.3** (stay on 5.9 until typescript-eslint, ts-jest and Nest certify the next major — same policy as `omnichannel-platform`) |
 | WhatsApp | `whatsapp-web.js` | 1.34.7 |
-| Framework | NestJS: `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-fastify` (Fastify 5 adapter), `@nestjs/cli`, `@nestjs/testing` | 12.0.1 / 12.0.1 / 12.0.1 / 12.0.10 / 12.0.1 (the pins `omnichannel-platform` runs with; bump deliberately, one area per PR) |
-| HTTP engine | `fastify` (via adapter; use the version `@nestjs/platform-fastify` requires: `@nestjs/platform-fastify@12.0.1` pins fastify `5.12.1` exactly; 5.12.7 belongs to adapter 12.2.0) | 5.12.1 |
+| Framework | NestJS: `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-fastify` (Fastify 5 adapter), `@nestjs/cli`, `@nestjs/testing` | 12.0.2 / 12.0.2 / 12.0.2 / 12.0.10 / 12.0.2 (12.0.2 of the Fastify adapter fixes GHSA-9c5c-9qcx-q35q and brings `fastify` 5.12.4, which fixes four high advisories in 5.12.1; every other Nest package keeps the 12.0.1 pin that `omnichannel-platform` runs with, which is compatible because their peer ranges accept any 12.x core; bump deliberately, one area per PR) |
+| HTTP engine | `fastify` (via adapter; use the version `@nestjs/platform-fastify` requires: `@nestjs/platform-fastify@12.0.2` pins fastify `5.12.4` exactly; 5.12.7 belongs to adapter 12.2.0. 5.12.1, the pin of adapter 12.0.1, has four high advisories: an authentication bypass through malformed URLs and three validation bypasses) | 5.12.4 |
 | Validation | `zod` (v4, import from `"zod"`) + `nestjs-zod` | 4.6.7 / 5.5.0 |
 | OpenAPI | `@nestjs/swagger` | 12.0.4 |
 | Config / health / throttling | `@nestjs/config` 12.0.1, `@nestjs/terminus` 12.1.0, `@nestjs/throttler` 6.7.1 | — |
@@ -65,7 +65,7 @@ Versions verified against the npm registry on 2026-10-26.
 | Queue | `@nestjs/bullmq` + `bullmq` + `ioredis` | 12.0.0 / 6.3.4 / 6.0.0 |
 | Queue dashboard | `@bull-board/api` + `@bull-board/fastify` + `@bull-board/ui` (flag `BULL_BOARD_ENABLED`, default false; the Fastify adapter exists at 9.10.5, verified) | 9.10.5 |
 | Scheduling | `@nestjs/schedule` (watchdog, reconciliation timers) | 12.0.2 |
-| Database | PostgreSQL (image `postgres:18.6-alpine`) via `prisma` (CLI, dev) + `@prisma/client` + `@prisma/adapter-pg` + `pg` | **7.10.1** for the three Prisma packages (do NOT use `prisma@8.0.0-rc.*`, release candidate); `pg` 8.16.3 |
+| Database | PostgreSQL (image `postgres:18.6-alpine`) via `prisma` (CLI; a RUNTIME dependency, because the image runs `prisma migrate deploy` before starting and `prisma.config.ts` imports `prisma/config`) + `@prisma/client` + `@prisma/adapter-pg` + `pg` | **7.10.1** for the three Prisma packages (do NOT use `prisma@8.0.0-rc.*`, release candidate); `pg` 8.16.3 |
 | Cache/queue store | Redis (image `redis:8.10.1-alpine`, AOF enabled: `appendonly yes`) | 8.10.1 |
 | Logging | `nestjs-pino` + `pino` + `pino-http` (dev: `pino-pretty`) | 5.1.0 / 10.3.1 / 11.0.0 / 13.1.3 |
 | Metrics | `@prometheus-io/client` (`prom-client` is deprecated upstream: "replaced by @prometheus-io/client"; verify its API with Context7) | 0.16.1 |
@@ -190,7 +190,7 @@ Everything here is proven in `omnichannel-platform` and is reproduced on purpose
   }
 }
 ```
-Pinned `devDependencies` (tooling): `@commitlint/cli` 21.2.2, `@commitlint/config-conventional` 21.2.2, `@eslint/js` 10.0.1, `@nestjs/cli` 12.0.10, `@nestjs/testing` 12.0.1, `@types/jest` 30.0.0, `@types/node` 24.19.2, `@types/supertest` 7.2.1, `eslint` 10.9.1, `eslint-import-resolver-typescript` 4.4.5, `eslint-plugin-import-x` 4.17.1, `husky` 9.1.7, `jest` 30.5.1, `jest-environment-node` 30.5.1, `lint-staged` 17.4.1, `pino-pretty` 13.1.3, `prettier` 3.9.6, `supertest` 7.2.2, `ts-jest` 29.4.12, `tsx` 4.20.5, `typescript` 5.9.3, `typescript-eslint` 8.69.0. Runtime dependency versions are in the §2 table; pin ALL versions exactly (no `^`/`~`). `pnpm-workspace.yaml` holds the build-script allow-list that pnpm 11 requires (`allowBuilds`): `unrs-resolver: true` (needed by the TypeScript import resolver); `prisma`, `@prisma/engines`, `@nestjs/core`, `esbuild`, `@swc/core`, `puppeteer`: `false` (Chromium comes from the system, `PUPPETEER_SKIP_DOWNLOAD=true`). Verify the exact pnpm 11 syntax with Context7 before writing it; keep the list minimal.
+Pinned `devDependencies` (tooling): `@commitlint/cli` 21.2.2, `@commitlint/config-conventional` 21.2.2, `@eslint/js` 10.0.1, `@nestjs/cli` 12.0.10, `@nestjs/testing` 12.0.2, `@types/jest` 30.0.0, `@types/node` 24.19.2, `@types/supertest` 7.2.1, `eslint` 10.9.1, `eslint-import-resolver-typescript` 4.4.5, `eslint-plugin-import-x` 4.17.1, `husky` 9.1.7, `jest` 30.5.1, `jest-environment-node` 30.5.1, `lint-staged` 17.4.1, `pino-pretty` 13.1.3, `prettier` 3.9.6, `supertest` 7.2.2, `ts-jest` 29.4.12, `tsx` 4.20.5, `typescript` 5.9.3, `typescript-eslint` 8.69.0. Runtime dependency versions are in the §2 table; pin ALL versions exactly (no `^`/`~`). `pnpm-workspace.yaml` holds the build-script allow-list that pnpm 11 requires (`allowBuilds`): `unrs-resolver: true` (needed by the TypeScript import resolver); `prisma`, `@prisma/engines`, `@nestjs/core`, `esbuild`, `@swc/core`, `puppeteer`: `false` (Chromium comes from the system, `PUPPETEER_SKIP_DOWNLOAD=true`). Verify the exact pnpm 11 syntax with Context7 before writing it; keep the list minimal.
 
 #### 2.6.3 Config files
 `.nvmrc`: `24.20.0`
@@ -748,6 +748,8 @@ jobs:
 ```
 (The image runs migrations in `docker-entrypoint.sh`, so the `security-scan` run must provide `DATABASE_URL` as above. The YAML shows the final form; until step 4.7 the boot and image checks curl `/health` instead of `/ready`, and `smoke-http` only checks `/health`. `.env.example` must hold values that pass the schema, because the `integration-tests` job sources it. The deploy/publish job — GHCR push and optional deploy — is added in Phase 11, on `main` only, after these four.)
 
+**Implementation notes (step 0.9):** the workflow is the committed `.github/workflows/ci.yml`, checked with `actionlint`; its six action SHAs were checked against their release tags and the gitleaks checksum against the release. It differs from the draft above in four ways. (1) Until step 1.1 makes the port configurable the gateway listens on 3000, so the boot and image checks use `http://localhost:3000` and `/health` (the draft's 8081 and 8080 return in 1.1, when the port becomes configurable; `/ready` returns in 4.7). (2) The rollbacks loop uses a Bash glob with `nullglob`, newest first, instead of `ls | sort -r` (it survives names with spaces and an empty folder). (3) `prisma.config.ts` loads `.env.local` when it exists, because the Prisma CLI does not read `.env` files; that file is what `pnpm bootstrap` creates, and CI and the image use the environment instead. (4) The image keeps only production dependencies and removes the `npm` that ships with the base image, which bundles its own `tar`, `undici`, `ip-address` and `brace-expansion`; with them, Trivy fails the job on high advisories that have a fix. The base image also runs `apt-get upgrade`, and `openssl` is installed in the build stage too, because the Prisma schema engine is downloaded for the OpenSSL it finds. Verified locally with a real `docker compose up`, a real `pnpm bootstrap` and `trivy image --severity CRITICAL,HIGH --ignore-unfixed` (exit 0). The published ports of the compose file are `API_PORT`, `POSTGRES_PORT` and `REDIS_PORT` (defaults 3000, 5432, 6379), so the stack can start next to others.
+
 #### 2.6.8 Dependabot, PR template, repository ruleset
 `.github/dependabot.yml` (the TDD pins every version, so routine bumps are done on purpose, one area per PR after reading the changelog; security alerts are unaffected by `ignore`):
 ```yaml
@@ -803,6 +805,7 @@ updates:
 <!-- Which TDD section does this implement? e.g. §6.4 -->
 
 ## Checklist
+- [ ] The title is a Conventional Commit, lowercase, 72 characters or fewer (it becomes the squash commit)
 - [ ] Only `wwebjs-adapter.ts` imports whatsapp-web.js; only `src/database/**` uses Prisma
 - [ ] New/changed capability is ONE `@WaOperation` with summary, description, examples, errors, `scope` and `wwebjs` links
 - [ ] New env vars are in `env.schema.ts`, `.env.example` AND the docs
@@ -811,6 +814,7 @@ updates:
 - [ ] Migration includes a rollback script in `prisma/rollbacks/`
 - [ ] Sends stay idempotent; events keep `seq` order; nothing blocks the event pipeline
 - [ ] No secrets, QR codes or WhatsApp session data in code, logs or fixtures
+- [ ] The step's checkbox and progress row in `docs/IMPLEMENTATION_PLAN.md` are updated
 
 ## Migration notes
 <!-- Deployment steps, breaking changes, or "none" -->
