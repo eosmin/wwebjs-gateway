@@ -54,7 +54,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 2 — Database (`feat/database`) — TDD §5.3
 
-- [ ] **2.1** `prisma/schema.prisma` with every model. *Done when:* `prisma validate` and `pnpm db:generate` pass.
+- [x] **2.1** `prisma/schema.prisma` with every model. *Done when:* `prisma validate` and `pnpm db:generate` pass.
 - [ ] **2.2** First migration and its rollback script. *Done when:* `validate:rollbacks` passes and the migration applies to an empty database.
 - [ ] **2.3** `prisma.service.ts`. *Done when:* an integration test connects and disconnects cleanly.
 - [ ] **2.4** Repositories (api-keys, sessions, webhooks, deliveries, inbound-hooks, messages, idempotency, suppressions). *Done when:* integration tests pass against Postgres.
@@ -191,7 +191,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 1.3 | done | `feat/1-3-types` | 2026-10-27 |
 | 1.4 | done | `feat/1-4-common-lib` | 2026-10-27 |
 | 1.5 | done | `feat/1-5-infra` | 2026-10-27 |
-| 2.1 | todo | - | - |
+| 2.1 | done | `feat/2-1-prisma-schema` | 2026-10-27 |
 | 2.2 | todo | - | - |
 | 2.3 | todo | - | - |
 | 2.4 | todo | - | - |
