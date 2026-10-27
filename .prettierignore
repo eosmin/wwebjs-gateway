@@ -1,0 +1,16 @@
+# Specifications and assistant instructions are maintained by hand (wide tables) or generated
+docs/
+CLAUDE.md
+.claude/
+.mcp.json
+
+# Generated code and build output
+dist/
+coverage/
+generated/
+
+# Dependencies, lockfile and credentials of WhatsApp sessions
+node_modules/
+pnpm-lock.yaml
+.wwebjs_auth/
+.wwebjs_cache/
