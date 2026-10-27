@@ -29,6 +29,8 @@ module.exports = {
     '!**/index.ts',
     '!src/generated/**',
     '!src/main.ts', // bootstrap: exercised by the boot smoke test in CI
+    '!src/database/repositories/**', // plain Prisma queries: covered by tests/integration against Postgres
+    '!src/database/database.module.ts', // wiring only: loaded by the same integration suites
     '!src/whatsapp/wwebjs-adapter.ts' // needs a real WhatsApp account: covered by the opt-in E2E_REAL suite
   ],
   coverageThreshold: { global: { lines: 80, functions: 80, statements: 80, branches: 75 } }
