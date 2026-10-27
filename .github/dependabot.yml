@@ -32,6 +32,9 @@ updates:
     ignore:
       - dependency-name: '*'
         update-types: ['version-update:semver-minor', 'version-update:semver-patch']
+      # The runtime is Node 24; a Node major is a deliberate migration, not a bot bump
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: docker-compose
     directory: /
