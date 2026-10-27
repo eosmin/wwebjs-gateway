@@ -68,9 +68,10 @@ export const DEPRECATED_APIS: readonly DeprecatedApi[] = [
 ]
 
 // Files that are not application code, or that are the list itself. The ESLint config names the
-// banned packages on purpose, to forbid them, so it is the list's twin.
+// banned packages on purpose, to forbid them, and so does the test that guards those bans: they
+// are the list's twins.
 const NOT_SCANNED =
-  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|eslint\.config\.js|scripts\/lib\/deprecations(\.spec)?\.ts)$/
+  /(^|\/)(node_modules|dist|coverage|generated)\/|^(docs|prisma\/migrations|prisma\/rollbacks)\/|(^|\/)(pnpm-lock\.yaml|eslint\.config\.js|tests\/parity\/lint-boundaries\.spec\.ts|scripts\/lib\/deprecations(\.spec)?\.ts)$/
 const SCANNED_EXTENSIONS = /\.(ts|tsx|js|jsx|cjs|mjs|cts|mts|prisma)$|(^|\/)package\.json$/
 
 export interface Finding {

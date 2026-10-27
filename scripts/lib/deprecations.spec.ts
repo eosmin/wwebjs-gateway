@@ -79,6 +79,12 @@ describe('findDeprecations', () => {
     expect(findDeprecations('docs/TDD.md', 'z.nativeEnum(A)')).toEqual([])
     expect(findDeprecations('node_modules/x/index.js', 'z.nativeEnum(A)')).toEqual([])
     expect(findDeprecations('eslint.config.js', "{ name: 'prom-client' }")).toEqual([])
+    expect(
+      findDeprecations(
+        'tests/parity/lint-boundaries.spec.ts',
+        "expect(names).toContain('prom-client')"
+      )
+    ).toEqual([])
   })
 })
 

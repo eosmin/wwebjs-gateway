@@ -46,12 +46,22 @@ const restrictedPaths = [
   { name: 'redis', message: 'Use ioredis' }
 ]
 
+// The generator writes the Prisma client into src/generated/prisma, so the code imports it by a
+// relative path and never as '@prisma/client': the package name alone would not catch it
+const prismaClientImport = {
+  group: ['**/generated/prisma', '**/generated/prisma/**'],
+  message: 'Only src/database/** may use the Prisma client (use a repository)'
+}
+
 // Every block restates the whole option object, so the shared parts live in one place
 const restrictImports = exceptName => [
   'error',
   {
     paths: restrictedPaths.filter(p => p.name !== exceptName),
-    patterns: [deepRelativeImport]
+    patterns:
+      exceptName === '@prisma/client'
+        ? [deepRelativeImport]
+        : [deepRelativeImport, prismaClientImport]
   }
 ]
 
@@ -93,10 +103,7 @@ export default defineConfig([
       ],
 
       'no-console': 'error',
-      'no-restricted-imports': [
-        'error',
-        { paths: restrictedPaths, patterns: [deepRelativeImport] }
-      ],
+      'no-restricted-imports': restrictImports(),
       'no-restricted-syntax': ['error', processEnvBan, ...httpStatusBans],
 
       'import-x/order': [
