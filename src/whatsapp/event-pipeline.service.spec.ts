@@ -381,3 +381,208 @@ describe('EventPipelineService seq bound', () => {
     expect(published).toHaveLength(2)
   })
 })
+
+describe('EventPipelineService reconcile', () => {
+  const missed = (id: string, sentAt: string) =>
+    buildMessageDto({ id, fromMe: false, sentAt, receivedAt: NOW.toISOString() })
+
+  it('stores what the reconciliation found and publishes it as one sorted burst', async () => {
+    const { service, published, messages, redis, sessions } = build()
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+
+    const count = await service.reconcile(SESSION, [
+      missed('b', '2026-10-27T11:00:02.000Z'),
+      missed('a', '2026-10-27T11:00:01.000Z')
+    ])
+    await jest.advanceTimersByTimeAsync(1500)
+
+    expect(count).toBe(2)
+    expect(messages.upsert).toHaveBeenCalledTimes(2)
+    expect(redis.set).toHaveBeenCalledWith(`dedupe:${SESSION}:message:a`, '1', 'EX', 600, 'NX')
+    expect(published.map(envelope => envelope.event)).toEqual([
+      'message',
+      'message',
+      'message_batch'
+    ])
+    expect(published[0]).toMatchObject({ data: { id: 'a' } })
+    expect(published[1]).toMatchObject({ data: { id: 'b' } })
+    expect(published[2]).toMatchObject({
+      data: { reason: 'reconcile', count: 2, messages: [{ id: 'a' }, { id: 'b' }] }
+    })
+    expect(published.map(envelope => envelope.seq)).toEqual([1, 2, 3])
+    expect(messages.markEmitted).toHaveBeenCalledWith(SESSION, ['a', 'b'], expect.any(Date))
+    // A recovered message is old news: it must not move the baseline of the next reconciliation
+    expect(sessions.update).not.toHaveBeenCalled()
+  })
+
+  it('sorts a live message that arrives meanwhile into the same burst', async () => {
+    const { service, published } = build()
+    const client = new FakeWhatsAppClient(SESSION)
+    await service.open(SESSION, client, { orderingEnabled: true })
+
+    await service.reconcile(SESSION, [missed('old', '2026-10-27T11:00:01.000Z')])
+    client.emit({
+      event: 'message',
+      data: buildMessageDto({
+        id: 'live',
+        fromMe: false,
+        sentAt: NOW.toISOString(),
+        receivedAt: NOW.toISOString()
+      })
+    })
+    await jest.advanceTimersByTimeAsync(1500)
+
+    expect(published.map(envelope => envelope.event)).toEqual([
+      'message',
+      'message',
+      'message_batch'
+    ])
+    expect(published[0]).toMatchObject({ data: { id: 'old' } })
+    expect(published[1]).toMatchObject({ data: { id: 'live' } })
+    expect(published[2]).toMatchObject({ data: { reason: 'reconcile', count: 2 } })
+  })
+
+  it('goes on without the dedupe while Redis is down', async () => {
+    const { service, published, redis, messages } = build()
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+
+    redis.status = 'reconnecting'
+    const count = await service.reconcile(SESSION, [missed('a', '2026-10-27T11:00:01.000Z')])
+    redis.status = 'ready'
+    await jest.advanceTimersByTimeAsync(1500)
+
+    expect(count).toBe(1)
+    expect(redis.set).not.toHaveBeenCalled()
+    expect(messages.upsert).toHaveBeenCalledTimes(1)
+    expect(published).toMatchObject([{ event: 'message', data: { id: 'a' } }])
+  })
+
+  it('skips a message the pipeline already saw', async () => {
+    const { service, published, redis, messages } = build()
+    redis.set.mockResolvedValueOnce(null)
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+
+    const count = await service.reconcile(SESSION, [missed('a', '2026-10-27T11:00:01.000Z')])
+    await jest.advanceTimersByTimeAsync(1500)
+
+    expect(count).toBe(0)
+    expect(messages.upsert).not.toHaveBeenCalled()
+    expect(published).toHaveLength(0)
+  })
+
+  it('gives the claim back and skips a message that could not be stored', async () => {
+    const { service, published, redis, messages } = build()
+    messages.upsert.mockRejectedValueOnce(new Error('db down'))
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+
+    const count = await service.reconcile(SESSION, [missed('a', '2026-10-27T11:00:01.000Z')])
+    await jest.advanceTimersByTimeAsync(1500)
+
+    expect(count).toBe(0)
+    expect(redis.del).toHaveBeenCalledWith(`dedupe:${SESSION}:message:a`)
+    expect(published).toHaveLength(0)
+  })
+
+  it('answers zero for a session with no open pipeline', async () => {
+    const { service, messages } = build()
+
+    await expect(
+      service.reconcile(SESSION, [missed('a', '2026-10-27T11:00:01.000Z')])
+    ).resolves.toBe(0)
+    expect(messages.upsert).not.toHaveBeenCalled()
+  })
+
+  it('answers zero once the pipeline is closed', async () => {
+    const { service, messages, published } = build()
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+    const pending = service.reconcile(SESSION, [missed('a', '2026-10-27T11:00:01.000Z')])
+    await service.close(SESSION)
+
+    await expect(pending).resolves.toBe(0)
+    expect(messages.upsert).not.toHaveBeenCalled()
+    expect(published).toHaveLength(0)
+    await expect(
+      service.reconcile(SESSION, [missed('b', '2026-10-27T11:00:01.000Z')])
+    ).resolves.toBe(0)
+  })
+
+  it('publishes straight away when ordering is off', async () => {
+    const { service, published } = build()
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: false })
+
+    await service.reconcile(SESSION, [missed('a', '2026-10-27T11:00:01.000Z')])
+    await flush()
+
+    expect(published).toMatchObject([{ event: 'message', data: { id: 'a' } }])
+  })
+})
+
+describe('EventPipelineService last activity', () => {
+  const live = (id: string, sentAt: Date = NOW) =>
+    ({
+      event: 'message',
+      data: buildMessageDto({
+        id,
+        fromMe: false,
+        sentAt: sentAt.toISOString(),
+        receivedAt: sentAt.toISOString()
+      })
+    }) as const
+
+  it('saves lastEventAt when an incoming message arrives', async () => {
+    const { service, sessions } = build()
+    const client = new FakeWhatsAppClient(SESSION)
+    await service.open(SESSION, client, { orderingEnabled: true })
+
+    client.emit(live('a'))
+    await flush()
+
+    expect(sessions.update).toHaveBeenCalledWith(SESSION, { lastEventAt: NOW })
+  })
+
+  it('does not count the events of the session itself', async () => {
+    const { service, sessions } = build()
+    const client = new FakeWhatsAppClient(SESSION)
+    await service.open(SESSION, client, { orderingEnabled: true })
+
+    client.emit({ event: 'ready', data: {} })
+    await service.publish(SESSION, 'ping', {})
+    await flush()
+
+    expect(sessions.update).not.toHaveBeenCalled()
+  })
+
+  it('writes the latest activity when the session stops', async () => {
+    const { service, sessions } = build()
+    const client = new FakeWhatsAppClient(SESSION)
+    await service.open(SESSION, client, { orderingEnabled: true })
+    client.emit(live('a'))
+    await flush()
+    await jest.advanceTimersByTimeAsync(5000)
+    client.emit(live('b', new Date(NOW.getTime() + 5000)))
+    await flush()
+
+    await service.close(SESSION)
+
+    expect(sessions.update).toHaveBeenLastCalledWith(SESSION, {
+      lastEventAt: new Date(NOW.getTime() + 5000)
+    })
+  })
+
+  it('drops the pending activity of a deleted session', async () => {
+    const { service, sessions } = build()
+    const client = new FakeWhatsAppClient(SESSION)
+    await service.open(SESSION, client, { orderingEnabled: true })
+    client.emit(live('a'))
+    await flush()
+    await jest.advanceTimersByTimeAsync(1000)
+    client.emit(live('b', new Date(NOW.getTime() + 1000)))
+    await flush()
+    sessions.update.mockClear()
+
+    service.forget(SESSION)
+    await service.close(SESSION)
+
+    expect(sessions.update).not.toHaveBeenCalled()
+  })
+})

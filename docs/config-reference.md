@@ -50,9 +50,9 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `INBOUND_ORDER_MAX_MESSAGES` | integer, 1 or more | no | `200` | Messages a chat may hold in the order buffer before it flushes |
 | `MESSAGE_BATCH_ENABLED` | `true`, `false` | no | `true` | Publish the synthesized message_batch event |
 | `RECONCILE_ON_READY` | `true`, `false` | no | `true` | Fetch the recent messages of the busiest chats when a session becomes ready |
-| `RECONCILE_MAX_CHATS` | integer, 0 or more | no | `50` | Chats the reconciler visits per session start |
+| `RECONCILE_MAX_CHATS` | integer, 0 or more | no | `50` | Chats the reconciler visits per session start (0 turns the reconciliation off) |
 | `RECONCILE_FETCH_LIMIT` | integer, 1 or more | no | `50` | Messages the reconciler fetches per chat |
-| `RECONCILE_LOOKBACK_HOURS` | integer, 0 or more | no | `48` | Hours into the past the reconciler looks for missed messages |
+| `RECONCILE_LOOKBACK_HOURS` | integer, 0 or more | no | `48` | Hours into the past the reconciler looks for missed messages (0 turns the reconciliation off) |
 | `INCLUDE_RAW` | `true`, `false` | no | `true` | Attach the sanitized raw WhatsApp data to messages |
 | `RAW_MAX_FIELD_BYTES` | integer, 1 or more | no | `8192` | Bytes a single field of the raw data may take before it is truncated |
 | `SEND_MIN_INTERVAL_MS` | integer, 0 or more | no | `1000` | Minimum milliseconds between two sends of the same session |

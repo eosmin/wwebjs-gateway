@@ -126,6 +126,7 @@ describe('event pipeline (integration)', () => {
         client,
         messages,
         sequencer,
+        noteIncoming: () => undefined,
         claim: async key => (await redis.client.set(key, '1', 'EX', 600, 'NX')) === 'OK',
         unclaim: async key => {
           await redis.client.del(key)
@@ -156,7 +157,8 @@ describe('event pipeline (integration)', () => {
     expect(messageIds(published)).toEqual(['a', 'b', 'c'])
     expect(published.map(envelope => envelope.seq)).toEqual([1, 2, 3, 4])
     expect(published[3]?.event).toBe('message_batch')
-    expect(await unemitted(sessionId)).toBe(0)
+    // Rows are marked as emitted after the publish, not with it
+    await until(async () => (await unemitted(sessionId)) === 0)
   })
 
   it('drops a message the client emits twice, using Redis', async () => {
@@ -214,7 +216,8 @@ describe('event pipeline (integration)', () => {
     ])
     expect(messageIds(restarted.published)).toEqual(['first', 'second', 'third'])
     expect(restarted.published.map(envelope => envelope.seq)).toEqual([1, 2, 3, 4, 5])
-    expect(await unemitted(sessionId)).toBe(0)
+    // Rows are marked as emitted after the publish, not with it
+    await until(async () => (await unemitted(sessionId)) === 0)
   })
 
   it('publishes the rest of a batch, in order, after Redis fails halfway', async () => {

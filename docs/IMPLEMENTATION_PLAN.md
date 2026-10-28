@@ -69,7 +69,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **3.6** `event-pipeline.service.ts`. *Done when:* dedupe, order, monotonic `seq` and crash recovery tests pass.
 - [x] **3.7** `session-manager.service.ts`. *Done when:* status machine, reconnect backoff, restore stagger and `MAX_SESSIONS` tests pass.
 - [x] **3.8** `watchdog.service.ts`. *Done when:* stuck-start and blocking-state tests pass.
-- [ ] **3.9** `reconciler.service.ts`. *Done when:* recovery, no-duplicates and lookback tests pass.
+- [x] **3.9** `reconciler.service.ts`. *Done when:* recovery, no-duplicates and lookback tests pass.
 - [ ] **3.10** `wwebjs-adapter.ts` (last), the `whatsapp-web.js` pin and `.github/workflows/wwebjs-watch.yml`. *Done when:* it compiles against the real library, covers every event, wraps calls in timeouts, and the lint boundary rule allows only this file to import `whatsapp-web.js`.
 
 ## Milestone 4 — API core (`feat/api-core`) — TDD §6.2, §6.7, §6.10, §6.11
@@ -179,8 +179,9 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **5.2** The memory guard of the watchdog (TDD §6.5: process RSS above `MEMORY_RESTART_THRESHOLD_MB` restarts the largest idle session, never mid-send) was left out of 3.8: it needs the send queue to know a session is idle, and a way to tell which session is the largest (the port has no per-session memory). Add both here, with tests, and remove the "not part of this pass yet" note from `docs/sessions.md`.
 - [ ] **4.6** Register `SessionManager` and `WatchdogService` in a module (none exists yet) and import it into `AppModule`: until then neither runs. The boot test of 4.6 must cover the watchdog timer starting and stopping with the app.
 - [ ] **5.x, the sessions API** The `Session` rows that `SessionManager` returns carry `seqHighWater` (a `bigint`, which `JSON.stringify` rejects). The mapper to the session DTO must leave it out; add a test that a DTO serializes.
-- [ ] **3.9** The manager does not call the reconciler (it comes later in the dependency order): subscribe to `session_status` with `status: 'ready'` on the `EventBusService`.
-- [ ] **3.9** The reconciler feeds recovered messages with `InboundOrderBuffer.offer(message, 'reconcile')` through the same pipeline path (it needs a public entry point on `EventPipelineService`); the batch `reason` stays `reconcile` only for a buffer it opened.
+- [x] **3.9** The manager does not call the reconciler (it comes later in the dependency order): subscribe to `session_status` with `status: 'ready'` on the `EventBusService`.
+- [x] **3.9** The reconciler feeds recovered messages with `InboundOrderBuffer.offer(message, 'reconcile')` through the same pipeline path (it needs a public entry point on `EventPipelineService`); the batch `reason` stays `reconcile` only for a buffer it opened.
+- [ ] **4.6** Register `ReconcilerService` in the same module as `SessionManager` and `WatchdogService`; the boot test must cover it subscribing to `session_status` and unsubscribing at shutdown.
 - [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
 ## Progress tracking
@@ -213,8 +214,8 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.5 | done | `feat/3-5-order-buffer` | 2026-10-27 |
 | 3.6 | done | `feat/3-6-event-pipeline` | 2026-10-27 |
 | 3.7 | done | `feat/3-7-session-manager` | 2026-10-28 |
-| 3.8 | done | - | 2026-10-28 |
-| 3.9 | todo | - | - |
+| 3.8 | done | #21 | 2026-10-28 |
+| 3.9 | done | `feat/3-9-reconciler` | 2026-10-28 |
 | 3.10 | todo | - | - |
 | 4.1 | todo | - | - |
 | 4.2 | todo | - | - |

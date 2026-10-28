@@ -93,6 +93,7 @@ interface Env {
   nextSeq: jest.Mock<Promise<number>, [string]>
   claim: jest.Mock<Promise<boolean>, [string]>
   unclaim: jest.Mock<Promise<void>, [string]>
+  noteIncoming: jest.Mock<void, [Date]>
 }
 
 // The database and Redis (the dedupe keys and the seq counter) outlive a pipeline, as they outlive
@@ -110,6 +111,7 @@ function environment(previous?: Env): Env {
     metrics: new MetricsService(),
     nextSeq: jest.fn((_sessionId: string) => Promise.resolve(++counter.seq)),
     claim: jest.fn(key => Promise.resolve(!seen.has(key) && Boolean(seen.add(key)))),
+    noteIncoming: jest.fn<void, [Date]>(),
     unclaim: jest.fn((key: string) => {
       seen.delete(key)
       return Promise.resolve()
@@ -130,6 +132,7 @@ function start(env: Env, options: Partial<SessionPipelineOptions> = {}): Session
       sequencer,
       claim: key => env.claim(key),
       unclaim: key => env.unclaim(key),
+      noteIncoming: at => env.noteIncoming(at),
       metrics: env.metrics.metrics
     }
   )
@@ -1172,6 +1175,53 @@ describe('SessionEventPipeline (review findings)', () => {
     await advance(0)
 
     expect(env.unclaim).not.toHaveBeenCalled()
+  })
+
+  it('notes the activity of an incoming live message, not of our own or other events', async () => {
+    const env = environment()
+    open(env)
+
+    env.client.emit(message(incoming('mine', 0, { fromMe: true })))
+    env.client.emit({ event: 'ready', data: {} })
+    await advance(0)
+    expect(env.noteIncoming).not.toHaveBeenCalled()
+
+    env.client.emit(message(incoming('a', 0)))
+    await advance(0)
+    expect(env.noteIncoming).toHaveBeenCalledTimes(1)
+  })
+
+  it('notes the time the sender wrote the message, so a backlog does not look like news', async () => {
+    const env = environment()
+    open(env)
+    const backlog = incoming('old', 7200)
+
+    env.client.emit(message(backlog))
+    await advance(0)
+
+    expect(env.noteIncoming).toHaveBeenCalledWith(new Date(backlog.sentAt))
+  })
+
+  it('does not note a message that could not be stored', async () => {
+    const env = environment()
+    env.messages.failUpsert = true
+    open(env)
+
+    env.client.emit(message(incoming('a', 0)))
+    await advance(0)
+
+    expect(env.noteIncoming).not.toHaveBeenCalled()
+  })
+
+  it('does not note a repeat of a message the dedupe dropped', async () => {
+    const env = environment()
+    open(env)
+
+    env.client.emit(message(incoming('a', 0)))
+    env.client.emit(message(incoming('a', 0)))
+    await advance(0)
+
+    expect(env.noteIncoming).toHaveBeenCalledTimes(1)
   })
 
   it('does not schedule a replay for an outgoing message that failed to publish', async () => {
