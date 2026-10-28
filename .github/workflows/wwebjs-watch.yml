@@ -1,0 +1,118 @@
+name: wwebjs release watch
+
+# Dependabot ignores whatsapp-web.js on purpose: upgrading it is a deliberate act with its own
+# runbook. This workflow is the notification: it keeps ONE open issue while npm has a newer release.
+#
+# - The issue follows npm, the registry `pnpm install` uses. The GitHub release only adds a link.
+# - A run edits the issue only when the latest version changed, so the checklist ticks of the owner
+#   survive. An issue the owner closes by hand is opened again by the next run: close it with the
+#   upgrade, not before.
+# - GitHub disables scheduled workflows after 60 days without repository activity; re-enable it in the
+#   Actions tab (or run it by hand) if the issues stop coming.
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  # Both are read by the gh CLI
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  LABEL: wwebjs-release
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      # What the registries answer is data, not shell: it only ever travels through step outputs and
+      # environment variables, never through ${{ }} inside a script
+      - name: Read the pinned and the latest versions
+        id: versions
+        run: |
+          pinned=$(node -p "require('./package.json').dependencies['whatsapp-web.js']")
+          npm_latest=$(npm view whatsapp-web.js version)
+          semver='^[0-9]+\.[0-9]+\.[0-9]+$'
+          for value in "$pinned" "$npm_latest"; do
+            [[ $value =~ $semver ]] || { echo "Unexpected version: $value" >&2; exit 1; }
+          done
+
+          # The release notes link is a courtesy: a repository without releases, or an API failure,
+          # must not hide a new npm version
+          release_url="https://github.com/wwebjs/whatsapp-web.js/releases"
+          if tag=$(gh api repos/wwebjs/whatsapp-web.js/releases/latest --jq .tag_name 2>/dev/null) &&
+            [[ $tag =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            release_url="$release_url/tag/$tag"
+          fi
+
+          {
+            echo "pinned=$pinned"
+            echo "npm_latest=$npm_latest"
+            echo "release_url=$release_url"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open, update or close the issue
+        env:
+          PINNED: ${{ steps.versions.outputs.pinned }}
+          NPM_LATEST: ${{ steps.versions.outputs.npm_latest }}
+          RELEASE_URL: ${{ steps.versions.outputs.release_url }}
+        run: |
+          # Create the label once; any failure other than "already exists" shows up here, not later
+          if ! gh label list --limit 200 --json name --jq '.[].name' | grep -qx "$LABEL"; then
+            gh label create "$LABEL" --color FBCA04 --description 'A newer whatsapp-web.js exists'
+          fi
+          existing=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')
+
+          # The pin is the latest, or newer (a release npm no longer lists): nothing to announce
+          if [[ $(printf '%s\n' "$PINNED" "$NPM_LATEST" | sort -V | tail -n 1) == "$PINNED" ]]; then
+            if [[ -n $existing ]]; then
+              gh issue close "$existing" --comment "The pin is $PINNED, which is the latest release. Closing."
+            fi
+            echo "whatsapp-web.js $PINNED is up to date"
+            exit 0
+          fi
+
+          title="whatsapp-web.js $NPM_LATEST is available"
+          if [[ -n $existing && $(gh issue view "$existing" --json title --jq .title) == "$title" ]]; then
+            echo "Issue #$existing already announces $NPM_LATEST"
+            exit 0
+          fi
+
+          cat > body.md <<EOF
+          The pin is \`$PINNED\`; the latest on npm is \`$NPM_LATEST\`.
+
+          Release notes: $RELEASE_URL
+
+          Upgrading is a deliberate pull request, never an automatic one. Level 2 checklist (TDD §6.14):
+
+          - [ ] Branch \`chore/bump-wwebjs\`; change the exact pin in \`package.json\`; \`pnpm install\`
+          - [ ] Read the release notes; re-check the event names in \`Constants.js\` and the compatibility notes of TDD §2.5
+          - [ ] \`pnpm test\`: the parity test fails on every added or removed symbol until it is mapped or listed \`unsupported\` with a reason in \`src/parity/overrides.ts\`
+          - [ ] Compare the runtime shapes with the typings again (ids typed as strings, poll options, \`event*\` fields): the mappers accept both
+          - [ ] \`pnpm validate:all\` and the integration suites
+          - [ ] Smoke test with a real session on a spare number (\`E2E_REAL=1\`)
+          - [ ] Pull request, CI, merge, deploy; the rollback is the previous image tag
+
+          _Opened by the \`wwebjs release watch\` workflow. It updates this issue when a newer version appears and closes it once the pin catches up._
+          EOF
+
+          if [[ -n $existing ]]; then
+            gh issue edit "$existing" --title "$title" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md --label "$LABEL"
+          fi
