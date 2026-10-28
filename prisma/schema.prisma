@@ -68,6 +68,8 @@ model Session {
   // First successful `ready` after linking; drives the warm-up of the send policy
   linkedAt        DateTime?     @db.Timestamptz(3)
   lastError       String?
+  // Upper bound of the `seq` the session has delivered, written ahead in blocks (see seq-allocator)
+  seqHighWater    BigInt        @default(0)
 
   apiKeys      ApiKey[]
   webhooks     Webhook[]

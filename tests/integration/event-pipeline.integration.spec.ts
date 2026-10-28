@@ -247,7 +247,14 @@ describe('event pipeline (integration)', () => {
     bus.subscribe('*', envelope => {
       published.push(envelope)
     })
-    const service = new EventPipelineService(config, redis, messages, bus, new MetricsService())
+    const service = new EventPipelineService(
+      config,
+      redis,
+      messages,
+      sessions,
+      bus,
+      new MetricsService()
+    )
     const client = new FakeWhatsAppClient(sessionId)
     await service.open(sessionId, client, { orderingEnabled: true })
 
@@ -265,5 +272,68 @@ describe('event pipeline (integration)', () => {
       ['ping', 2]
     ])
     expect(await redis.client.get(`seq:${sessionId}`)).toBe('2')
+  })
+
+  it('never repeats a seq after Redis forgets the counter', async () => {
+    const sessionId = await newSession('seq-loss')
+    const bus = new EventBusService()
+    const seqs: number[] = []
+    bus.subscribe('*', envelope => {
+      seqs.push(envelope.seq)
+    })
+    const build = (): EventPipelineService =>
+      new EventPipelineService(config, redis, messages, sessions, bus, new MetricsService())
+    const first = build()
+    await first.open(sessionId, new FakeWhatsAppClient(sessionId), { orderingEnabled: true })
+
+    try {
+      await first.publish(sessionId, 'ping', {})
+      await first.publish(sessionId, 'ping', {})
+      // Redis loses the counter while the gateway runs
+      await redis.client.del(`seq:${sessionId}`)
+      await first.publish(sessionId, 'ping', {})
+      // The bound was written before the first seq was used
+      expect((await sessions.findById(sessionId))?.seqHighWater).toBe(100n)
+
+      // A clean shutdown brings it to the last seq, so the next boot leaves no gap
+      await first.onApplicationShutdown()
+      expect((await sessions.findById(sessionId))?.seqHighWater).toBe(3n)
+      await redis.client.del(`seq:${sessionId}`)
+      const second = build()
+      await second.open(sessionId, new FakeWhatsAppClient(sessionId), { orderingEnabled: true })
+      await second.publish(sessionId, 'ping', {})
+      await second.onApplicationShutdown()
+
+      expect(seqs).toEqual([1, 2, 3, 4])
+    } finally {
+      await first.close(sessionId)
+    }
+  })
+
+  it('leaves a gap of at most one block after a crash, never a repeat', async () => {
+    const sessionId = await newSession('seq-crash')
+    const bus = new EventBusService()
+    const seqs: number[] = []
+    bus.subscribe('*', envelope => {
+      seqs.push(envelope.seq)
+    })
+    const build = (): EventPipelineService =>
+      new EventPipelineService(config, redis, messages, sessions, bus, new MetricsService())
+    const crashed = build()
+    await crashed.open(sessionId, new FakeWhatsAppClient(sessionId), { orderingEnabled: true })
+    await crashed.publish(sessionId, 'ping', {})
+    await crashed.publish(sessionId, 'ping', {})
+
+    // The process dies (no shutdown) and Redis comes back empty
+    await redis.client.del(`seq:${sessionId}`)
+    const restarted = build()
+    await restarted.open(sessionId, new FakeWhatsAppClient(sessionId), { orderingEnabled: true })
+    try {
+      await restarted.publish(sessionId, 'ping', {})
+    } finally {
+      await restarted.close(sessionId)
+    }
+
+    expect(seqs).toEqual([1, 2, 101])
   })
 })

@@ -1,6 +1,14 @@
-import { backoffDelayMs, retry } from './retry.js'
+import { backoffCeilingMs, backoffDelayMs, retry } from './retry.js'
 
 const base = { attempts: 3, baseDelayMs: 100, maxDelayMs: 1000 }
+
+describe('backoffCeilingMs', () => {
+  it('doubles per attempt and stops at the maximum', () => {
+    expect([1, 2, 3, 4, 5].map(attempt => backoffCeilingMs(attempt, 100, 1000))).toEqual([
+      100, 200, 400, 800, 1000
+    ])
+  })
+})
 
 describe('backoffDelayMs', () => {
   it('doubles the ceiling per attempt up to the maximum', () => {

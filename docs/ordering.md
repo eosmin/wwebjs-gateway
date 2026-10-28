@@ -14,7 +14,7 @@ Every event of a session goes through the same steps, one event at a time, in th
 4. **Stamp and publish.** `seq` comes from a Redis `INCR seq:<session>` when the event is published, so `seq` order equals the corrected order. All the events of a session, those of the client and the ones the gateway makes up (`session_status`, `message_sent`, ...), are stamped and delivered through one queue, so `seq` order is also delivery order. A batch is published without any other event in the middle.
 5. **Mark.** The stored rows get `emittedAt`.
 
-`seq` keeps growing across restarts because it lives in Redis, which runs with AOF (TDD §6.14). If Redis loses its data, the counter starts again from 1.
+`seq` keeps growing across restarts because it lives in Redis, which runs with AOF (TDD §6.14). If Redis loses its data, the counter does not go back below what the session delivered. Because AOF syncs every second, a crash of Redis can also lose about a second of increments. A bound reserved in Postgres and the last `seq` kept in memory stop a `seq` from repeating, at the price of gaps of at most 100 numbers; see [Redis restarts and `seq`](sessions.md#redis-restarts-and-seq).
 
 ## The algorithm
 

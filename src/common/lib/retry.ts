@@ -10,15 +10,19 @@ export interface RetryOptions {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
-// Exponential backoff with full jitter: a random delay in [0, min(maxDelayMs, baseDelayMs * 2^(attempt-1))]
+// The longest wait of an attempt (1-based): baseDelayMs doubled per attempt, up to maxDelayMs
+export function backoffCeilingMs(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  return Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1))
+}
+
+// Exponential backoff with full jitter: a random delay in [0, backoffCeilingMs]
 export function backoffDelayMs(
   attempt: number,
   baseDelayMs: number,
   maxDelayMs: number,
   random: () => number = Math.random
 ): number {
-  const ceiling = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1))
-  return Math.floor(random() * (ceiling + 1))
+  return Math.floor(random() * (backoffCeilingMs(attempt, baseDelayMs, maxDelayMs) + 1))
 }
 
 export async function retry<T>(
