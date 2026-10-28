@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { isSerializationFailure } from '../db-errors.js'
+import { isForeignKeyViolation, isSerializationFailure } from '../db-errors.js'
 import type { ApiKey } from '../models.js'
 import { PrismaService } from '../prisma.service.js'
 
@@ -23,8 +23,14 @@ export interface NewApiKey {
 export class ApiKeysRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  create(data: NewApiKey): Promise<ApiKey> {
-    return this.prisma.apiKey.create({ data })
+  // Null when the session of the key does not exist (any more)
+  async create(data: NewApiKey): Promise<ApiKey | null> {
+    try {
+      return await this.prisma.apiKey.create({ data })
+    } catch (error) {
+      if (isForeignKeyViolation(error)) return null
+      throw error
+    }
   }
 
   findById(id: string): Promise<ApiKey | null> {
@@ -56,7 +62,12 @@ export class ApiKeysRepository {
   // and the old key never lives longer than it already would (a key that expires sooner keeps its
   // date). Serializable, so a rotation that races a revoke or another rotation is run again
   // instead of reading a stale key.
-  async rotate(oldId: string, replacement: NewApiKey, oldExpiresAt: Date): Promise<ApiKey | null> {
+  // `replacement` receives the old row as the transaction read it, so the copy is never stale.
+  async rotate(
+    oldId: string,
+    replacement: (old: ApiKey) => NewApiKey,
+    oldExpiresAt: Date
+  ): Promise<ApiKey | null> {
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.rotateOnce(oldId, replacement, oldExpiresAt)
@@ -68,7 +79,7 @@ export class ApiKeysRepository {
 
   private rotateOnce(
     oldId: string,
-    replacement: NewApiKey,
+    replacement: (old: ApiKey) => NewApiKey,
     oldExpiresAt: Date
   ): Promise<ApiKey | null> {
     return this.prisma.$transaction(
@@ -78,7 +89,7 @@ export class ApiKeysRepository {
         const expiresAt =
           old.expiresAt !== null && old.expiresAt < oldExpiresAt ? old.expiresAt : oldExpiresAt
         await tx.apiKey.update({ where: { id: oldId }, data: { expiresAt } })
-        return tx.apiKey.create({ data: { ...replacement, rotatedFromId: oldId } })
+        return tx.apiKey.create({ data: { ...replacement(old), rotatedFromId: oldId } })
       },
       { isolationLevel: 'Serializable' }
     )

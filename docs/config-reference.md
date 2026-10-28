@@ -14,7 +14,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `DATABASE_URL` | URL | yes |  | PostgreSQL connection string |
 | `REDIS_URL` | URL | yes |  | Redis connection string |
 | `ADMIN_API_KEY` | string, 32 characters or more | yes |  | Admin API key, 32 characters or more (stored only as a hash) |
-| `METRICS_TOKEN` | string, 1 character or more | no |  | Bearer token that grants access to GET /metrics; when unset, /metrics is closed |
+| `METRICS_TOKEN` | string, 32 characters or more | no |  | Bearer token, 32 characters or more, that grants access to GET /metrics; when unset, only an admin key can read it |
 | `API_KEY_ROTATION_GRACE_MINUTES` | integer, 0 or more | no | `10` | Minutes the previous API key keeps working after a rotation |
 | `API_KEY_MAX_TTL_DAYS` | integer, 0 or more | no | `0` | Longest lifetime in days an API key may be given; 0 means no cap |
 | `TRUST_PROXY_HOPS` | integer, 0 or more | no | `0` | Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP |

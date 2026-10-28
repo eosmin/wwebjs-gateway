@@ -3,7 +3,7 @@
 # Metrics
 
 `GET /metrics` answers in the Prometheus text format and requires `Authorization: Bearer <METRICS_TOKEN>`;
-when `METRICS_TOKEN` is unset the endpoint is closed.
+an admin key is also accepted, and when `METRICS_TOKEN` is unset only an admin key can read it.
 
 | Series | Type | Labels | Meaning |
 | --- | --- | --- | --- |

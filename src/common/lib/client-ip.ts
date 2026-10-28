@@ -1,3 +1,5 @@
+import type { FastifyRequest } from 'fastify'
+
 // The address a request really came from. Each trusted proxy appends the address it saw to
 // X-Forwarded-For, so counting `trustedHops` entries back from the socket skips what the caller
 // wrote itself; with 0 hops the header is ignored and the socket peer is the client.
@@ -16,4 +18,14 @@ export function resolveClientIp(
   if (forwarded.length < trustedHops) return peer
   const chain = [...forwarded, peer]
   return chain[chain.length - 1 - trustedHops] ?? peer
+}
+
+// The same, read from a request
+export function requestClientIp(request: FastifyRequest, trustedHops: number): string {
+  const forwarded = request.headers['x-forwarded-for']
+  return resolveClientIp(
+    request.raw.socket.remoteAddress,
+    typeof forwarded === 'string' ? forwarded : undefined,
+    trustedHops
+  )
 }

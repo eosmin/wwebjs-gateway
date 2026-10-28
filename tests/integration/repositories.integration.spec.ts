@@ -62,7 +62,7 @@ describe('repositories (integration)', () => {
   const newApiKey = async (
     suffix: string,
     over: Partial<Parameters<ApiKeysRepository['create']>[0]> = {}
-  ): Promise<Awaited<ReturnType<ApiKeysRepository['create']>>> => {
+  ): Promise<ApiKey> => {
     const key = await apiKeys.create({
       name: 'k',
       keyHash: `h-${runId}-${suffix}`,
@@ -70,6 +70,7 @@ describe('repositories (integration)', () => {
       scopes: [],
       ...over
     })
+    if (key === null) throw new Error('the key could not be created')
     apiKeyIds.push(key.id)
     return key
   }
@@ -238,13 +239,28 @@ describe('repositories (integration)', () => {
       expect((await apiKeys.findById(key.id))?.revokedAt).toEqual(stored)
     })
 
+    it('answers null instead of failing when the session of the key does not exist', async () => {
+      const hash = `h-${runId}-no-session`
+
+      const created = await apiKeys.create({
+        name: 'k',
+        keyHash: hash,
+        keyPrefix: 'wgk_',
+        sessionId: `missing-${runId}`,
+        scopes: []
+      })
+
+      expect(created).toBeNull()
+      expect(await apiKeys.findByHash(hash)).toBeNull()
+    })
+
     it('rotates: the new key points at the old one and the old one gets an end date', async () => {
       const old = await newApiKey('old', { scopes: ['send'] })
       const graceEnd = new Date('2030-01-01T00:00:00Z')
 
       const next = await apiKeys.rotate(
         old.id,
-        { name: 'k', keyHash: `h-${runId}-new`, keyPrefix: 'wgk_', scopes: ['send'] },
+        () => ({ name: 'k', keyHash: `h-${runId}-new`, keyPrefix: 'wgk_', scopes: ['send'] }),
         graceEnd
       )
       if (next) apiKeyIds.push(next.id)
@@ -253,13 +269,37 @@ describe('repositories (integration)', () => {
       expect((await apiKeys.findById(old.id))?.expiresAt).toEqual(graceEnd)
     })
 
+    it('hands the replacement builder the old row as the transaction read it', async () => {
+      const old = await newApiKey('builder', { scopes: ['read'], allowedCidrs: ['10.0.0.0/8'] })
+      const seen: ApiKey[] = []
+
+      const next = await apiKeys.rotate(
+        old.id,
+        row => {
+          seen.push(row)
+          return {
+            name: row.name,
+            keyHash: `h-${runId}-builder-new`,
+            keyPrefix: 'wgk_',
+            scopes: row.scopes
+          }
+        },
+        new Date('2030-01-01T00:00:00Z')
+      )
+      if (next) apiKeyIds.push(next.id)
+
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({ id: old.id, scopes: ['read'], allowedCidrs: ['10.0.0.0/8'] })
+      expect(next).toMatchObject({ scopes: ['read'] })
+    })
+
     it('does not extend a key that expires sooner than the grace period', async () => {
       const soon = new Date('2029-01-01T00:00:00Z')
       const old = await newApiKey('soon', { expiresAt: soon })
 
       const next = await apiKeys.rotate(
         old.id,
-        { name: 'k', keyHash: `h-${runId}-soon-new`, keyPrefix: 'wgk_', scopes: [] },
+        () => ({ name: 'k', keyHash: `h-${runId}-soon-new`, keyPrefix: 'wgk_', scopes: [] }),
         new Date('2030-01-01T00:00:00Z')
       )
       if (next) apiKeyIds.push(next.id)
@@ -273,7 +313,7 @@ describe('repositories (integration)', () => {
 
       const rotation = apiKeys.rotate(
         old.id,
-        { name: 'k', keyHash: taken.keyHash, keyPrefix: 'wgk_', scopes: [] },
+        () => ({ name: 'k', keyHash: taken.keyHash, keyPrefix: 'wgk_', scopes: [] }),
         new Date('2030-01-01T00:00:00Z')
       )
 
@@ -286,7 +326,7 @@ describe('repositories (integration)', () => {
       const rotate = (n: number): Promise<ApiKey | null> =>
         apiKeys.rotate(
           old.id,
-          { name: 'k', keyHash: `h-${runId}-race-${n}`, keyPrefix: 'wgk_', scopes: [] },
+          () => ({ name: 'k', keyHash: `h-${runId}-race-${n}`, keyPrefix: 'wgk_', scopes: [] }),
           new Date('2030-01-01T00:00:00Z')
         )
 
@@ -303,7 +343,7 @@ describe('repositories (integration)', () => {
 
       const next = await apiKeys.rotate(
         old.id,
-        { name: 'k', keyHash: hash, keyPrefix: 'wgk_', scopes: [] },
+        () => ({ name: 'k', keyHash: hash, keyPrefix: 'wgk_', scopes: [] }),
         new Date('2030-01-01T00:00:00Z')
       )
 
@@ -316,7 +356,7 @@ describe('repositories (integration)', () => {
 
       const result = await apiKeys.rotate(
         MISSING_UUID,
-        { name: 'k', keyHash: hash, keyPrefix: 'wgk_', scopes: [] },
+        () => ({ name: 'k', keyHash: hash, keyPrefix: 'wgk_', scopes: [] }),
         new Date()
       )
 
