@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core'
 
+import { ApiModule } from './api/api.module.js'
 import { HealthController } from './api/controllers/health.controller.js'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js'
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor.js'
@@ -10,7 +11,7 @@ import { LoggerModule } from './infra/logger/logger.module.js'
 import { MetricsModule } from './infra/metrics/metrics.module.js'
 
 @Module({
-  imports: [ConfigModule, LoggerModule, MetricsModule],
+  imports: [ConfigModule, LoggerModule, MetricsModule, ApiModule],
   controllers: [HealthController],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

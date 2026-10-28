@@ -76,7 +76,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 - [x] **4.1** `auth.service.ts` + `api-key.guard.ts` (session scope, permission scopes `read|send|manage|webhooks|events`, expiry, CIDR allowlist). *Done when:* tests pass for `INSUFFICIENT_SCOPE`, `API_KEY_EXPIRED`, `IP_NOT_ALLOWED` and revocation.
 - [x] **4.2** Filters and interceptors (error contract, request id, metrics, timeout). *Done when:* the error body matches §6.11.
-- [ ] **4.3** `@WaOperation` + `operation-registry.service.ts`. *Done when:* the registry lists operations and rejects incomplete metadata.
+- [x] **4.3** `@WaOperation` + `operation-registry.service.ts`. *Done when:* the registry lists operations and rejects incomplete metadata.
 - [ ] **4.4** Swagger and nestjs-zod wiring. *Done when:* `/docs/json` is valid OpenAPI.
 - [ ] **4.5** System, health (`/ready`, `/metrics`) and api-keys controllers (incl. `rotate` with grace period; every operation declares its `scope`). *Done when:* `/ready` pings Postgres and Redis and fails without them.
 - [ ] **4.6** Sessions and QR controllers. *Done when:* the server boots, creates a session and serves a QR (fake client).
@@ -226,7 +226,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.10 | done | #23 | 2026-10-28 |
 | 4.1 | done | `feat/4-1-auth` | 2026-10-28 |
 | 4.2 | done | `feat/4-2-filters-interceptors` | 2026-10-28 |
-| 4.3 | todo | - | - |
+| 4.3 | done | `feat/4-3-operation-registry` | 2026-10-28 |
 | 4.4 | todo | - | - |
 | 4.5 | todo | - | - |
 | 4.6 | todo | - | - |
