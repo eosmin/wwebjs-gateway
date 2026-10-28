@@ -7,6 +7,14 @@ allowBuilds:
   '@swc/core': false
   puppeteer: false
   '@parcel/watcher': false
+  '@scarf/scarf': false
+
+# nestjs-zod 5.5.0 declares peers up to Nest 11 / @nestjs/swagger 11; it only uses the public decorator and
+# pipe APIs, which Nest 12 keeps. The boot test of the docs (src/api/docs) fails if that ever stops being true
+peerDependencyRules:
+  allowedVersions:
+    nestjs-zod>@nestjs/common: '12'
+    nestjs-zod>@nestjs/swagger: '12'
 
 # Jest 30 only require()s the ESM-only packages of Nest 12 when Node runs with
 # --experimental-vm-modules; set here once for every pnpm script instead of repeating it per script
