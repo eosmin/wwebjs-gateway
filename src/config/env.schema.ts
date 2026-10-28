@@ -83,8 +83,11 @@ export const envSchema = z
       .min(32)
       .describe('Admin API key, 32 characters or more (stored only as a hash)'),
     METRICS_TOKEN: text()
+      .min(32)
       .optional()
-      .describe('Bearer token that grants access to GET /metrics; when unset, /metrics is closed'),
+      .describe(
+        'Bearer token, 32 characters or more, that grants access to GET /metrics; when unset, only an admin key can read it'
+      ),
     API_KEY_ROTATION_GRACE_MINUTES: count(10).describe(
       'Minutes the previous API key keeps working after a rotation'
     ),

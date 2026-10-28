@@ -1,7 +1,7 @@
 # Authentication
 
-Every route needs an API key unless it is marked public (`/health`, and the routes that say so in
-later steps). Send the key as `X-API-Key: <key>` or `Authorization: Bearer <key>`; `X-API-Key`
+Every route needs an API key unless it is marked public (`/health`, `/ready`, and `/metrics`, which
+checks its own credentials; see [system.md](system.md)). Send the key as `X-API-Key: <key>` or `Authorization: Bearer <key>`; `X-API-Key`
 wins when both are present. Any other `Authorization` scheme is not a key.
 
 ## Kinds of key
@@ -14,8 +14,8 @@ wins when both are present. Any other `Authorization` scheme is not a key.
 
 A database key with no session is an admin key whatever its stored scopes say: scopes only limit
 session keys. Creating a key without a session therefore needs an admin key, and the create
-endpoint (step 4.5) rejects a session-less key that carries restricted scopes instead of silently
-promoting it.
+endpoint (step 4.5) rejects a session-less key that carries `scopes` with `400 VALIDATION_ERROR`
+instead of silently promoting it.
 
 Database keys look like `wgk_<43 url-safe characters>`. Only the sha256 of the key is stored; the
 raw key is shown once when it is created.
@@ -82,20 +82,48 @@ delays or fails a request.
 
 Keys, secrets and QR strings are never logged.
 
+## Managing keys
+
+Only admin keys reach these operations (their scope is `admin`).
+
+| Operation | What it does |
+| --- | --- |
+| `POST /v1/api-keys` | Creates a key. Body: `name`, optional `sessionId`, `scopes`, `allowedCidrs`, `expiresAt`. The raw key is in the `201` answer and nowhere else. |
+| `GET /v1/api-keys` | Lists every key, revoked and expired included. Never returns a raw key or a hash. |
+| `POST /v1/api-keys/{id}/rotate` | Issues a new key with the same name, session, scopes and addresses (returned once) and ends the old key after `API_KEY_ROTATION_GRACE_MINUTES` (10 by default); the answer's `previousKeyExpiresAt` says when. |
+| `DELETE /v1/api-keys/{id}` | Revokes the key. Revoking a revoked key keeps the first date. |
+
+```bash
+curl -X POST http://localhost:3000/v1/api-keys \
+  -H "X-API-Key: $ADMIN_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"chatbot","sessionId":"main","scopes":["read","send","events"]}'
+```
+
+- A key without `sessionId` is an admin key. A `sessionId` that does not exist answers `404 NOT_FOUND`.
+- `allowedCidrs` entries must be addresses or CIDR ranges, `scopes` can only hold `read`, `send`,
+  `manage`, `webhooks` and `events`, and `expiresAt` must be in the future: anything else is
+  `400 VALIDATION_ERROR`.
+- `API_KEY_MAX_TTL_DAYS` caps the lifetime. A key created without `expiresAt` gets the longest one
+  allowed, and an `expiresAt` beyond the cap is refused, not shortened. `0` means no cap.
+- A rotation carries over an expiry that is still ahead. A key with none, or one that already
+  lapsed, gets the cap (or none when there is no cap). If the old key expires before the grace
+  period ends it keeps that earlier date.
+- Rotating or revoking a key that is missing (or, for a rotation, already revoked) is
+  `404 NOT_FOUND`.
+- Revoking the new key of a rotation does not touch the old one, which keeps working until the end
+  of its grace period. To cut a leaked key at once, revoke that key itself (`DELETE` works during the
+  grace period too), not its replacement.
+- `METRICS_TOKEN`, like `ADMIN_API_KEY`, must have 32 characters or more.
+- Both operations call `AuthService.invalidate`, so they take effect at once on this instance.
+
 ## Current status
 
-Built: the guard, `AuthService`, the scopes, the address allowlist and the session helper.
+Built: the guard, `AuthService`, the scopes, the address allowlist, the session helper and the key
+management operations above. `AuthModule` is imported by the modules that have controllers
+(`SystemModule`, `ApiKeysModule`) and registers the guard globally.
 
-Not wired yet, on purpose:
+Not built yet:
 
-- `AuthModule` is not imported by `AppModule`, because it needs the database module and the
-  application has no controller that uses it yet. It is wired when the first controllers arrive
-  (steps 4.5 and 4.6); until then `/health` is the only route and it is public.
-- `@WaOperation` (step 4.3) sets the scope of every operation through `@RequireScope`.
-- Creating, listing, revoking and rotating keys (`/v1/api-keys`, grace period of
-  `API_KEY_ROTATION_GRACE_MINUTES`, cap `API_KEY_MAX_TTL_DAYS`) arrives in step 4.5; revoke and
-  rotate call `AuthService.invalidate`.
-- `GET /metrics` accepts an admin key or the `METRICS_TOKEN` bearer (step 4.5).
 - The guard handles HTTP contexts only. A Socket.IO handler never goes through it; the gateway
   authenticates the handshake itself.
 - Socket.IO authentication (`auth: { apiKey }`) arrives with the gateway and reuses

@@ -5,7 +5,7 @@ const valid = {
   DATABASE_URL: 'postgresql://gateway:gateway@localhost:5432/gateway',
   REDIS_URL: 'redis://localhost:6379',
   ADMIN_API_KEY: 'a'.repeat(32),
-  METRICS_TOKEN: 'metrics-token'
+  METRICS_TOKEN: 'm'.repeat(32)
 }
 
 // Every default of TDD §6.15, so that a typo in any of them fails here
@@ -124,11 +124,11 @@ describe('envSchema', () => {
     const env = envSchema.parse({
       ...valid,
       ADMIN_API_KEY: `${'a'.repeat(32)}\n`,
-      METRICS_TOKEN: ' t\n'
+      METRICS_TOKEN: ` ${'t'.repeat(32)}\n`
     })
 
     expect(env.ADMIN_API_KEY).toBe('a'.repeat(32))
-    expect(env.METRICS_TOKEN).toBe('t')
+    expect(env.METRICS_TOKEN).toBe('t'.repeat(32))
   })
 
   it.each([
@@ -148,6 +148,8 @@ describe('envSchema', () => {
     ['an unknown LOG_LEVEL', { LOG_LEVEL: 'loud' }],
     ['an ADMIN_API_KEY shorter than 32 characters', { ADMIN_API_KEY: 'short' }],
     ['an empty METRICS_TOKEN', { METRICS_TOKEN: '' }],
+    ['a METRICS_TOKEN shorter than 32 characters', { METRICS_TOKEN: 'short-token' }],
+    ['a METRICS_TOKEN of 31 characters', { METRICS_TOKEN: 'm'.repeat(31) }],
     ['a PUBLIC_BASE_URL that is not http(s)', { PUBLIC_BASE_URL: 'ftp://gateway.example.com' }],
     ['a DATABASE_URL that is not a URL', { DATABASE_URL: 'not a url' }]
   ])('rejects %s', (_label, override) => {
@@ -361,7 +363,7 @@ describe('envSchema bounds and edges', () => {
     ],
     [
       'a METRICS_TOKEN placeholder in production',
-      { NODE_ENV: 'production', METRICS_TOKEN: 'replace-this-token' },
+      { NODE_ENV: 'production', METRICS_TOKEN: 'replace-this-token-with-a-random-one' },
       'METRICS_TOKEN'
     ]
   ])('reports %s on the variable at fault', (_label, override, path) => {
@@ -383,7 +385,7 @@ describe('envSchema bounds and edges', () => {
       envSchema.safeParse({
         ...valid,
         ADMIN_API_KEY: `replace-this-${'a'.repeat(32)}`,
-        METRICS_TOKEN: 'replace-this-token'
+        METRICS_TOKEN: 'replace-this-token-with-a-random-one'
       }).success
     ).toBe(true)
   })

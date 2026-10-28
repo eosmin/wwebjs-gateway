@@ -78,7 +78,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **4.2** Filters and interceptors (error contract, request id, metrics, timeout). *Done when:* the error body matches §6.11.
 - [x] **4.3** `@WaOperation` + `operation-registry.service.ts`. *Done when:* the registry lists operations and rejects incomplete metadata.
 - [x] **4.4** Swagger and nestjs-zod wiring. *Done when:* `/docs/json` is valid OpenAPI.
-- [ ] **4.5** System, health (`/ready`, `/metrics`) and api-keys controllers (incl. `rotate` with grace period; every operation declares its `scope`). *Done when:* `/ready` pings Postgres and Redis and fails without them. *Carried over from 4.4 (reviews):* (a) a test through `AppModule` where a bad body on a route with a Zod DTO answers 400 `VALIDATION_ERROR` via the global pipe; (b) a `@ZodResponse` route whose extra output field is stripped by `ZodSerializerInterceptor`; (c) `buildOpenApiDocument` sets `security: []` on routes marked `@Public()` (`IS_PUBLIC_KEY`), so `/ready` and `/metrics` do not ask for the API key.
+- [x] **4.5** System, health (`/ready`, `/metrics`) and api-keys controllers (incl. `rotate` with grace period; every operation declares its `scope`). *Done when:* `/ready` pings Postgres and Redis and fails without them. *Carried over from 4.4 (reviews):* (a) a test through `AppModule` where a bad body on a route with a Zod DTO answers 400 `VALIDATION_ERROR` via the global pipe; (b) a `@ZodResponse` route whose extra output field is stripped by `ZodSerializerInterceptor`; (c) `buildOpenApiDocument` sets `security: []` on routes marked `@Public()` (`IS_PUBLIC_KEY`), so `/ready` and `/metrics` do not ask for the API key.
 - [ ] **4.6** Sessions and QR controllers. *Done when:* the server boots, creates a session and serves a QR (fake client).
 - [ ] **4.7** `main.ts` finalized; `smoke-http` and CI checks move to `/ready`, `/metrics` and the error contract. *Done when:* the CI boot and image checks pass with the new probes. *Carried over from 4.4:* `smoke-http` must request `/docs/json` with `ENABLE_DOCS=true` (nothing else tests that `main.ts` calls `setupDocs`) and get 404 with `ENABLE_DOCS=false`.
 - [ ] **4.8** `tests/parity/` skeleton. *Done when:* the expected-failures list exists and the test runs.
@@ -165,6 +165,8 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the step that owns them. Tick each one in that step's PR; the two that need an owner decision are also in the PENDING table of TDD §11.
 
 - [x] **4.2** The request-id interceptor writes the `x-request-id` RESPONSE header with the id Fastify already chose (`createFastifyAdapter`, step 1.5). Today the id reaches the logs but not the response.
+- [ ] **4.6** `GET /v1/system/info` adds the WhatsApp Web version and the live status of each session once `SessionManager` is registered (TDD §6.11 lists it; step 4.5 reports versions, uptime and counts by status only).
+- [ ] **4.7** Rate limit (`@nestjs/throttler` 6.7.1, TDD §2 and §6.14, `RATE_LIMIT_MAX`) keyed by API key or IP, including the public routes `/ready`, `/metrics` and the failed-authentication path (each unknown key costs one database lookup, and `/ready` pings Postgres and Redis per call). No step owned it before; found in the security review of 4.5.
 - [ ] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
 - [ ] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
 - [ ] **5.5 and 7.4** Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
@@ -228,7 +230,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 4.2 | done | `feat/4-2-filters-interceptors` | 2026-10-28 |
 | 4.3 | done | `feat/4-3-operation-registry` | 2026-10-28 |
 | 4.4 | done | `feat/4-4-swagger-zod` | 2026-10-28 |
-| 4.5 | todo | - | - |
+| 4.5 | done | `feat/4-5-system-health-keys` | 2026-10-28 |
 | 4.6 | todo | - | - |
 | 4.7 | todo | - | - |
 | 4.8 | todo | - | - |

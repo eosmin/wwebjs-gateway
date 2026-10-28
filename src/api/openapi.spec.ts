@@ -7,6 +7,7 @@ import { Validator } from '@seriousme/openapi-schema-validator'
 import { ZodResponse, ZodValidationPipe, createZodDto } from 'nestjs-zod'
 import { z } from 'zod'
 
+import { Public } from '../common/decorators/auth.decorators.js'
 import { ErrorCode } from '../common/errors.js'
 import { createFastifyAdapter } from '../infra/logger/fastify-adapter.js'
 
@@ -89,13 +90,38 @@ class PlainController {
   }
 }
 
+@Controller('v1/open')
+class OpenController {
+  @Public()
+  @Get('method')
+  method(): { ok: true } {
+    return { ok: true }
+  }
+}
+
+@Public()
+@Controller('v1/open-class')
+class OpenClassController {
+  @Get()
+  all(): { ok: true } {
+    return { ok: true }
+  }
+}
+
 describe('setupDocs', () => {
   let app: NestFastifyApplication
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [ApiModule],
-      controllers: [ProbeController, StatusController, ResetController, PlainController],
+      controllers: [
+        ProbeController,
+        StatusController,
+        ResetController,
+        PlainController,
+        OpenController,
+        OpenClassController
+      ],
       providers: [{ provide: APP_PIPE, useClass: ZodValidationPipe }]
     }).compile()
     app = moduleRef.createNestApplication<NestFastifyApplication>(createFastifyAdapter())
@@ -173,6 +199,15 @@ describe('setupDocs', () => {
       apiKey: { type: 'apiKey', in: 'header', name: 'x-api-key' }
     })
     expect(document.security).toEqual([{ apiKey: [] }])
+  })
+
+  it('asks for no key on a route marked @Public(), on the method or on the class', async () => {
+    const { paths } = await fetchDocument()
+
+    expect(paths['/v1/open/method']?.get?.security).toEqual([])
+    expect(paths['/v1/open-class']?.get?.security).toEqual([])
+    expect(paths['/v1/plain']?.get).not.toHaveProperty('security')
+    expect(paths['/v1/probe/send']?.post).not.toHaveProperty('security')
   })
 
   it('points every error response at ErrorBody and joins the codes that share a status', async () => {

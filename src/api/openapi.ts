@@ -1,7 +1,9 @@
 import type { INestApplication } from '@nestjs/common'
+import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger'
 import { cleanupOpenApiDoc } from 'nestjs-zod'
 
+import { IS_PUBLIC_KEY } from '../common/decorators/auth.decorators.js'
 import { ERROR_DEFINITIONS, ErrorCode } from '../common/errors.js'
 import type { AppConfig } from '../config/env.schema.js'
 
@@ -96,6 +98,30 @@ function enrich(operation: Operation, { meta }: RegisteredOperation): void {
   Object.assign(operation.responses, errorResponses(meta.errors))
 }
 
+// `Controller.method` of every route the ApiKeyGuard lets through: @Public() on the method or on
+// the class
+function publicHandlerKeys(app: INestApplication): Set<string> {
+  const discovery = app.get(DiscoveryService, { strict: false })
+  const scanner = app.get(MetadataScanner, { strict: false })
+  const reflector = app.get(Reflector, { strict: false })
+  const keys = new Set<string>()
+  for (const wrapper of discovery.getControllers()) {
+    const instance: unknown = wrapper.instance
+    if (typeof instance !== 'object' || instance === null) continue
+    const prototype: unknown = Object.getPrototypeOf(instance)
+    if (typeof prototype !== 'object' || prototype === null) continue
+    const classIsPublic = reflector.get<boolean | undefined>(IS_PUBLIC_KEY, instance.constructor)
+    for (const methodName of scanner.getAllMethodNames(prototype)) {
+      const handler: unknown = Reflect.get(prototype, methodName)
+      if (typeof handler !== 'function') continue
+      if (classIsPublic === true || reflector.get<boolean | undefined>(IS_PUBLIC_KEY, handler)) {
+        keys.add(`${instance.constructor.name}.${methodName}`)
+      }
+    }
+  }
+  return keys
+}
+
 export function buildOpenApiDocument(
   app: INestApplication,
   registry: OperationRegistryService
@@ -104,10 +130,14 @@ export function buildOpenApiDocument(
   const idByHandler = new Map(
     registry.list().map(op => [`${op.controller.constructor.name}.${op.methodName}`, op.meta.id])
   )
+  const publicKeys = publicHandlerKeys(app)
+  const publicOperationIds = new Set<string>()
   const config = new DocumentBuilder()
     .setTitle('wwebjs-gateway')
     .setDescription('REST, webhooks and Socket.IO gateway over whatsapp-web.js')
     .setVersion('1.0.0')
+    // Zod writes a nullable field as `type: ['string', 'null']`, which only OpenAPI 3.1 allows
+    .setOpenAPIVersion('3.1.0')
     .addApiKey({ type: 'apiKey', in: 'header', name: API_KEY_HEADER }, 'apiKey')
     .addSecurityRequirements('apiKey')
     .build()
@@ -115,8 +145,12 @@ export function buildOpenApiDocument(
   const document = cleanupOpenApiDoc(
     SwaggerModule.createDocument(app, config, {
       // The id of the registry is the operationId, so a client generated from the document keeps it
-      operationIdFactory: (controllerKey, methodKey) =>
-        idByHandler.get(`${controllerKey}.${methodKey}`) ?? `${controllerKey}.${methodKey}`
+      operationIdFactory: (controllerKey, methodKey) => {
+        const handler = `${controllerKey}.${methodKey}`
+        const id = idByHandler.get(handler) ?? handler
+        if (publicKeys.has(handler)) publicOperationIds.add(id)
+        return id
+      }
     })
   )
 
@@ -130,6 +164,10 @@ export function buildOpenApiDocument(
       const operation = pathItem[method]
       const registered = operation?.operationId ? operations.get(operation.operationId) : undefined
       if (operation && registered) enrich(operation, registered)
+      // An empty list overrides the document-wide key requirement: no credential is asked for
+      if (operation?.operationId && publicOperationIds.has(operation.operationId)) {
+        operation.security = []
+      }
     }
   }
   return document

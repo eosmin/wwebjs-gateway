@@ -10,7 +10,8 @@ const REQUIRED_GUIDES = [
   'docs/config-reference.md',
   'docs/errors.md',
   'docs/events.md',
-  'docs/sessions.md'
+  'docs/sessions.md',
+  'docs/system.md'
 ]
 
 const read = (path: string): string => readFileSync(path, 'utf8')

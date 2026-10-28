@@ -6,7 +6,7 @@ import { APP_CONFIG } from '../../config/config.module.js'
 import type { AppConfig } from '../../config/env.schema.js'
 import { AuthService } from '../../services/auth.service.js'
 import { IS_PUBLIC_KEY, REQUIRED_SCOPE_KEY } from '../decorators/auth.decorators.js'
-import { resolveClientIp } from '../lib/client-ip.js'
+import { requestClientIp } from '../lib/client-ip.js'
 import { type OperationScope, type Principal, assertScope } from '../principal.js'
 
 // The request carries the principal from here on
@@ -36,12 +36,7 @@ export class ApiKeyGuard implements CanActivate {
       return true
     }
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>()
-    const forwarded = request.headers['x-forwarded-for']
-    const clientIp = resolveClientIp(
-      request.raw.socket.remoteAddress,
-      typeof forwarded === 'string' ? forwarded : undefined,
-      this.config.TRUST_PROXY_HOPS
-    )
+    const clientIp = requestClientIp(request, this.config.TRUST_PROXY_HOPS)
     const principal = await this.auth.authenticate(extractApiKey(request), clientIp)
     // A route that declares no scope is a mistake; it fails closed to admin keys only
     const scope =
