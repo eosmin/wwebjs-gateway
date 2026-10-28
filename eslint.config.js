@@ -35,7 +35,7 @@ const deepRelativeImport = {
 const restrictedPaths = [
   {
     name: 'whatsapp-web.js',
-    message: 'Only src/whatsapp/wwebjs-adapter.ts may import whatsapp-web.js'
+    message: 'Only src/whatsapp/wwebjs-adapter.ts (and its own spec) may import whatsapp-web.js'
   },
   {
     name: '@prisma/client',
@@ -117,9 +117,10 @@ export default defineConfig([
     }
   },
 
-  // The adapter is the only file that may import the library
+  // The adapter, and the spec that drives it with a real Client, are the only files that may import
+  // the library
   {
-    files: ['src/whatsapp/wwebjs-adapter.ts'],
+    files: ['src/whatsapp/wwebjs-adapter.ts', 'src/whatsapp/wwebjs-adapter.spec.ts'],
     rules: {
       'no-restricted-imports': restrictImports('whatsapp-web.js')
     }

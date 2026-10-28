@@ -36,7 +36,7 @@ The root `../CLAUDE.md` still applies: DRY/KISS/YAGNI/SOLID, strict typing (no `
 
 ## Project-specific rules
 
-- Only `src/whatsapp/wwebjs-adapter.ts` may import `whatsapp-web.js`. Everything else depends on `WhatsAppClientPort` and our DTOs. Never `JSON.stringify` a wwebjs object.
+- Only `src/whatsapp/wwebjs-adapter.ts` (and its own spec, which drives a real `Client`) may import `whatsapp-web.js`. Everything else depends on `WhatsAppClientPort` and our DTOs. Never `JSON.stringify` a wwebjs object.
 - Never set `puppeteer.userDataDir` (LocalAuth throws). Session IDs match `^[-_\w]{1,64}$`.
 - BullMQ-connected ioredis must use `maxRetriesPerRequest: null`; no `QueueScheduler`.
 - Zod 4 only (`z.email()`, `z.uuid()`, `z.url()`, `z.strictObject()`), validated through `nestjs-zod`. Prisma 7.10.1 with the pg driver adapter (NOT `prisma@8` rc); fetch the Prisma 7 setup from Context7 first; never `prisma db push`; `BigInt` never leaks into DTOs. No `@nestjs/platform-express`.

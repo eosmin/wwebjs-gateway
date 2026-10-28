@@ -35,6 +35,19 @@ describe('architecture boundaries', () => {
     )
   })
 
+  it('lets the spec of the adapter import whatsapp-web.js, and no other spec of the folder', async () => {
+    expect(names(await restrictionsFor('src/whatsapp/wwebjs-adapter.spec.ts'))).not.toContain(
+      'whatsapp-web.js'
+    )
+    // The exception is one file, not a pattern: any other file of the folder is still restricted
+    for (const other of ['src/whatsapp/mappers.spec.ts', 'src/whatsapp/other.spec.ts']) {
+      expect(names(await restrictionsFor(other))).toContain('whatsapp-web.js')
+    }
+    expect(names(await restrictionsFor('tests/helpers/fake-whatsapp-client.ts'))).toContain(
+      'whatsapp-web.js'
+    )
+  })
+
   it('keeps the Prisma client out of everything but src/database, by package and by path', async () => {
     const outside = await restrictionsFor('src/api/x.ts')
     const inside = await restrictionsFor('src/database/x.ts')
