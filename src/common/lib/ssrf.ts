@@ -3,6 +3,7 @@ import { BlockList, isIP } from 'node:net'
 
 import { ValidationError } from '../errors.js'
 
+import { type Family, parseNetwork } from './cidr.js'
 import { withTimeout } from './timeout.js'
 
 export interface SsrfPolicy {
@@ -12,8 +13,6 @@ export interface SsrfPolicy {
   allowPrivate: boolean
   resolve?: (hostname: string) => Promise<readonly string[]>
 }
-
-type Family = 'ipv4' | 'ipv6'
 
 const BLOCKED_RANGES: readonly (readonly [string, number, Family])[] = [
   ['0.0.0.0', 8, 'ipv4'],
@@ -80,19 +79,6 @@ export function isBlockedAddress(address: string): boolean {
 interface Allowlist {
   hostnames: Set<string>
   cidrs: BlockList
-}
-
-const MAX_PREFIX = { ipv4: 32, ipv6: 128 } as const
-
-// Splits an allowlist entry into a CIDR or address, or null when it is a hostname
-function parseNetwork(entry: string): { network: string; family: Family; prefix?: number } | null {
-  const [network = '', prefixText, ...extra] = entry.split('/')
-  const family = isIP(network) === 4 ? 'ipv4' : isIP(network) === 6 ? 'ipv6' : null
-  if (family === null) return null
-  if (prefixText === undefined && extra.length === 0) return { network, family }
-  const prefix = /^\d{1,3}$/.test(prefixText ?? '') ? Number(prefixText) : NaN
-  if (extra.length > 0 || !(prefix <= MAX_PREFIX[family])) return null
-  return { network, family, prefix }
 }
 
 // An entry is a valid hostname or a valid address/CIDR; `10.0.0.0/99` is neither
