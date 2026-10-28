@@ -4,6 +4,7 @@ import { TEST_ENV } from '../../tests/helpers/env.js'
 import { FakeWhatsAppClient, buildMessageDto } from '../../tests/helpers/fake-whatsapp-client.js'
 import { parseEnv } from '../config/env.schema.js'
 import type { MessagesRepository } from '../database/repositories/messages.repository.js'
+import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import type { RedisService } from '../infra/redis/redis.service.js'
 import type { EventEnvelope } from '../types/events.js'
@@ -20,6 +21,7 @@ interface Built {
   published: EventEnvelope[]
   redis: { status: string; incr: jest.Mock; set: jest.Mock; del: jest.Mock }
   messages: Record<'upsert' | 'updateAck' | 'markEmitted' | 'listUnemitted', jest.Mock>
+  sessions: Record<'findById' | 'update' | 'raiseSeqHighWater', jest.Mock>
 }
 
 function build(env: Record<string, string> = {}): Built {
@@ -41,14 +43,20 @@ function build(env: Record<string, string> = {}): Built {
     markEmitted: jest.fn(() => Promise.resolve(1)),
     listUnemitted: jest.fn(() => Promise.resolve([]))
   }
+  const sessions = {
+    findById: jest.fn(() => Promise.resolve({ seqHighWater: 0n })),
+    update: jest.fn(() => Promise.resolve({})),
+    raiseSeqHighWater: jest.fn(() => Promise.resolve())
+  }
   const service = new EventPipelineService(
     parseEnv({ ...TEST_ENV, ...env }),
     { client: redis } as unknown as RedisService,
     messages as unknown as MessagesRepository,
+    sessions as unknown as SessionsRepository,
     bus,
     new MetricsService()
   )
-  return { service, bus, published, redis, messages }
+  return { service, bus, published, redis, messages, sessions }
 }
 
 const flush = (): Promise<void> => jest.advanceTimersByTimeAsync(0)
@@ -291,5 +299,85 @@ describe('EventPipelineService', () => {
     await service.publish(SESSION, 'ping', {})
 
     expect(published).toHaveLength(1)
+  })
+})
+
+describe('EventPipelineService seq bound', () => {
+  it('starts above the bound the database holds, and corrects Redis', async () => {
+    const { service, published, sessions, redis } = build()
+    sessions.findById.mockResolvedValue({ seqHighWater: 250n })
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+
+    await service.publish(SESSION, 'ping', {})
+
+    expect(published.map(envelope => envelope.seq)).toEqual([251])
+    expect(redis.set).toHaveBeenCalledWith(`seq:${SESSION}`, 251)
+    expect(sessions.raiseSeqHighWater).toHaveBeenCalledWith(SESSION, 350n)
+  })
+
+  it('does not open a session whose bound cannot be read', async () => {
+    const { service, sessions } = build()
+    sessions.findById.mockRejectedValue(new Error('db down'))
+    await expect(
+      service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+    ).rejects.toThrow('db down')
+  })
+
+  it('stops waiting for a database that does not answer', async () => {
+    const { service, sessions } = build()
+    sessions.findById.mockReturnValue(new Promise(() => undefined))
+    const opening = service.open(SESSION, new FakeWhatsAppClient(SESSION), {
+      orderingEnabled: true
+    })
+    const failed = expect(opening).rejects.toMatchObject({ code: 'WHATSAPP_TIMEOUT' })
+    await jest.advanceTimersByTimeAsync(5000)
+    await failed
+  })
+
+  it('keeps publishing when the bound cannot be written', async () => {
+    const { service, published, sessions } = build()
+    sessions.raiseSeqHighWater.mockRejectedValue(new Error('db down'))
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+
+    await service.publish(SESSION, 'ping', {})
+    await service.publish(SESSION, 'ping', {})
+
+    expect(published.map(envelope => envelope.seq)).toEqual([1, 2])
+  })
+
+  it('keeps the count when a session is closed and its last status is published', async () => {
+    const { service, published, sessions } = build()
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+    await service.publish(SESSION, 'ping', {})
+    await service.close(SESSION)
+    await service.publish(SESSION, 'ping', {})
+
+    expect(published.map(envelope => envelope.seq)).toEqual([1, 2])
+    expect(sessions.raiseSeqHighWater).toHaveBeenCalledTimes(1)
+    expect(sessions.update).not.toHaveBeenCalled()
+  })
+
+  it('brings the bound to the last seq at shutdown, after the pipelines flushed', async () => {
+    const { service, sessions } = build()
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+    await service.publish(SESSION, 'ping', {})
+    await service.publish(SESSION, 'ping', {})
+
+    await service.closeAll()
+
+    expect(sessions.update).toHaveBeenLastCalledWith(SESSION, { seqHighWater: 2n })
+  })
+
+  it('forgets the count of a deleted session', async () => {
+    const { service, published, sessions } = build()
+    await service.publish(SESSION, 'ping', {})
+    service.forget(SESSION)
+    sessions.findById.mockResolvedValue(null)
+    await service.publish(SESSION, 'ping', {})
+
+    // Redis was not touched here, so the mock counter went on: what matters is that the bound is
+    // read again from the database
+    expect(sessions.findById).toHaveBeenCalledTimes(2)
+    expect(published).toHaveLength(2)
   })
 })
