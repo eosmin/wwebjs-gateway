@@ -23,6 +23,7 @@ export interface ReleasedItem<F> {
 export interface ReleasedBatch<F> {
   chatId: string
   items: ReleasedItem<F>[]
+  reason: BatchReason
   batch?: MessageBatch
 }
 
@@ -64,6 +65,30 @@ interface SortKey<F> {
   canonical: number
 }
 
+// Every message of the burst, own ones included, so a bot sees what was already answered. The
+// batch exists only when the contact wrote two or more of them.
+export function buildBatch(
+  chatId: string,
+  messages: MessageDto[],
+  reason: BatchReason
+): MessageBatch | undefined {
+  const first = messages[0]
+  const last = messages.at(-1)
+  const fromContact = messages.filter(message => !message.fromMe).length
+  if (fromContact < 2 || !first || !last) return undefined
+
+  const origin = messages.find(message => message.origin)?.origin
+  return {
+    chatId,
+    messages,
+    firstSentAt: first.sentAt,
+    lastSentAt: last.sentAt,
+    count: messages.length,
+    ...(origin && { origin }),
+    reason
+  }
+}
+
 const compare = (a: number, b: number): number => (a < b ? -1 : a > b ? 1 : 0)
 
 const byConversationOrder = <F>(a: SortKey<F>, b: SortKey<F>): number =>
@@ -87,14 +112,16 @@ export class InboundOrderBuffer<F> {
     private readonly ports: OrderBufferPorts<F>
   ) {}
 
-  // true: the buffer keeps the message and will release it; false: publish it right away
-  offer(message: MessageDto, reason: BatchReason = 'burst'): boolean {
+  // true: the buffer keeps the message and will release it; false: publish it right away.
+  // `force` holds it even when it is not late: a message replayed from the database was stored
+  // before it could be published, so the buffer must sort it with the others of its chat.
+  offer(message: MessageDto, reason: BatchReason = 'burst', force = false): boolean {
     if (this.closed) return false
     if (this.held.has(message.id)) return true
 
     const state = this.chats.get(message.chatId)
     const busy = state !== undefined && (state.open !== undefined || state.pending > 0)
-    if (!busy && !this.isLate(message)) return false
+    if (!force && !busy && !this.isLate(message)) return false
 
     const chat = state ?? this.openState(message.chatId)
     const buffer = chat.open ?? this.openBuffer(chat, message.chatId)
@@ -209,10 +236,16 @@ export class InboundOrderBuffer<F> {
     })
 
     try {
+      const batch = buildBatch(
+        buffer.chatId,
+        items.map(item => item.message),
+        buffer.reason
+      )
       await this.ports.release({
         chatId: buffer.chatId,
         items,
-        ...this.digest(buffer, items)
+        reason: buffer.reason,
+        ...(batch && { batch })
       })
       await this.releaseLateFollowers(buffer, delivered)
     } catch (error) {
@@ -225,32 +258,6 @@ export class InboundOrderBuffer<F> {
 
   private forget(buffer: ChatBuffer<F>): void {
     for (const entry of buffer.entries) this.held.delete(entry.message.id)
-  }
-
-  // Every message of the burst, own ones included, so a bot sees what was already answered. The
-  // batch exists only when the contact wrote two or more of them.
-  private digest(
-    buffer: ChatBuffer<F>,
-    items: ReleasedItem<F>[]
-  ): { batch: MessageBatch } | Record<string, never> {
-    const messages = items.map(item => item.message)
-    const first = messages[0]
-    const last = messages.at(-1)
-    const fromContact = messages.filter(message => !message.fromMe).length
-    if (fromContact < 2 || !first || !last) return {}
-
-    const origin = messages.find(message => message.origin)?.origin
-    return {
-      batch: {
-        chatId: buffer.chatId,
-        messages,
-        firstSentAt: first.sentAt,
-        lastSentAt: last.sentAt,
-        count: messages.length,
-        ...(origin && { origin }),
-        reason: buffer.reason
-      }
-    }
   }
 
   // A follower may arrive while `release` awaits, after the snapshot of `items` was taken

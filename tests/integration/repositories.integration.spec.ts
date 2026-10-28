@@ -637,13 +637,28 @@ describe('repositories (integration)', () => {
       expect(await messages.findExistingIds(sessionId, [])).toEqual(new Set())
     })
 
-    it('updates the ack and reports a missing message', async () => {
+    it('moves the ack forward only, and reports a missing message', async () => {
       const sessionId = await newSession('msg-ack')
       await messages.upsert(message(sessionId, 'm1'))
 
       expect(await messages.updateAck(sessionId, 'm1', 3)).toBe(true)
       expect(await messages.updateAck(sessionId, 'nope', 3)).toBe(false)
+      expect(await messages.updateAck(sessionId, 'm1', 2)).toBe(false)
+      expect(await messages.updateAck(sessionId, 'm1', 3)).toBe(false)
       expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(3)
+    })
+
+    it('applies an ack of -1 (error) whatever the stored one', async () => {
+      const sessionId = await newSession('msg-ack-error')
+      await messages.upsert(message(sessionId, 'm1', { ack: 2 }))
+
+      expect(await messages.updateAck(sessionId, 'm1', -1)).toBe(true)
+      expect(await messages.updateAck(sessionId, 'm1', -1)).toBe(false)
+      expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(-1)
+      // An ack after the error replaces it (the message was sent again), then only moves forward
+      expect(await messages.updateAck(sessionId, 'm1', 0)).toBe(true)
+      expect(await messages.updateAck(sessionId, 'm1', 1)).toBe(true)
+      expect(await messages.updateAck(sessionId, 'm1', 0)).toBe(false)
     })
 
     it('marks as published once and lists the unpublished incoming ones in sent order', async () => {
@@ -664,6 +679,16 @@ describe('repositories (integration)', () => {
 
       expect(held.map(m => m.id)).toEqual(['early', 'late'])
       expect((await messages.findById(sessionId, 'done'))?.emittedAt).toEqual(at)
+    })
+
+    it('lists the unpublished incoming messages of one chat', async () => {
+      const sessionId = await newSession('msg-unemitted-chat')
+      await messages.upsert(message(sessionId, 'a'))
+      await messages.upsert(message(sessionId, 'b', { chatId: 'other@c.us' }))
+
+      const held = await messages.listUnemitted(sessionId, 'other@c.us')
+
+      expect(held.map(m => m.id)).toEqual(['b'])
     })
 
     it('lists a chat newest first, with a cursor and a limit', async () => {

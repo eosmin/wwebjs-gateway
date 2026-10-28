@@ -35,6 +35,7 @@ describe('MetricsService', () => {
     metrics.orderingHeld.inc()
     metrics.orderingReordered.inc()
     metrics.orderingHoldSeconds.observe(1)
+    metrics.pipelineErrors.inc({ stage: 'store' })
     metrics.sends.inc({ result: 'sent' })
     metrics.sendDurationSeconds.observe(0.2)
     metrics.sendQueueDepth.set({ session: 'main' }, 3)
@@ -52,6 +53,7 @@ describe('MetricsService', () => {
       'gw_ordering_held_total 1',
       'gw_ordering_reordered_total 1',
       'gw_ordering_hold_seconds_count 1',
+      'gw_pipeline_errors_total{stage="store"} 1',
       'gw_send_total{result="sent"} 1',
       'gw_send_duration_seconds_count 1',
       'gw_send_queue_depth{session="main"} 3',

@@ -10,11 +10,13 @@ export const TEST_ENV = {
   ADMIN_API_KEY: 'a'.repeat(32)
 }
 
-// The Postgres of the shell or of CI, for the integration suites. Read before the loop below removes
-// it; undefined when the variable is not set (unit runs). It relies on the module registry being
-// shared between this setup file and the specs, so a config with `resetModules` would break it.
+// The Postgres and Redis of the shell or of CI, for the integration suites. Read before the loop
+// below removes them; undefined when a variable is not set (unit runs). It relies on the module
+// registry being shared between this setup file and the specs, so a config with `resetModules`
+// would break it.
 export const REAL_ENV = {
-  DATABASE_URL: process.env['DATABASE_URL']
+  DATABASE_URL: process.env['DATABASE_URL'],
+  REDIS_URL: process.env['REDIS_URL']
 }
 
 // A variable of the schema already in the shell of a developer or of CI must not reach the specs
