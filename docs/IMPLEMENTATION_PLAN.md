@@ -74,7 +74,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 4 — API core (`feat/api-core`) — TDD §6.2, §6.7, §6.10, §6.11
 
-- [ ] **4.1** `auth.service.ts` + `api-key.guard.ts` (session scope, permission scopes `read|send|manage|webhooks|events`, expiry, CIDR allowlist). *Done when:* tests pass for `INSUFFICIENT_SCOPE`, `API_KEY_EXPIRED`, `IP_NOT_ALLOWED` and revocation.
+- [x] **4.1** `auth.service.ts` + `api-key.guard.ts` (session scope, permission scopes `read|send|manage|webhooks|events`, expiry, CIDR allowlist). *Done when:* tests pass for `INSUFFICIENT_SCOPE`, `API_KEY_EXPIRED`, `IP_NOT_ALLOWED` and revocation.
 - [ ] **4.2** Filters and interceptors (error contract, request id, metrics, timeout). *Done when:* the error body matches §6.11.
 - [ ] **4.3** `@WaOperation` + `operation-registry.service.ts`. *Done when:* the registry lists operations and rejects incomplete metadata.
 - [ ] **4.4** Swagger and nestjs-zod wiring. *Done when:* `/docs/json` is valid OpenAPI.
@@ -223,8 +223,8 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.7 | done | `feat/3-7-session-manager` | 2026-10-28 |
 | 3.8 | done | #21 | 2026-10-28 |
 | 3.9 | done | #22 | 2026-10-28 |
-| 3.10 | done | `feat/3-10-wwebjs-adapter` | 2026-10-28 |
-| 4.1 | todo | - | - |
+| 3.10 | done | #23 | 2026-10-28 |
+| 4.1 | done | `feat/4-1-auth` | 2026-10-28 |
 | 4.2 | todo | - | - |
 | 4.3 | todo | - | - |
 | 4.4 | todo | - | - |
