@@ -1,6 +1,7 @@
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core'
+import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import { Test } from '@nestjs/testing'
+import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod'
 
 import { AppModule } from './app.module.js'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js'
@@ -58,9 +59,11 @@ describe('GET /health', () => {
   })
 
   it.each([
+    [APP_PIPE, ZodValidationPipe],
     [APP_FILTER, AllExceptionsFilter],
     [APP_INTERCEPTOR, RequestIdInterceptor],
-    [APP_INTERCEPTOR, TimeoutInterceptor]
+    [APP_INTERCEPTOR, TimeoutInterceptor],
+    [APP_INTERCEPTOR, ZodSerializerInterceptor]
   ])('registers %p with %p globally', (token, implementation) => {
     const providers = Reflect.getMetadata('providers', AppModule) as {
       provide?: unknown

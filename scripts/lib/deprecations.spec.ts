@@ -37,6 +37,10 @@ const CASES: Record<string, { hit: string; miss: string }> = {
   "'incoming_call' / 'code_received' events": {
     hit: "client.on('incoming_call', fn)",
     miss: "client.on('call', fn)"
+  },
+  'patchNestJsSwagger(': {
+    hit: 'patchNestJsSwagger()',
+    miss: 'cleanupOpenApiDoc(document)'
   }
 }
 

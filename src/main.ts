@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import { Logger } from 'nestjs-pino'
 
+import { setupDocs } from './api/openapi.js'
 import { AppModule } from './app.module.js'
 import { APP_CONFIG } from './config/config.module.js'
 import type { AppConfig } from './config/env.schema.js'
@@ -14,6 +15,7 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger))
   app.enableShutdownHooks()
   const config = app.get<AppConfig>(APP_CONFIG)
+  setupDocs(app, config)
   await app.listen(config.PORT, config.HOST)
 }
 
