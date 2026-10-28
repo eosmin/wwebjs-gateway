@@ -59,6 +59,23 @@ The wait doubles with every attempt, from 5 s up to 5 min, and the gateway uses 
 
 A client that was replaced is ignored: whatever it still emits is dropped.
 
+## Watchdog
+
+The watchdog looks at every running session each `WATCHDOG_INTERVAL_MS` (30 s). A pass that finds the previous one still running does nothing. It only reads the state of a client; for a fix it asks the manager, which ignores a request about a run that has moved on (a reconnect, a stop or the next phase came first). The pass does not wait for the request, so a session with a slow teardown does not delay the checks of the others. Each reconnect it asks for counts in `gw_watchdog_restarts_total`, and every action starts with a `session_error` event (`WATCHDOG_START_TIMEOUT`, `WATCHDOG_HEALTH_CHECK` or `WATCHDOG_BLOCKED_STATE`, with the reason as `message`) that arrives before the `session_status` it causes.
+
+| Finding                                                                                                               | What happens                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `starting` or `authenticating` for more than `SESSION_START_TIMEOUT_MS` (180 s)                                       | Reconnect, as after a drop (same wait, same attempt count)                                             |
+| `ready` and `getState()` is not `CONNECTED`, throws or takes over 10 s, `WATCHDOG_MAX_FAILURES` (3) checks in a row   | Reconnect (`lastError: health check failed N times`)                                                   |
+| `ready` and `getState()` is `UNPAIRED`, `UNPAIRED_IDLE`, `DEPRECATED_VERSION`, `TOS_BLOCK` or `PROXYBLOCK`            | `failed` when two checks in a row read it, `lastError: WhatsApp Web state <state>`; no retry while the gateway runs |
+| `ready` and `getState()` is `CONFLICT`                                                                                | As the line above, unless `TAKEOVER_ON_CONFLICT=true`, where it counts as a failed check               |
+
+The time limit counts from the start of the phase: `authenticating` starts when the code is scanned, so the time a person takes to scan is never counted. A session in `qr` or `pairing_code` is never restarted. One answer of `CONNECTED` resets the count of failed checks, and a session that came back with a new browser starts from zero.
+
+A `failed` session keeps `autoStart` on, so the next boot of the gateway tries it once more (a `DEPRECATED_VERSION` is solved by an upgrade, which is a new boot). The second read of a blocking state is a debounce: one transient answer does not end the retries.
+
+The memory guard (`MEMORY_RESTART_THRESHOLD_MB`, the resident memory of the gateway process) is not part of this pass yet: restarting the largest idle session needs the send queue, to know that a session is not sending.
+
 ## Commands
 
 | Command        | What it does                                                                                                   |

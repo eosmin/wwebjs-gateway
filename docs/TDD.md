@@ -1558,8 +1558,8 @@ Pipeline errors are caught per event, counted in metrics, and never stop the str
 - `requireReady(id)` throws `ConflictError('SESSION_NOT_READY')`.
 
 **Watchdog**
-- Every `WATCHDOG_INTERVAL_MS` (30 s) per `ready` session: `getState()` with 10 s timeout. `WATCHDOG_MAX_FAILURES` (3) consecutive failures, or state in `{CONFLICT (without takeover), UNPAIRED, UNPAIRED_IDLE, DEPRECATED_VERSION, TOS_BLOCK, PROXYBLOCK}` → `session_error` + reconnect path (blocking states set `failed` + `last_error` instead of looping).
-- Stuck startup: a session in `starting`/`authenticating` longer than `SESSION_START_TIMEOUT_MS` (180 s) is restarted.
+- Every `WATCHDOG_INTERVAL_MS` (30 s) per `ready` session: `getState()` with 10 s timeout. `WATCHDOG_MAX_FAILURES` (3) consecutive failures (a `getState()` that throws, takes over 10 s or answers anything but `CONNECTED`) → `session_error` (code `WATCHDOG_HEALTH_CHECK`) + reconnect path. A state in `{CONFLICT (without takeover), UNPAIRED, UNPAIRED_IDLE, DEPRECATED_VERSION, TOS_BLOCK, PROXYBLOCK}` read at 2 consecutive checks → `session_error` (code `WATCHDOG_BLOCKED_STATE`) + `failed` + `last_error` instead of looping; the second read is the debounce that keeps one transient answer from ending the retries. With `TAKEOVER_ON_CONFLICT=true`, `CONFLICT` is not blocking: the adapter takes the session back, and if that does not work, the failed checks recycle the browser as a safety net. Every reconnect the watchdog asks for increments `gw_watchdog_restarts_total`; `session_error` is published before the `session_status` it causes.
+- Stuck startup: a session in `starting`/`authenticating` longer than `SESSION_START_TIMEOUT_MS` (180 s) is restarted through the reconnect path (`session_error` code `WATCHDOG_START_TIMEOUT`); the time counts from the start of that phase, so the time a person takes to scan a QR code is never counted.
 - Optional memory guard: if process RSS > `MEMORY_RESTART_THRESHOLD_MB` (0 = off), restart the largest idle session (never mid-send).
 
 ### 6.6 Serialization (`mappers.ts`, `types/dto.ts`)
@@ -1949,6 +1949,7 @@ Before writing code that touches a library fetch current docs: (1) load skill `c
 - **Repository name:** `wwebjs-gateway`.
 - **License:** all rights reserved (decided 2026-10-27). A root `LICENSE` file states "Copyright (c) 2026 Erick Monjaras (eosmin). All rights reserved." with no grant of rights; `package.json` uses `"license": "UNLICENSED"` and `"private": true`.
 - **Module format:** ESM (decided 2026-10-27, step 0.3); see the note in §2.
+- **Watchdog debounce and signals (decided 2026-10-28, step 3.8):** a blocking `WAState` fails the session only at the second consecutive check (≈60 s), since failing ends the retries; the watchdog publishes `session_error` with a `WATCHDOG_*` code before the status change; `CONFLICT` with the takeover on counts as a failed check (safety net). The memory guard moved to step 5.2 (it needs the send queue).
 - Technology and design decisions (NestJS + Fastify adapter, Prisma 7, single instance, `whatsapp-web.js` over Baileys, ordering buffer + `message_batch`, persistent send queue, send policy, WA Web version pinning, toolchain mirrored from `omnichannel-platform`) are in §2, §6 and become ADRs (§6.13).
 
 **PENDING — ask the owner at the stated moment:**
