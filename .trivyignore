@@ -1,0 +1,16 @@
+# Accepted findings of the image scan. Each entry needs a reason, an owner decision and an expiry
+# (`exp:`): after that date the scan fails again and the entry must be re-checked or removed.
+# Both come from puppeteer 24.38.0, which whatsapp-web.js 1.34.7 pins exactly, so no fixed version
+# can be installed without overriding the library's own dependencies.
+
+# basic-ftp 5.3.1 (fixed in 6.x): denial of service through crafted FTP directory listings. It is
+# loaded only by proxy-agent -> pac-proxy-agent -> get-uri for `pac+ftp:` proxy scripts, which
+# @puppeteer/browsers uses when it downloads a browser through a proxy. The gateway installs no
+# browser through puppeteer (build scripts are off) and never talks to an FTP server.
+CVE-2026-102990 exp:2027-01-28
+
+# zod 3.25.76 (fixed in 4.6.x): denial of service through unbounded array validation. It is used by
+# chromium-bidi, which puppeteer-core reaches only with `protocol: 'webDriverBiDi'`. whatsapp-web.js
+# never sets it, so the browser is driven over CDP and the validator never sees input. The gateway's
+# own zod is 4.x.
+CVE-2023-54404 exp:2027-01-28

@@ -209,4 +209,6 @@ jobs:
           image-ref: wwebjs-gateway:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          # Accepted findings, each with a reason and an expiry
+          trivyignores: .trivyignore
           exit-code: '1'
