@@ -121,6 +121,22 @@ describe('InboundOrderBuffer', () => {
       expect(buffer.offer(incoming('a', 4))).toBe(true)
     })
 
+    it('holds a message that is not late when it is forced, as a replay from the database is', async () => {
+      const { buffer, released } = build()
+
+      expect(buffer.offer(incoming('a', 1), 'burst', true)).toBe(true)
+      await advance(OPTIONS.windowMs)
+
+      expect(ids(released[0])).toEqual(['a'])
+    })
+
+    it('does not hold a forced message once closed', () => {
+      const { buffer } = build()
+      buffer.close()
+
+      expect(buffer.offer(incoming('a', 1), 'burst', true)).toBe(false)
+    })
+
     it('keeps chats apart: a buffer in one chat does not hold another', () => {
       const { buffer } = build()
       buffer.offer(incoming('a', 10))
@@ -244,6 +260,20 @@ describe('InboundOrderBuffer', () => {
       await advance(OPTIONS.windowMs)
 
       expect(ids(released[0])).toEqual(['a'])
+    })
+  })
+
+  describe('reason of a release', () => {
+    it('is burst by default and reconcile when the reconciler offered a message', async () => {
+      const burst = build()
+      burst.buffer.offer(incoming('a', 10))
+      await advance(OPTIONS.windowMs)
+      const reconcile = build()
+      reconcile.buffer.offer(incoming('b', 10), 'reconcile')
+      await advance(OPTIONS.windowMs)
+
+      expect(burst.released[0]?.reason).toBe('burst')
+      expect(reconcile.released[0]?.reason).toBe('reconcile')
     })
   })
 
