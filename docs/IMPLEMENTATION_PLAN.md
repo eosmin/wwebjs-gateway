@@ -75,7 +75,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 ## Milestone 4 — API core (`feat/api-core`) — TDD §6.2, §6.7, §6.10, §6.11
 
 - [x] **4.1** `auth.service.ts` + `api-key.guard.ts` (session scope, permission scopes `read|send|manage|webhooks|events`, expiry, CIDR allowlist). *Done when:* tests pass for `INSUFFICIENT_SCOPE`, `API_KEY_EXPIRED`, `IP_NOT_ALLOWED` and revocation.
-- [ ] **4.2** Filters and interceptors (error contract, request id, metrics, timeout). *Done when:* the error body matches §6.11.
+- [x] **4.2** Filters and interceptors (error contract, request id, metrics, timeout). *Done when:* the error body matches §6.11.
 - [ ] **4.3** `@WaOperation` + `operation-registry.service.ts`. *Done when:* the registry lists operations and rejects incomplete metadata.
 - [ ] **4.4** Swagger and nestjs-zod wiring. *Done when:* `/docs/json` is valid OpenAPI.
 - [ ] **4.5** System, health (`/ready`, `/metrics`) and api-keys controllers (incl. `rotate` with grace period; every operation declares its `scope`). *Done when:* `/ready` pings Postgres and Redis and fails without them.
@@ -164,7 +164,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the step that owns them. Tick each one in that step's PR; the two that need an owner decision are also in the PENDING table of TDD §11.
 
-- [ ] **4.2** The request-id interceptor writes the `x-request-id` RESPONSE header with the id Fastify already chose (`createFastifyAdapter`, step 1.5). Today the id reaches the logs but not the response.
+- [x] **4.2** The request-id interceptor writes the `x-request-id` RESPONSE header with the id Fastify already chose (`createFastifyAdapter`, step 1.5). Today the id reaches the logs but not the response.
 - [ ] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
 - [ ] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
 - [ ] **5.5 and 7.4** Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
@@ -225,7 +225,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.9 | done | #22 | 2026-10-28 |
 | 3.10 | done | #23 | 2026-10-28 |
 | 4.1 | done | `feat/4-1-auth` | 2026-10-28 |
-| 4.2 | todo | - | - |
+| 4.2 | done | `feat/4-2-filters-interceptors` | 2026-10-28 |
 | 4.3 | todo | - | - |
 | 4.4 | todo | - | - |
 | 4.5 | todo | - | - |

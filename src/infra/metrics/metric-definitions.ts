@@ -18,6 +18,19 @@ export const METRIC_DEFINITIONS = {
     help: 'Sessions currently in each status.',
     labels: ['status']
   },
+  httpRequests: {
+    name: 'gw_http_requests_total',
+    type: 'counter',
+    help: 'HTTP responses, by method, route pattern and status (`unmatched` when no route matched).',
+    labels: ['method', 'route', 'status']
+  },
+  httpDurationSeconds: {
+    name: 'gw_http_request_duration_seconds',
+    type: 'histogram',
+    help: 'Seconds from receiving an HTTP request to the end of its response, by method and route pattern.',
+    labels: ['method', 'route'],
+    buckets: LATENCY_BUCKETS
+  },
   events: {
     name: 'gw_events_total',
     type: 'counter',
