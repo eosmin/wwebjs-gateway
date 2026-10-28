@@ -63,10 +63,11 @@ export class MessagesRepository {
     return new Set(rows.map(row => row.id))
   }
 
-  // False when the message is not stored
+  // The ack only moves forward: WhatsApp can re-emit an older one after a reconnect, and it must not
+  // lower a newer one. -1 (error) always applies, and an ack after an error applies too (a resend). False when nothing changed (not stored, or older).
   async updateAck(sessionId: string, id: string, ack: number): Promise<boolean> {
     const { count } = await this.prisma.storedMessage.updateMany({
-      where: { sessionId, id },
+      where: { sessionId, id, ...(ack === -1 ? { NOT: { ack: -1 } } : { ack: { lt: ack } }) },
       data: { ack }
     })
     return count > 0
@@ -81,11 +82,12 @@ export class MessagesRepository {
     return count
   }
 
-  // Incoming messages that were stored but not yet published (held when the process died), in the
-  // order they were sent, to be fed again through the order buffer
-  listUnemitted(sessionId: string): Promise<StoredMessage[]> {
+  // Incoming messages that were stored but not yet published (held when the process died, or whose
+  // publishing failed), in the order they were sent, to be fed again through the order buffer.
+  // `chatId` narrows it to one chat.
+  listUnemitted(sessionId: string, chatId?: string): Promise<StoredMessage[]> {
     return this.prisma.storedMessage.findMany({
-      where: { sessionId, direction: 'in', emittedAt: null },
+      where: { sessionId, chatId, direction: 'in', emittedAt: null },
       orderBy: [{ sentAt: 'asc' }, { receivedAt: 'asc' }]
     })
   }
