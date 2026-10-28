@@ -70,7 +70,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **3.7** `session-manager.service.ts`. *Done when:* status machine, reconnect backoff, restore stagger and `MAX_SESSIONS` tests pass.
 - [x] **3.8** `watchdog.service.ts`. *Done when:* stuck-start and blocking-state tests pass.
 - [x] **3.9** `reconciler.service.ts`. *Done when:* recovery, no-duplicates and lookback tests pass.
-- [ ] **3.10** `wwebjs-adapter.ts` (last), the `whatsapp-web.js` pin and `.github/workflows/wwebjs-watch.yml`. *Done when:* it compiles against the real library, covers every event, wraps calls in timeouts, and the lint boundary rule allows only this file to import `whatsapp-web.js`.
+- [x] **3.10** `wwebjs-adapter.ts` (last), the `whatsapp-web.js` pin and `.github/workflows/wwebjs-watch.yml`. *Done when:* it compiles against the real library, covers every event, wraps calls in timeouts, and the lint boundary rule allows only this file to import `whatsapp-web.js`.
 
 ## Milestone 4 — API core (`feat/api-core`) — TDD §6.2, §6.7, §6.10, §6.11
 
@@ -182,6 +182,13 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [x] **3.9** The manager does not call the reconciler (it comes later in the dependency order): subscribe to `session_status` with `status: 'ready'` on the `EventBusService`.
 - [x] **3.9** The reconciler feeds recovered messages with `InboundOrderBuffer.offer(message, 'reconcile')` through the same pipeline path (it needs a public entry point on `EventPipelineService`); the batch `reason` stays `reconcile` only for a buffer it opened.
 - [ ] **4.6** Register `ReconcilerService` in the same module as `SessionManager` and `WatchdogService`; the boot test must cover it subscribing to `session_status` and unsubscribing at shutdown.
+- [ ] **4.6** In the same module provide `WHATSAPP_CLIENT_FACTORY` with `createWwebjsClientFactory(config)` (`APP_CONFIG`); until then no session can start. The boot test must show the token resolves to the real factory and that building a client does not open a browser.
+- [ ] **4.7** The process guard for unhandled rejections: `isPuppeteerFailure` (exported by `wwebjs-adapter.ts`, defined in `wa-call.ts`) says whether a rejection is a Puppeteer death. A rejection raised inside wwebjs itself (its `framenavigated` handler, its `exposeFunction` callbacks) comes from no call of ours and names no session, so decide how it is attributed (for example, reconnect every session that is not `ready`) and test it; the adapter already reports a dead browser or page of its own session as `session_error`.
+- [ ] **12.3** With a real account, check what 3.10 could only read in the source of wwebjs 1.34.7: a wid in `groupMentions[].groupJid`, `mentionedIds`, `PollVote.voter` and `Call.from`; `{ name, localId }` options in `pollOptions` and `selectedOptions`; the `event*` fields of `Message` (the typings declare them, `Message.js` never sets them: an event's data is only in `raw`); and the `disconnected` reason `Max qrcode retries reached` when `QR_MAX_RETRIES` runs out (the manager reconnects on it). Redacted fixtures go in `tests/fixtures/`.
+- [ ] **5.x, the send route** `SendOptions.extra` (and `EditOptions.extra`, `ChannelSendOptions.extra`) reaches wwebjs untouched, and wwebjs merges it into the message built inside the WhatsApp Web page. The request schema must be a `strictObject`, bound `extra` (key count, depth, size) and the docs must say it is a power-user escape hatch behind the `send` scope; decide with the owner whether to allow-list its keys.
+- [ ] **9.5** Write `docs/upgrading.md`: `dependabot.yml`, `wwebjs-watch.yml` and TDD §6.14 point to it and it does not exist yet. Include the three levels, the typings-vs-runtime check of TDD §2.5, and re-enabling the release watch after GitHub pauses an idle repository's schedules.
+- [ ] **11.1** The image must install Chromium and the deployment must set `PUPPETEER_EXECUTABLE_PATH` (the install runs no puppeteer build script, so no browser is downloaded). `--no-sandbox` is always on (TDD §6.3): the image runs as a non-root user, and the threat model (ADR) must say that the container is the boundary, so no extra privileges, a read-only root where possible and a restricted network egress. The first `security-scan` run after 3.10 may report the puppeteer tree: judge each finding and add a justified `.trivyignore` entry only for a real false positive.
+- [ ] **12.3** Promote `getInviteInfo` to a named DTO once its shape is seen on a real invite (the adapter answers a sanitized `Record<string, unknown>`).
 - [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
 ## Progress tracking
@@ -215,8 +222,8 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.6 | done | `feat/3-6-event-pipeline` | 2026-10-27 |
 | 3.7 | done | `feat/3-7-session-manager` | 2026-10-28 |
 | 3.8 | done | #21 | 2026-10-28 |
-| 3.9 | done | `feat/3-9-reconciler` | 2026-10-28 |
-| 3.10 | todo | - | - |
+| 3.9 | done | #22 | 2026-10-28 |
+| 3.10 | done | `feat/3-10-wwebjs-adapter` | 2026-10-28 |
 | 4.1 | todo | - | - |
 | 4.2 | todo | - | - |
 | 4.3 | todo | - | - |

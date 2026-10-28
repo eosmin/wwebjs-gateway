@@ -23,17 +23,17 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `RATE_LIMIT_MAX` | integer, 1 or more | no | `300` | Requests per minute allowed per API key |
 | `ENABLE_DOCS` | `true`, `false` | no |  | Serve Swagger UI and the OpenAPI JSON; when unset, true except in production |
 | `WWEBJS_DATA_PATH` | string, 1 character or more | no | `./.wwebjs_auth` | Folder where whatsapp-web.js keeps the authenticated sessions |
-| `PUPPETEER_EXECUTABLE_PATH` | string, 1 character or more | no |  | Chromium or Chrome binary; when unset, the one Puppeteer downloaded |
+| `PUPPETEER_EXECUTABLE_PATH` | string, 1 character or more | no |  | Chromium or Chrome binary. Set it: the install does not download one (puppeteer build scripts are off), so a session cannot start without it |
 | `WWEB_VERSION` | string, 1 character or more | no |  | Pins the WhatsApp Web version; when unset, the live latest build |
 | `WWEB_VERSION_CACHE_TYPE` | `local`, `remote`, `none` | no | `local` | Where the pinned WhatsApp Web HTML snapshot is read from |
 | `WWEB_CACHE_PATH` | string, 1 character or more | no | `./.wwebjs_cache` | Folder holding the local WhatsApp Web HTML snapshots |
-| `WWEB_VERSION_REMOTE_PATH` | string, 1 character or more | no |  | URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote |
+| `WWEB_VERSION_REMOTE_PATH` | string, 1 character or more | no |  | https URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote. The page it serves runs inside the logged-in browser: trust the host |
 | `WWEB_VERSION_STRICT` | `true`, `false` | no | `true` | Fail the session start when the pinned WhatsApp Web version cannot be loaded, instead of running the live latest build |
-| `QR_MAX_RETRIES` | integer, 0 or more | no | `6` | QR codes generated before a session gives up pairing |
+| `QR_MAX_RETRIES` | integer, 0 or more | no | `6` | QR codes refreshed before a session gives up pairing (wwebjs shows this number plus one); 0 never gives up and keeps the browser running |
 | `TAKEOVER_ON_CONFLICT` | `true`, `false` | no | `false` | Take the session back when WhatsApp Web is opened elsewhere |
 | `DEVICE_NAME` | string, 1 character or more | no |  | Device name shown in the linked devices list |
 | `BROWSER_NAME` | string, 1 character or more | no |  | Browser name shown in the linked devices list |
-| `PROXY_URL` | URL | no |  | Proxy the Chromium traffic goes through; when unset, a direct connection |
+| `PROXY_URL` | URL | no |  | Proxy the Chromium traffic goes through (http, https, socks4 or socks5); credentials in the URL work for http and https only; when unset, a direct connection |
 | `WA_CALL_TIMEOUT_MS` | integer, 1 or more | no | `60000` | Milliseconds a call to WhatsApp Web may take before it is abandoned |
 | `FFMPEG_PATH` | string, 1 character or more | no |  | ffmpeg binary used to convert media; when unset, the one on the PATH |
 | `MAX_SESSIONS` | integer, 1 or more | no | `10` | Sessions the gateway accepts to create |

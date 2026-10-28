@@ -131,6 +131,19 @@ export function sanitizeRaw(
   return isRecord(clean) ? clean : undefined
 }
 
+// Fields the DTOs keep as free-form JSON (`dynamicReplyButtons`, a call's `participants`) are typed
+// `object` by wwebjs. They go through the same cycle-safe copy as `raw`, so that a back reference or a
+// function in one never reaches a serializer.
+const OPAQUE_MAX_FIELD_BYTES = 8192
+
+type Json = NonNullable<MessageDto['dynamicReplyButtons']>
+
+function toJson(value: object | null | undefined): Json | undefined {
+  if (value === null || value === undefined) return undefined
+  // sanitizeValue returns only JSON values: it drops functions and symbols and breaks cycles
+  return sanitizeValue(value, OPAQUE_MAX_FIELD_BYTES, 0, new WeakSet()) as Json | undefined
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -215,9 +228,21 @@ type MessageGatewayFields =
   | 'latestEditMsgKey'
   | 'protocolMessageKey'
   | 'isEventCanceled'
+  | 'mentionedIds'
+  | 'groupMentions'
+  | 'businessOwnerJid'
+  | 'pollOptions'
+  | 'dynamicReplyButtons'
 
 export interface MessageSource extends Omit<MessageDto, MessageGatewayFields> {
   id: IdLike
+  // The typings of wwebjs say string, but Message.js copies what WhatsApp Web holds, which can be wids
+  mentionedIds: IdLike[]
+  groupMentions: { groupSubject: string; groupJid: IdLike }[]
+  businessOwnerJid?: IdLike | null
+  // Typed string[], but Message.js copies the `{ name, localId }` options WhatsApp Web holds
+  pollOptions?: (string | { name: string })[] | null
+  dynamicReplyButtons?: object | null
   location?: LocationDto | null
   inviteV4?: InviteV4Dto | null
   latestEditMsgKey?: IdLike | null
@@ -253,8 +278,6 @@ const MESSAGE_FIELDS = [
   'isStarred',
   'vCards',
   'mediaKey',
-  'mentionedIds',
-  'groupMentions',
   'timestamp',
   'to',
   'type',
@@ -262,14 +285,11 @@ const MESSAGE_FIELDS = [
   'orderId',
   'title',
   'description',
-  'businessOwnerJid',
   'productId',
   'latestEditSenderTimestampMs',
-  'dynamicReplyButtons',
   'selectedButtonId',
   'selectedRowId',
   'pollName',
-  'pollOptions',
   'allowMultipleAnswers',
   'eventStartTime',
   'eventEndTime',
@@ -304,7 +324,21 @@ export function mapMessage(source: MessageSource, options: MessageMapOptions): M
     // For a group chat `from` is the group, `author` the sender
     chatId: source.fromMe ? source.to : source.from,
     sentAt: unixToIso(source.timestamp),
-    receivedAt: toIso(options.receivedAt)
+    receivedAt: toIso(options.receivedAt),
+    mentionedIds: source.mentionedIds.map(serializeId),
+    groupMentions: source.groupMentions.map(({ groupSubject, groupJid }) => ({
+      groupSubject,
+      groupJid: serializeId(groupJid)
+    }))
+  }
+  const businessOwnerJid = optionalId(source.businessOwnerJid)
+  if (businessOwnerJid !== undefined) message.businessOwnerJid = businessOwnerJid
+  const dynamicReplyButtons = toJson(source.dynamicReplyButtons)
+  if (dynamicReplyButtons !== undefined) message.dynamicReplyButtons = dynamicReplyButtons
+  if (source.pollOptions) {
+    message.pollOptions = source.pollOptions.map(option =>
+      typeof option === 'string' ? option : option.name
+    )
   }
   if (source.location) message.location = pick(source.location, LOCATION_FIELDS)
   if (source.inviteV4) message.inviteV4 = pick(source.inviteV4, INVITE_V4_FIELDS)
@@ -379,19 +413,35 @@ export function mapReactionList(source: ReactionListSource): ReactionListDto {
   }
 }
 
-// wwebjs hands the poll message itself as `parentMessage`; we keep its id
-export interface PollVoteSource extends Omit<PollVoteDto, 'parentMessageId' | 'interactedAtTs'> {
-  parentMessage: { id: IdLike }
+// wwebjs hands the poll message itself as `parentMessage`; we keep its id. The typings of 1.34.7 say
+// `voter` is a string and an option is `{ id, name }`, but PollVote.js assigns the sender's wid and
+// `{ name, localId }`, with `name` undefined when the poll message could not be found.
+export interface PollVoteSource extends Omit<
+  PollVoteDto,
+  'voter' | 'selectedOptions' | 'parentMessageId' | 'interactedAtTs'
+> {
+  voter: IdLike
+  selectedOptions: { id?: number; localId?: number; name?: string }[]
+  // `id` is undefined when WhatsApp Web no longer had the poll message
+  parentMessage: { id?: IdLike }
+  parentMsgKey?: IdLike | null
   // wwebjs spells it this way
   interractedAtTs: number
 }
 
 export function mapPollVote(source: PollVoteSource): PollVoteDto {
+  const parentId = source.parentMessage.id ?? source.parentMsgKey
+  if (parentId === undefined || parentId === null) {
+    throw new Error('A poll vote names no poll message')
+  }
   return {
-    voter: source.voter,
-    selectedOptions: source.selectedOptions.map(({ id, name }) => ({ id, name })),
+    voter: serializeId(source.voter),
+    selectedOptions: source.selectedOptions.map(option => ({
+      id: option.localId ?? option.id ?? 0,
+      name: option.name ?? ''
+    })),
     interactedAtTs: source.interractedAtTs,
-    parentMessageId: serializeId(source.parentMessage.id)
+    parentMessageId: serializeId(parentId)
   }
 }
 
@@ -551,7 +601,9 @@ export function mapMembershipRequest(source: MembershipRequestSource): Membershi
   return request
 }
 
-export type GroupNotificationSource = WithIds<GroupNotificationDto, 'id'>
+export type GroupNotificationSource = Omit<WithIds<GroupNotificationDto, 'id'>, 'recipientIds'> & {
+  recipientIds: IdLike[]
+}
 
 export function mapGroupNotification(source: GroupNotificationSource): GroupNotificationDto {
   return {
@@ -559,7 +611,7 @@ export function mapGroupNotification(source: GroupNotificationSource): GroupNoti
     author: source.author,
     body: source.body,
     chatId: source.chatId,
-    recipientIds: source.recipientIds,
+    recipientIds: source.recipientIds.map(serializeId),
     timestamp: source.timestamp,
     type: source.type
   }
@@ -586,22 +638,29 @@ export function mapBroadcast(source: BroadcastSource, options: MessageMapOptions
   }
 }
 
-export type CallSource = CallDto
+// `from` is `data.peerJid` in Call.js, the wid WhatsApp Web holds, though the typings say string
+export type CallSource = Omit<CallDto, 'from' | 'participants'> & {
+  from?: IdLike | null
+  participants?: object | null
+}
 
 const CALL_FIELDS = [
   'id',
-  'from',
   'timestamp',
   'isVideo',
   'isGroup',
   'fromMe',
   'canHandleLocally',
-  'webClientShouldHandle',
-  'participants'
+  'webClientShouldHandle'
 ] as const satisfies readonly (keyof CallSource)[]
 
 export function mapCall(source: CallSource): CallDto {
-  return pick(source, CALL_FIELDS)
+  const call: CallDto = pick(source, CALL_FIELDS)
+  const from = optionalId(source.from)
+  if (from !== undefined) call.from = from
+  const participants = toJson(source.participants)
+  if (participants !== undefined) call.participants = participants
+  return call
 }
 
 // ---- Commerce ----------------------------------------------------------------------------------

@@ -140,6 +140,49 @@ describe('mapMessage', () => {
     expect(mapMessage(source, OPTIONS)).not.toHaveProperty('downloadMedia')
   })
 
+  // The typings say string, but Message.js copies the Wid objects WhatsApp Web holds
+  it('serializes mentions and group mentions that arrive as wids', () => {
+    const source = message({
+      mentionedIds: [id('a@c.us'), 'b@c.us'] as unknown as MessageSource['mentionedIds'],
+      groupMentions: [{ groupSubject: 'Team', groupJid: id('g@g.us') }],
+      businessOwnerJid: id('o@c.us')
+    })
+
+    const dto = mapMessage(source, OPTIONS)
+
+    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dto.mentionedIds).toEqual(['a@c.us', 'b@c.us'])
+    expect(dto.groupMentions).toEqual([{ groupSubject: 'Team', groupJid: 'g@g.us' }])
+    expect(dto.businessOwnerJid).toBe('o@c.us')
+  })
+
+  it('keeps the name of each poll option, which wwebjs holds as { name, localId }', () => {
+    const dto = mapMessage(
+      message({
+        type: 'poll_creation',
+        pollName: 'Lunch?',
+        pollOptions: [
+          { name: 'Tacos', localId: 0 },
+          { name: 'Pizza', localId: 1 }
+        ] as unknown as MessageSource['pollOptions']
+      }),
+      OPTIONS
+    )
+
+    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dto.pollOptions).toEqual(['Tacos', 'Pizza'])
+  })
+
+  it('copies the free-form objects wwebjs types as `object` without functions or cycles', () => {
+    const buttons: Record<string, unknown> = { id: 'b1', send: () => undefined }
+    buttons['self'] = buttons
+
+    const dto = mapMessage(message({ dynamicReplyButtons: buttons }), OPTIONS)
+
+    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dto.dynamicReplyButtons).toEqual({ id: 'b1', self: '[circular]' })
+  })
+
   it('drops the fields wwebjs left null', () => {
     const source = { ...message(), author: null, location: null } as unknown as MessageSource
 
@@ -542,6 +585,21 @@ describe('the other mappers produce DTOs that pass their own schema', () => {
     expect(dto.id).toBe('n1')
   })
 
+  it('group notification whose recipients arrive as wids', () => {
+    const dto = mapGroupNotification({
+      id: id('n1'),
+      author: 'a@c.us',
+      body: '',
+      chatId: 'g@g.us',
+      recipientIds: [id('b@c.us'), 'c@c.us'],
+      timestamp: 1,
+      type: 'add'
+    })
+
+    expect(GroupNotificationDto.parse(dto)).toEqual(dto)
+    expect(dto.recipientIds).toEqual(['b@c.us', 'c@c.us'])
+  })
+
   it('label, call, battery', () => {
     expect(mapLabel({ id: '1', name: 'VIP', hexColor: '#fff' })).toEqual({
       id: '1',
@@ -560,6 +618,29 @@ describe('the other mappers produce DTOs that pass their own schema', () => {
       webClientShouldHandle: false
     })
     expect(CallDto.parse(call)).toEqual(call)
+    expect(call).not.toHaveProperty('from')
+
+    const fromWid = mapCall({
+      id: 'c2',
+      from: id('a@c.us'),
+      timestamp: 1,
+      isVideo: false,
+      isGroup: false,
+      fromMe: false,
+      canHandleLocally: false,
+      webClientShouldHandle: false
+    })
+    expect(CallDto.parse(fromWid)).toEqual(fromWid)
+    expect(fromWid.from).toBe('a@c.us')
+
+    const cycle: Record<string, unknown> = { 'a@c.us': { state: 'ringing' } }
+    cycle['self'] = cycle
+    const withParticipants = mapCall({ ...call, id: 'c3', participants: cycle })
+    expect(CallDto.parse(withParticipants)).toEqual(withParticipants)
+    expect(withParticipants.participants).toEqual({
+      'a@c.us': { state: 'ringing' },
+      self: '[circular]'
+    })
   })
 
   it('broadcast', () => {
@@ -673,5 +754,67 @@ describe('the other mappers produce DTOs that pass their own schema', () => {
 
     expect(PollVoteDto.parse(dto)).toEqual(dto)
     expect(dto).toMatchObject({ interactedAtTs: 99, parentMessageId: 'poll1' })
+  })
+
+  // wwebjs 1.34.7 types `voter` as a string and the options as `{ id, name }`, but PollVote.js
+  // assigns the Wid object of the sender and `{ name, localId }`
+  it('poll vote as wwebjs really builds it: a wid voter and options with localId', () => {
+    const dto = mapPollVote({
+      voter: id('a@c.us'),
+      selectedOptions: [{ localId: 2, name: 'Si' }],
+      interractedAtTs: 99,
+      parentMessage: { id: id('poll1') }
+    })
+
+    expect(PollVoteDto.parse(dto)).toEqual(dto)
+    expect(dto.voter).toBe('a@c.us')
+    expect(dto.selectedOptions).toEqual([{ id: 2, name: 'Si' }])
+  })
+
+  // PollVote.js builds `new Message(client, data.parentMessage)`, which patches nothing when the poll
+  // message was not found, so its id is undefined; `parentMsgKey` still names the poll
+  it('poll vote whose poll message was not found keeps the poll id from parentMsgKey', () => {
+    const dto = mapPollVote({
+      voter: 'a@c.us',
+      selectedOptions: [],
+      interractedAtTs: 99,
+      parentMessage: {},
+      parentMsgKey: id('poll9')
+    })
+
+    expect(PollVoteDto.parse(dto)).toEqual(dto)
+    expect(dto.parentMessageId).toBe('poll9')
+  })
+
+  it('poll vote that names no poll at all is refused instead of inventing an id', () => {
+    expect(() =>
+      mapPollVote({ voter: 'a@c.us', selectedOptions: [], interractedAtTs: 1, parentMessage: {} })
+    ).toThrow()
+  })
+
+  it('poll vote option that only has `id` and one whose id is missing', () => {
+    const dto = mapPollVote({
+      voter: 'a@c.us',
+      selectedOptions: [{ id: 4, name: 'A' }, { name: 'B' }],
+      interractedAtTs: 1,
+      parentMessage: { id: id('p') }
+    })
+
+    expect(dto.selectedOptions).toEqual([
+      { id: 4, name: 'A' },
+      { id: 0, name: 'B' }
+    ])
+  })
+
+  it('poll vote whose poll message was not found, so no option has a name', () => {
+    const dto = mapPollVote({
+      voter: 'a@c.us',
+      selectedOptions: [{ localId: 1, name: undefined }],
+      interractedAtTs: 99,
+      parentMessage: { id: id('poll1') }
+    })
+
+    expect(PollVoteDto.parse(dto)).toEqual(dto)
+    expect(dto.selectedOptions).toEqual([{ id: 1, name: '' }])
   })
 })

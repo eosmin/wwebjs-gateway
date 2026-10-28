@@ -123,6 +123,7 @@ Versions verified against the npm registry on 2026-10-26.
 - Every wwebjs call can hang (Puppeteer `evaluate`). The adapter wraps each call in a timeout (`WA_CALL_TIMEOUT_MS`).
 - WhatsApp Web changes break the library periodically. The WA Web version is controlled by `ClientOptions.webVersion`/`webVersionCache`; expose via env and document the upgrade/rollback runbook.
 - Each running session = one Chromium (~200–500 MB RAM). Enforce `MAX_SESSIONS`.
+- **The typings of 1.34.7 are not the runtime (verified in step 3.10 from the source of the package; re-check on every bump).** `Message.groupMentions[].groupJid`, `Message.mentionedIds`, `Message.businessOwnerJid`, `PollVote.voter`, `GroupNotification.recipientIds` and `Call.from` are typed `string` but hold the wid objects WhatsApp Web keeps; `PollVote.selectedOptions` is `{ name, localId }` (with `name` undefined when the poll message was not found), not `{ id, name }`; `Message.pollOptions` is `{ name, localId }[]`, not `string[]`; `Message.dynamicReplyButtons` and `Call.participants` are `object`. The mappers accept both forms. The `event*` fields of `Message` are declared but `Message.js` never sets them (an event's data is only in `rawData`). `Client.on('message_revoke_everyone')` may pass no revoked message. `Client.editScheduledEvent` is typed with the DOM `Event`. `addParticipants` is typed as a map of maps; it answers a map of `{ code, message, isInviteV4Sent }`. `initialize()` resolves once WhatsApp Web is injected, before the QR code is scanned, and `page.goto` has no timeout. When `qrMaxRetries` runs out it emits `disconnected` with the reason `Max qrcode retries reached` and destroys the client. `import { Client } from 'whatsapp-web.js'` fails in Node ESM (the `...Constants` spread hides the other exports): use the default import.
 
 **Socket.IO 4 (Nest)** — implement as a `@WebSocketGateway()` with `IoAdapter`/`@nestjs/platform-socket.io`; attach to the Fastify server (the Nest Socket.IO adapter shares the HTTP server). Authentication in a handshake middleware (`afterInit` → `server.use(...)`).
 
@@ -334,7 +335,8 @@ const deepRelativeImport = {
 const restrictedPaths = [
   {
     name: 'whatsapp-web.js',
-    message: 'Only src/whatsapp/wwebjs-adapter.ts may import whatsapp-web.js'
+    message:
+      'Only src/whatsapp/wwebjs-adapter.ts (and its own spec) may import whatsapp-web.js'
   },
   {
     name: '@prisma/client',
@@ -416,9 +418,10 @@ export default defineConfig([
     }
   },
 
-  // The adapter is the only file that may import the library
+  // The adapter, and the spec that drives it with a real Client, are the only files that may import
+  // the library
   {
-    files: ['src/whatsapp/wwebjs-adapter.ts'],
+    files: ['src/whatsapp/wwebjs-adapter.ts', 'src/whatsapp/wwebjs-adapter.spec.ts'],
     rules: {
       'no-restricted-imports': restrictImports('whatsapp-web.js')
     }
@@ -1521,6 +1524,8 @@ Define `WA_EVENT_NAMES` (const tuple), a Zod payload schema per event, and `WaEv
 It subscribes to ALL events in §2.5, maps through `mappers.ts`, forwards `{event, data}`; listens to Puppeteer browser/page `disconnected`/`close`/`error` and emits `session_error`. The adapter is deliberately thin and is the ONLY file excluded from coverage thresholds (cannot run without a real account); everything else is tested against `tests/helpers/fake-whatsapp-client.ts`. A `WHATSAPP_CLIENT_FACTORY` provider token `(sessionId, options) => WhatsAppClientPort` is injected into `SessionManager`; tests override it with the fake.
 
 **Implementation notes (step 3.1):** the port is flat: every method takes ids as strings and returns DTOs, and one method carries every wwebjs member that does the same thing (`Chat.pin` and `Client.pinChat` are both `pinChat`; `Message.react` and `Client.sendReaction` are both `sendReaction`). `whatsapp-client.port.spec.ts` holds the map from each member of §6.12 to its method and fails to compile when the port has a method that nothing maps to. The option types (`SendOptions`, `CreateGroupOptions`, …) are plain interfaces in the port (editing takes text only, the one thing WhatsApp lets you edit), which stays free of Zod and of HTTP; the request schemas of the API are written with `satisfies z.ZodType<…>` against them, so that a divergence fails the build and the interface stays the single source. Media reaches the port as base64 only: a URL is downloaded before it, behind `assertPublicHttpUrl`, so the adapter never fetches a URL (`MediaFromURLOptions` has no counterpart in the port). `getInviteInfo` answers `Record<string, unknown>` for now; step 3.2 sanitizes it (no wwebjs object is ever serialized as it is) and promotes it to a named DTO if the real shape is stable. `Wa*Error` live in `wa-errors.ts`: `WaDisconnectedError` is `SESSION_NOT_READY` (409) and `WaTimeoutError` is `WHATSAPP_TIMEOUT` (504); both carry `dispatched` (false when the readiness check failed before the call, true when the page died or timed out with the call in flight), so that the send worker retries only what provably never left (§6.8), and `WaOperationError` is `WHATSAPP_ERROR` (502).
+
+**Implementation notes (step 3.10):** `wwebjs-adapter.ts` is `WwebjsAdapter` (one per session, wired to one `Client`) plus `createWwebjsClientFactory(config)` for the `WHATSAPP_CLIENT_FACTORY` token, and `buildClientOptions` (environment to `ClientOptions`: LocalAuth per session, no `userDataDir`, the Chromium arguments above, the proxy split into `--proxy-server` and `proxyAuthentication`, and `webVersionCache` `none` unless `WWEB_VERSION` is set, so that the live build runs). `wa-call.ts` has no library import and holds the part that can be tested without a browser: `runWaCall` (deadline with `withTimeout`, then translation to `WaDisconnectedError` / `WaTimeoutError` / `WaOperationError`; only a truncated message leaves, never the Puppeteer one for a dead browser), `notReady` (`dispatched: false`) and `isPuppeteerFailure`. A call made before `ready` or after a disconnect fails with `notReady`; `initialize`, `destroy`, `logout`, `resetState`, `getState`, `getWWebVersion` and the pairing calls work without it. Sends, media and picture calls get at least 180 s (`WA_CALL_TIMEOUT_MS` when larger), `initialize` 180 s. All 31 events of `Constants.js` are subscribed (a spec compares them with `Object.values(Events)` of the real library); each handler maps inside a try/catch that logs the event name and the error kind, never the payload. The adapter watches the Puppeteer browser and page of its own run and reports `session_error` with `BROWSER_DISCONNECTED`, `PAGE_CLOSED` or `PAGE_CRASHED` once, unless it closed the browser itself or a `disconnected` event came first. `rejectCall` works on the last 100 `Call` objects of the `call` event, because wwebjs rejects only through the object it handed out. `getInviteInfo` answers the result through `sanitizeRaw`. The spec (`wwebjs-adapter.spec.ts`) builds a real `Client` (it opens no browser until `initialize`) and drives it with `emit` and spies.
 
 ### 6.4 Event pipeline, ordering & reconciliation (`event-pipeline.service.ts`, `inbound-order-buffer.ts`, `reconciler.service.ts`)
 
