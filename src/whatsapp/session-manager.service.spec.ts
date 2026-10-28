@@ -18,7 +18,7 @@ import type { RedisService } from '../infra/redis/redis.service.js'
 import type { SessionStatus } from '../types/dto.js'
 
 import type { EventPipelineService } from './event-pipeline.service.js'
-import { SessionManager } from './session-manager.service.js'
+import { SessionManager, type RunRef } from './session-manager.service.js'
 import { WaOperationError } from './wa-errors.js'
 
 const NOW = new Date('2026-10-28T12:00:00.000Z')
@@ -87,6 +87,7 @@ interface Built {
   factory: FakeWhatsAppClientFactory
   // open/initialize/close/destroy in the order they happened
   trail: string[]
+  metrics: MetricsService
   published: Published[]
   pipeline: {
     open: jest.Mock
@@ -161,6 +162,7 @@ function build(
     sessions,
     factory,
     trail,
+    metrics,
     published,
     pipeline,
     redis,
@@ -1186,5 +1188,327 @@ describe('SessionManager races and edge cases', () => {
 
     expect(timers).not.toHaveBeenCalledWith(expect.any(Function), 60_000)
     expect(built.factory.clients).toHaveLength(1)
+  })
+})
+
+describe('SessionManager watchdog entry points', () => {
+  it('lists the sessions that have a client, with the time of the phase they are in', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    built.sessions.seed({ id: 'idle' })
+    const client = await startSession(built)
+    await flush()
+
+    expect(built.manager.running()).toEqual([
+      { id: ID, status: 'starting', generation: 1, client, phaseStartedAt: NOW.getTime() }
+    ])
+
+    await jest.advanceTimersByTimeAsync(60_000)
+    client.emit({ event: 'authenticated', data: {} })
+    await flush()
+    expect(built.manager.running()[0]).toMatchObject({
+      status: 'authenticating',
+      phaseStartedAt: NOW.getTime() + 60_000
+    })
+
+    client.emit({ event: 'ready', data: {} })
+    await flush()
+    expect(built.manager.running()[0]).toMatchObject({ status: 'ready', phaseStartedAt: undefined })
+  })
+
+  it('reconnects the run it was asked about and ignores one that has ended', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'health check failed 3 times')
+    expect(built.manager.status(ID)).toBe('disconnected')
+    expect(built.sessions.rows.get(ID)?.lastError).toBe('health check failed 3 times')
+    expect(client.callsOf('destroy')).toHaveLength(1)
+
+    // The same request again names a run that is gone
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'late')
+    expect(built.sessions.rows.get(ID)?.lastError).toBe('health check failed 3 times')
+  })
+
+  it('fails the run for good, with no reconnect behind it', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+
+    await built.manager.failRun(run, 'WATCHDOG_BLOCKED_STATE', 'WhatsApp Web state TOS_BLOCK')
+    expect(built.manager.status(ID)).toBe('failed')
+    expect(built.sessions.rows.get(ID)?.lastError).toBe('WhatsApp Web state TOS_BLOCK')
+    expect(built.manager.running()).toEqual([])
+
+    await jest.advanceTimersByTimeAsync(400_000)
+    expect(built.factory.clients).toHaveLength(1)
+  })
+})
+
+describe('SessionManager watchdog requests about a run that moved on', () => {
+  async function startedRun(built: Built): Promise<{
+    client: FakeWhatsAppClient
+    run: NonNullable<ReturnType<SessionManager['running']>[number]>
+  }> {
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    await flush()
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+    return { client, run }
+  }
+
+  it('ignores a request about a startup that went on to authenticate in the meantime', async () => {
+    const built = build()
+    const { client, run } = await startedRun(built)
+    await jest.advanceTimersByTimeAsync(200_000)
+    client.emit({ event: 'authenticated', data: {} })
+    await flush()
+
+    await built.manager.reconnectRun(run, 'WATCHDOG_START_TIMEOUT', 'stuck in starting')
+    expect(built.manager.status(ID)).toBe('authenticating')
+    expect(client.callsOf('destroy')).toHaveLength(0)
+  })
+
+  it('ignores a request about a ready session that is no longer the one it saw', async () => {
+    const built = build()
+    const { client } = await startedRun(built)
+    await makeReady(built, client)
+    const [ready] = built.manager.running()
+    if (!ready) throw new Error('no run')
+
+    await built.manager.restart(ID)
+    await flush()
+    const second = built.factory.clientFor(ID)
+    expect(second).not.toBe(client)
+
+    await built.manager.failRun(ready, 'WATCHDOG_BLOCKED_STATE', 'WhatsApp Web state TOS_BLOCK')
+    await built.manager.reconnectRun(ready, 'WATCHDOG_HEALTH_CHECK', 'late')
+    expect(built.manager.status(ID)).toBe('starting')
+    expect(built.manager.running()).toHaveLength(1)
+  })
+
+  it('ignores both requests once the gateway shuts down', async () => {
+    const built = build()
+    const { client } = await startedRun(built)
+    await makeReady(built, client)
+    const [ready] = built.manager.running()
+    if (!ready) throw new Error('no run')
+    built.pipeline.publish.mockClear()
+    // Queued before the shutdown, they would run after the flag is set
+    const reconnect = built.manager.reconnectRun(ready, 'WATCHDOG_HEALTH_CHECK', 'late')
+    const fail = built.manager.failRun(ready, 'WATCHDOG_BLOCKED_STATE', 'late')
+    const shutdown = built.manager.beforeApplicationShutdown()
+    await Promise.all([reconnect, fail, shutdown])
+    expect(built.pipeline.publish).not.toHaveBeenCalled()
+    expect(await built.metrics.metrics.watchdogRestarts.get()).toMatchObject({
+      values: [{ value: 0 }]
+    })
+    expect(built.sessions.rows.get(ID)?.status).toBe('ready')
+  })
+
+  it.each([
+    ['generation', (run: RunRef): RunRef => ({ ...run, generation: run.generation + 1 })],
+    ['status', (run: RunRef): RunRef => ({ ...run, status: 'qr' })],
+    [
+      'phase start',
+      (run: RunRef): RunRef => ({ ...run, phaseStartedAt: (run.phaseStartedAt ?? 0) + 1 })
+    ]
+  ])('ignores a request whose %s is not the one of the live run', async (_term, change) => {
+    const built = build()
+    const { run } = await startedRun(built)
+    built.pipeline.publish.mockClear()
+
+    await built.manager.reconnectRun(change(run), 'WATCHDOG_START_TIMEOUT', 'late')
+    await built.manager.failRun(change(run), 'WATCHDOG_BLOCKED_STATE', 'late')
+    expect(built.manager.status(ID)).toBe('starting')
+    expect(built.pipeline.publish).not.toHaveBeenCalled()
+  })
+
+  it('ignores a request about a ready session that went to qr within the same run', async () => {
+    const built = build()
+    const { client } = await startedRun(built)
+    await makeReady(built, client)
+    const [ready] = built.manager.running()
+    if (!ready) throw new Error('no run')
+    client.emit({ event: 'qr', data: { qr: 'qr-data' } })
+    await flush()
+
+    await built.manager.failRun(ready, 'WATCHDOG_BLOCKED_STATE', 'late')
+    expect(built.manager.status(ID)).toBe('qr')
+  })
+
+  it('counts a reconnect it makes as a restart of the watchdog, and nothing else', async () => {
+    const built = build()
+    const { client } = await startedRun(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+    const restarts = async (): Promise<number | undefined> =>
+      (await built.metrics.metrics.watchdogRestarts.get()).values[0]?.value
+
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'health check failed 3 times')
+    expect(await restarts()).toBe(1)
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'late')
+    expect(await restarts()).toBe(1)
+
+    // A failure that needs a person is not a restart
+    const other = build()
+    const second = await startedRun(other)
+    await makeReady(other, second.client)
+    const [ready] = other.manager.running()
+    if (!ready) throw new Error('no run')
+    await other.manager.failRun(ready, 'WATCHDOG_BLOCKED_STATE', 'WhatsApp Web state TOS_BLOCK')
+    expect((await other.metrics.metrics.watchdogRestarts.get()).values[0]?.value).toBe(0)
+  })
+
+  it('has no phase start while it waits for a scan, and starts a new phase after the scan', async () => {
+    const built = build()
+    const { client } = await startedRun(built)
+    client.emit({ event: 'qr', data: { qr: 'qr-data' } })
+    await flush()
+    expect(built.manager.running()[0]).toMatchObject({ status: 'qr', phaseStartedAt: undefined })
+
+    await jest.advanceTimersByTimeAsync(30_000)
+    client.emit({ event: 'authenticated', data: {} })
+    await flush()
+    expect(built.manager.running()[0]).toMatchObject({
+      status: 'authenticating',
+      phaseStartedAt: NOW.getTime() + 30_000
+    })
+  })
+
+  it('brings the session back after a watchdog reconnect', async () => {
+    const built = build()
+    const { client } = await startedRun(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'health check failed 3 times')
+    expect(built.manager.running()).toEqual([])
+    await untilNextClient(built, 1)
+    expect(built.factory.clients).toHaveLength(2)
+    expect(built.manager.running()[0]).toMatchObject({ status: 'starting' })
+  })
+})
+
+describe('SessionManager session_error from the watchdog', () => {
+  it('tells the consumers before the new status, with the code and the reason', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+    built.pipeline.publish.mockClear()
+
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'health check failed 3 times')
+    expect(built.pipeline.publish.mock.calls.map((call: unknown[]) => call[1])).toEqual([
+      'session_error',
+      'session_status'
+    ])
+    expect(built.pipeline.publish.mock.calls[0]).toEqual([
+      ID,
+      'session_error',
+      { code: 'WATCHDOG_HEALTH_CHECK', message: 'health check failed 3 times' }
+    ])
+  })
+
+  it('still fails the session when session_error cannot be published', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+    built.pipeline.publish.mockRejectedValueOnce(new Error('redis down'))
+
+    await built.manager.failRun(run, 'WATCHDOG_BLOCKED_STATE', 'WhatsApp Web state TOS_BLOCK')
+    expect(built.manager.status(ID)).toBe('failed')
+  })
+
+  it('says nothing about a request it ignores', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+    await built.manager.stop(ID)
+    built.pipeline.publish.mockClear()
+
+    await built.manager.failRun(run, 'WATCHDOG_BLOCKED_STATE', 'late')
+    expect(built.pipeline.publish).not.toHaveBeenCalled()
+  })
+})
+
+describe('SessionManager session_error edge cases', () => {
+  async function readyRun(built: Built): Promise<RunRef> {
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    const [run] = built.manager.running()
+    if (!run) throw new Error('no run')
+    built.pipeline.publish.mockClear()
+    return run
+  }
+
+  it('tells the consumers before it fails a session, with the code and the reason', async () => {
+    const built = build()
+    const run = await readyRun(built)
+    await built.manager.failRun(run, 'WATCHDOG_BLOCKED_STATE', 'WhatsApp Web state TOS_BLOCK')
+    expect(built.pipeline.publish.mock.calls.map((call: unknown[]) => call[1])).toEqual([
+      'session_error',
+      'session_status'
+    ])
+    expect(built.pipeline.publish.mock.calls[0]).toEqual([
+      ID,
+      'session_error',
+      { code: 'WATCHDOG_BLOCKED_STATE', message: 'WhatsApp Web state TOS_BLOCK' }
+    ])
+  })
+
+  it('still reconnects when session_error cannot be published, and logs the kind only', async () => {
+    const built = build()
+    const run = await readyRun(built)
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    built.pipeline.publish.mockRejectedValueOnce(new Error('redis password hunter2'))
+
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'health check failed 3 times')
+    expect(built.manager.status(ID)).toBe('disconnected')
+    const lines = warn.mock.calls.map(call => String(call[0])).join('\n')
+    expect(lines).toContain('Publishing session_error failed (Error)')
+    expect(lines).not.toContain('hunter2')
+  })
+
+  it('does not let a publish that hangs hold the session for ever', async () => {
+    const built = build()
+    const run = await readyRun(built)
+    built.pipeline.publish.mockImplementationOnce(() => new Promise<void>(() => undefined))
+
+    const done = built.manager.reconnectRun(
+      run,
+      'WATCHDOG_HEALTH_CHECK',
+      'health check failed 3 times'
+    )
+    await jest.advanceTimersByTimeAsync(5000)
+    await done
+    expect(built.manager.status(ID)).toBe('disconnected')
+  })
+
+  it('says nothing about a reconnect it ignores', async () => {
+    const built = build()
+    const run = await readyRun(built)
+    await built.manager.stop(ID)
+    built.pipeline.publish.mockClear()
+    await built.manager.reconnectRun(run, 'WATCHDOG_HEALTH_CHECK', 'late')
+    expect(built.pipeline.publish).not.toHaveBeenCalled()
   })
 })

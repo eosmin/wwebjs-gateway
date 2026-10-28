@@ -42,7 +42,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `SESSION_RECONNECT_MAX_ATTEMPTS` | integer, 0 or more | no | `0` | Reconnection attempts after a disconnect; 0 means unlimited |
 | `WATCHDOG_INTERVAL_MS` | integer, 1 or more | no | `30000` | Milliseconds between health checks of each session |
 | `WATCHDOG_MAX_FAILURES` | integer, 1 or more | no | `3` | Consecutive failed health checks before a session is restarted |
-| `MEMORY_RESTART_THRESHOLD_MB` | integer, 0 or more | no | `0` | Memory in MB of a session browser above which it is restarted; 0 disables the check |
+| `MEMORY_RESTART_THRESHOLD_MB` | integer, 0 or more | no | `0` | Resident memory in MB of the gateway process above which the largest idle session is restarted; 0 disables the check |
 | `INBOUND_ORDERING_ENABLED` | `true`, `false` | no | `true` | Hold and sort inbound messages per chat |
 | `INBOUND_LATE_THRESHOLD_S` | integer, 0 or more | no | `3` | Seconds of difference in sentAt after which a message counts as late |
 | `INBOUND_ORDER_WINDOW_MS` | integer, 0 or more | no | `1500` | Milliseconds the order buffer waits for earlier messages of a chat |

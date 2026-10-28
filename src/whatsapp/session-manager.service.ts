@@ -66,11 +66,30 @@ export interface StartOptions {
   pairingPhoneNumber?: string
 }
 
+// A session that has a client, as the watchdog sees it. `generation` identifies the run: once it
+// changes, whatever the watchdog saw about that run no longer holds.
+export interface RunningSession {
+  id: string
+  status: SessionStatus
+  generation: number
+  client: WhatsAppClientPort
+  // When the session entered `starting` or `authenticating`; undefined in any other status
+  phaseStartedAt: number | undefined
+}
+
+// Why the watchdog acts; it is the `code` of the `session_error` event the consumers get
+export type WatchdogCode =
+  'WATCHDOG_START_TIMEOUT' | 'WATCHDOG_HEALTH_CHECK' | 'WATCHDOG_BLOCKED_STATE'
+
+// What a request of the watchdog names to be sure it is about the run it looked at
+export type RunRef = Pick<RunningSession, 'id' | 'generation' | 'status' | 'phaseStartedAt'>
+
 // Everything a session that has a client, or is about to get one again, keeps in memory
 interface Runtime {
   client: WhatsAppClientPort | undefined
   // Raised on every start and teardown; a callback of an older client sees another number and quits
   generation: number
+  phaseStartedAt: number | undefined
   qr: string | undefined
   pairingPhoneNumber: string | undefined
   reconnectAttempts: number
@@ -244,6 +263,70 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     return client
   }
 
+  // ---- Watchdog entry points -------------------------------------------------------------------
+
+  running(): RunningSession[] {
+    const sessions: RunningSession[] = []
+    for (const [id, runtime] of this.runtimes) {
+      const status = this.statuses.get(id)
+      if (!status || !runtime.client) continue
+      sessions.push({
+        id,
+        status,
+        generation: runtime.generation,
+        client: runtime.client,
+        phaseStartedAt: runtime.phaseStartedAt
+      })
+    }
+    return sessions
+  }
+
+  // Both do nothing when the run is not the one the watchdog looked at (it ended, or went on to
+  // another phase while the request waited in the queue) or when the gateway is shutting down
+  reconnectRun(run: RunRef, code: WatchdogCode, reason: string): Promise<void> {
+    return this.exclusive(run.id, async () => {
+      const runtime = this.currentRuntime(run)
+      if (!runtime) return
+      this.metrics.metrics.watchdogRestarts.inc()
+      await this.announceError(run.id, code, reason)
+      await this.reconnect(run.id, runtime, reason)
+    })
+  }
+
+  // For a state that a new browser would not fix: no retry until someone starts the session
+  failRun(run: RunRef, code: WatchdogCode, reason: string): Promise<void> {
+    return this.exclusive(run.id, async () => {
+      const runtime = this.currentRuntime(run)
+      if (!runtime) return
+      await this.announceError(run.id, code, reason)
+      await this.fail(run.id, runtime, reason)
+    })
+  }
+
+  // Tells the consumers before the session moves, so `session_error` comes before the new status.
+  // A failure to tell is logged and never stops the remedy.
+  private async announceError(id: string, code: WatchdogCode, message: string): Promise<void> {
+    try {
+      await withTimeout(
+        this.pipeline.publish(id, 'session_error', { code, message }),
+        REDIS_TIMEOUT_MS,
+        'publish session_error'
+      )
+    } catch (error: unknown) {
+      this.logger.warn(`[${id}] Publishing session_error failed (${errorKind(error)})`)
+    }
+  }
+
+  private currentRuntime(run: RunRef): Runtime | undefined {
+    const runtime = this.runtimes.get(run.id)
+    if (this.shuttingDown || !runtime) return undefined
+    const same =
+      runtime.generation === run.generation &&
+      runtime.phaseStartedAt === run.phaseStartedAt &&
+      this.statuses.get(run.id) === run.status
+    return same ? runtime : undefined
+  }
+
   // ---- Lifecycle -------------------------------------------------------------------------------
 
   // Builds the client and the pipeline, then lets the browser start. The pipeline listens before
@@ -270,6 +353,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       runtime.unsubscribe = client.onEvent(event =>
         this.onClientEvent(id, runtime, generation, event)
       )
+      runtime.phaseStartedAt = Date.now()
       await this.transition(id, 'starting', {})
       // Not awaited: a browser that is slow to start must not hold the queue of the session
       void client.initialize().catch((error: unknown) => {
@@ -330,6 +414,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     runtime.reconnectTimer = undefined
     runtime.unsubscribe?.()
     runtime.unsubscribe = undefined
+    runtime.phaseStartedAt = undefined
     runtime.qr = undefined
     const client = runtime.client
     runtime.client = undefined
@@ -406,13 +491,17 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     switch (event.event) {
       case 'qr':
         runtime.qr = event.data.qr
+        runtime.phaseStartedAt = undefined
         await this.transition(id, 'qr', {})
         return
       case 'code':
+        runtime.phaseStartedAt = undefined
         await this.transition(id, 'pairing_code', {})
         return
       case 'authenticated':
         runtime.qr = undefined
+        // The time a person took to scan the code is not the time the browser took to load
+        runtime.phaseStartedAt = Date.now()
         await this.transition(id, 'authenticating', {})
         return
       case 'ready':
@@ -446,6 +535,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     const client = runtime.client
     if (!client) return
     runtime.qr = undefined
+    runtime.phaseStartedAt = undefined
     runtime.reconnectAttempts = 0
     const patch: SessionPatch = { lastConnectedAt: new Date(), lastError: null }
     try {
@@ -569,6 +659,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     const runtime: Runtime = {
       client: undefined,
       generation: 0,
+      phaseStartedAt: undefined,
       qr: undefined,
       pairingPhoneNumber,
       reconnectAttempts: 0,
