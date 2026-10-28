@@ -25,8 +25,9 @@ const CHAT = '5215500000001@c.us'
 
 const OPTIONS: Omit<SessionPipelineOptions, 'sessionId'> = {
   orderingEnabled: true,
-  // A window wide enough for the Postgres and Redis round trips between the messages of a burst
-  order: { lateThresholdS: 3, windowMs: 200, maxHoldMs: 2000, maxMessages: 200 },
+  // A window wide enough for the Postgres and Redis round trips between the messages of a burst,
+  // even on a slow runner: a burst that outlasts it is split in two buffers
+  order: { lateThresholdS: 3, windowMs: 1000, maxHoldMs: 4000, maxMessages: 200 },
   storeBodies: true,
   replayDelayMs: 80,
   maxReplayDelayMs: 400,
@@ -77,6 +78,8 @@ describe('event pipeline (integration)', () => {
     redis = new RedisService(config)
     // The pipeline refuses Redis commands until the connection is ready
     await redis.client.ping()
+    // The first query of the Prisma pool is the slowest: take it before the timed tests
+    await sessions.list()
   })
 
   afterAll(async () => {
