@@ -31,6 +31,8 @@ describe('MetricsService', () => {
     })()
 
     metrics.sessions.set({ status: 'ready' }, 2)
+    metrics.httpRequests.inc({ method: 'GET', route: '/health', status: '200' })
+    metrics.httpDurationSeconds.observe({ method: 'GET', route: '/health' }, 0.01)
     metrics.events.inc({ event: 'message' })
     metrics.orderingHeld.inc()
     metrics.orderingReordered.inc()
@@ -49,6 +51,8 @@ describe('MetricsService', () => {
     const body = await scrape()
     for (const line of [
       'gw_sessions{status="ready"} 2',
+      'gw_http_requests_total{method="GET",route="/health",status="200"} 1',
+      'gw_http_request_duration_seconds_count{method="GET",route="/health"} 1',
       'gw_events_total{event="message"} 1',
       'gw_ordering_held_total 1',
       'gw_ordering_reordered_total 1',

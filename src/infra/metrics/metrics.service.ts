@@ -22,6 +22,8 @@ const histogram = <L extends string>(registry: Registry, def: Definition<L>): Hi
 
 export interface Metrics {
   sessions: Gauge<'status'>
+  httpRequests: Counter<'method' | 'route' | 'status'>
+  httpDurationSeconds: Histogram<'method' | 'route'>
   events: Counter<'event'>
   orderingHeld: Counter
   orderingReordered: Counter
@@ -42,6 +44,8 @@ export function createMetrics(registry: Registry): Metrics {
   const d = METRIC_DEFINITIONS
   return {
     sessions: gauge(registry, d.sessions),
+    httpRequests: counter(registry, d.httpRequests),
+    httpDurationSeconds: histogram(registry, d.httpDurationSeconds),
     events: counter(registry, d.events),
     orderingHeld: counter(registry, d.orderingHeld),
     orderingReordered: counter(registry, d.orderingReordered),
