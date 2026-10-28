@@ -26,6 +26,7 @@ export interface Metrics {
   orderingHeld: Counter
   orderingReordered: Counter
   orderingHoldSeconds: Histogram
+  pipelineErrors: Counter<'stage'>
   sends: Counter<'result'>
   sendDurationSeconds: Histogram
   sendQueueDepth: Gauge<'session'>
@@ -45,6 +46,7 @@ export function createMetrics(registry: Registry): Metrics {
     orderingHeld: counter(registry, d.orderingHeld),
     orderingReordered: counter(registry, d.orderingReordered),
     orderingHoldSeconds: histogram(registry, d.orderingHoldSeconds),
+    pipelineErrors: counter(registry, d.pipelineErrors),
     sends: counter(registry, d.sends),
     sendDurationSeconds: histogram(registry, d.sendDurationSeconds),
     sendQueueDepth: gauge(registry, d.sendQueueDepth),

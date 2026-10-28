@@ -43,6 +43,12 @@ export const METRIC_DEFINITIONS = {
     labels: [],
     buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10, 30]
   },
+  pipelineErrors: {
+    name: 'gw_pipeline_errors_total',
+    type: 'counter',
+    help: 'Failures of the event pipeline, by stage (dedupe, store, publish, replay, event).',
+    labels: ['stage']
+  },
   sends: {
     name: 'gw_send_total',
     type: 'counter',

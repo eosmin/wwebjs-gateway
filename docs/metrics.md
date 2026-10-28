@@ -12,6 +12,7 @@ when `METRICS_TOKEN` is unset the endpoint is closed.
 | `gw_ordering_held_total` | counter | - | Inbound messages the order buffer held back to wait for earlier ones. |
 | `gw_ordering_reordered_total` | counter | - | Inbound messages published in a different order than they arrived. |
 | `gw_ordering_hold_seconds` | histogram | - | Seconds a held inbound message waited in the order buffer. |
+| `gw_pipeline_errors_total` | counter | `stage` | Failures of the event pipeline, by stage (dedupe, store, publish, replay, event). |
 | `gw_send_total` | counter | `result` | Outbound sends, by result. |
 | `gw_send_duration_seconds` | histogram | - | Seconds from taking a send job to its outcome. |
 | `gw_send_queue_depth` | gauge | `session` | Send jobs waiting in the queue of each session. |
