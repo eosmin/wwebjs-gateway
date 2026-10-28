@@ -196,6 +196,30 @@ describe('envSchema', () => {
     ['a fraction above 1', { WARMUP_START_FRACTION: '1.1' }],
     ['a fraction below 0', { HEALTH_MAX_BAD_RATIO: '-0.1' }],
     ['a PROXY_URL that is not a URL', { PROXY_URL: 'proxy' }],
+    ['a PROXY_URL that is not http, https, socks4 or socks5', { PROXY_URL: 'ftp://proxy.test:21' }],
+    [
+      'a SOCKS PROXY_URL with credentials, which Chromium cannot use',
+      { PROXY_URL: 'socks5://user:pass@proxy.test:1080' }
+    ],
+    [
+      'a PROXY_URL whose credentials are not valid percent-encoding',
+      { PROXY_URL: 'http://us%er:p%@proxy.test:80' }
+    ],
+    [
+      'a remote path that is not https',
+      {
+        WWEB_VERSION: '2.3000.1',
+        WWEB_VERSION_CACHE_TYPE: 'remote',
+        WWEB_VERSION_REMOTE_PATH: 'http://h.test/{version}.html'
+      }
+    ],
+    [
+      'a remote cache without a pinned version',
+      {
+        WWEB_VERSION_CACHE_TYPE: 'remote',
+        WWEB_VERSION_REMOTE_PATH: 'https://h.test/{version}.html'
+      }
+    ],
     ['an unknown WWEB_VERSION_CACHE_TYPE', { WWEB_VERSION_CACHE_TYPE: 'disk' }],
     ['a remote cache without a remote path', { WWEB_VERSION_CACHE_TYPE: 'remote' }],
     [
@@ -210,9 +234,18 @@ describe('envSchema', () => {
     expect(envSchema.safeParse({ ...valid, ...override }).success).toBe(false)
   })
 
+  it.each([
+    'http://proxy.test:8080',
+    'https://u:p%40ss@proxy.test:8443',
+    'socks5://proxy.test:1080'
+  ])('accepts the proxy %s', proxy => {
+    expect(envSchema.parse({ ...valid, PROXY_URL: proxy }).PROXY_URL).toBe(proxy)
+  })
+
   it('accepts a remote cache with a path that has the {version} placeholder', () => {
     const env = envSchema.parse({
       ...valid,
+      WWEB_VERSION: '2.3000.1',
       WWEB_VERSION_CACHE_TYPE: 'remote',
       WWEB_VERSION_REMOTE_PATH: 'https://h.test/{version}.html'
     })
@@ -285,9 +318,27 @@ describe('envSchema bounds and edges', () => {
   it.each([
     [
       'the remote cache without a path',
-      { WWEB_VERSION_CACHE_TYPE: 'remote' },
+      { WWEB_VERSION: '2.3000.1', WWEB_VERSION_CACHE_TYPE: 'remote' },
       'WWEB_VERSION_REMOTE_PATH'
     ],
+    [
+      'the remote cache without a version',
+      {
+        WWEB_VERSION_CACHE_TYPE: 'remote',
+        WWEB_VERSION_REMOTE_PATH: 'https://h.test/{version}.html'
+      },
+      'WWEB_VERSION'
+    ],
+    [
+      'a remote path over plain http',
+      {
+        WWEB_VERSION: '2.3000.1',
+        WWEB_VERSION_CACHE_TYPE: 'remote',
+        WWEB_VERSION_REMOTE_PATH: 'http://h.test/{version}.html'
+      },
+      'WWEB_VERSION_REMOTE_PATH'
+    ],
+    ['a SOCKS proxy with credentials', { PROXY_URL: 'socks5://u:p@proxy.test:1080' }, 'PROXY_URL'],
     [
       'a path without the placeholder',
       { WWEB_VERSION_REMOTE_PATH: 'https://h.test/wa.html' },

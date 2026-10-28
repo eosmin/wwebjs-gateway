@@ -23,6 +23,26 @@ const count = (fallback: number, { min = 0, max }: { min?: number; max?: number 
 
 const fraction = (fallback: number) => z.coerce.number().min(0).max(1).default(fallback)
 
+// Chromium takes no credentials for a SOCKS proxy, and the adapter decodes them for the other two
+const PROXY_PROTOCOLS: ReadonlySet<string> = new Set(['http:', 'https:', 'socks4:', 'socks5:'])
+
+function isUsableProxy(value: string): boolean {
+  // The field's own check reports a value that is not a URL
+  if (!URL.canParse(value)) return true
+  const url = new URL(value)
+  if (!PROXY_PROTOCOLS.has(url.protocol)) return false
+  const hasCredentials = url.username !== '' || url.password !== ''
+  if (!hasCredentials) return true
+  if (url.protocol.startsWith('socks')) return false
+  try {
+    decodeURIComponent(url.username)
+    decodeURIComponent(url.password)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const text = () => z.string().trim().min(1)
 
 const list = () =>
@@ -87,7 +107,9 @@ export const envSchema = z
       .describe('Folder where whatsapp-web.js keeps the authenticated sessions'),
     PUPPETEER_EXECUTABLE_PATH: text()
       .optional()
-      .describe('Chromium or Chrome binary; when unset, the one Puppeteer downloaded'),
+      .describe(
+        'Chromium or Chrome binary. Set it: the install does not download one (puppeteer build scripts are off), so a session cannot start without it'
+      ),
     WWEB_VERSION: text()
       .optional()
       .describe('Pins the WhatsApp Web version; when unset, the live latest build'),
@@ -101,12 +123,14 @@ export const envSchema = z
     WWEB_VERSION_REMOTE_PATH: text()
       .optional()
       .describe(
-        'URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote'
+        'https URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote. The page it serves runs inside the logged-in browser: trust the host'
       ),
     WWEB_VERSION_STRICT: flag(true).describe(
       'Fail the session start when the pinned WhatsApp Web version cannot be loaded, instead of running the live latest build'
     ),
-    QR_MAX_RETRIES: count(6).describe('QR codes generated before a session gives up pairing'),
+    QR_MAX_RETRIES: count(6).describe(
+      'QR codes refreshed before a session gives up pairing (wwebjs shows this number plus one); 0 never gives up and keeps the browser running'
+    ),
     TAKEOVER_ON_CONFLICT: flag(false).describe(
       'Take the session back when WhatsApp Web is opened elsewhere'
     ),
@@ -115,7 +139,9 @@ export const envSchema = z
     PROXY_URL: z
       .url()
       .optional()
-      .describe('Proxy the Chromium traffic goes through; when unset, a direct connection'),
+      .describe(
+        'Proxy the Chromium traffic goes through (http, https, socks4 or socks5); credentials in the URL work for http and https only; when unset, a direct connection'
+      ),
     WA_CALL_TIMEOUT_MS: count(60000, { min: 1 }).describe(
       'Milliseconds a call to WhatsApp Web may take before it is abandoned'
     ),
@@ -280,6 +306,22 @@ export const envSchema = z
   .refine(env => env.WWEB_VERSION_CACHE_TYPE !== 'remote' || env.WWEB_VERSION_REMOTE_PATH, {
     path: ['WWEB_VERSION_REMOTE_PATH'],
     error: 'is required when WWEB_VERSION_CACHE_TYPE is remote'
+  })
+  .refine(env => env.WWEB_VERSION_CACHE_TYPE !== 'remote' || env.WWEB_VERSION, {
+    path: ['WWEB_VERSION'],
+    error: 'is required when WWEB_VERSION_CACHE_TYPE is remote'
+  })
+  .refine(
+    env => !env.WWEB_VERSION_REMOTE_PATH || env.WWEB_VERSION_REMOTE_PATH.startsWith('https://'),
+    {
+      path: ['WWEB_VERSION_REMOTE_PATH'],
+      error: 'must be an https URL'
+    }
+  )
+  .refine(env => !env.PROXY_URL || isUsableProxy(env.PROXY_URL), {
+    path: ['PROXY_URL'],
+    error:
+      'must use http, https, socks4 or socks5, with credentials only for http and https, percent-encoded'
   })
   .refine(
     env => !env.WWEB_VERSION_REMOTE_PATH || env.WWEB_VERSION_REMOTE_PATH.includes('{version}'),
