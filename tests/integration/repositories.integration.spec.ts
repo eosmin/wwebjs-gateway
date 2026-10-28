@@ -133,6 +133,22 @@ describe('repositories (integration)', () => {
       expect((await sessions.list()).map(s => s.id)).toContain(id)
     })
 
+    it('only raises the seq bound with raiseSeqHighWater', async () => {
+      const id = await newSession('seq-bound')
+      expect((await sessions.findById(id))?.seqHighWater).toBe(0n)
+
+      await sessions.raiseSeqHighWater(id, 200n)
+      await sessions.raiseSeqHighWater(id, 100n)
+      expect((await sessions.findById(id))?.seqHighWater).toBe(200n)
+
+      await sessions.raiseSeqHighWater(id, 300n)
+      expect((await sessions.findById(id))?.seqHighWater).toBe(300n)
+
+      // `update` is the way down, for the shutdown
+      await sessions.update(id, { seqHighWater: 250n })
+      expect((await sessions.findById(id))?.seqHighWater).toBe(250n)
+    })
+
     it('lists the auto-start sessions only', async () => {
       const on = await newSession('auto-on')
       const off = await newSession('auto-off')

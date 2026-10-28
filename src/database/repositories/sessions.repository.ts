@@ -24,6 +24,7 @@ export interface SessionPatch {
   lastEventAt?: Date | null
   linkedAt?: Date | null
   lastError?: string | null
+  seqHighWater?: bigint
 }
 
 @Injectable()
@@ -47,6 +48,14 @@ export class SessionsRepository {
     return this.prisma.session.findMany({
       where: { autoStart: true },
       orderBy: { createdAt: 'asc' }
+    })
+  }
+
+  // Never lowers the bound: a write that arrives late (after a timeout) cannot undo a newer one
+  async raiseSeqHighWater(id: string, value: bigint): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { id, seqHighWater: { lt: value } },
+      data: { seqHighWater: value }
     })
   }
 
