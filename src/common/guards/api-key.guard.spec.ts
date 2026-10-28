@@ -1,5 +1,5 @@
-import { Controller, Get, HttpException, Req } from '@nestjs/common'
-import { APP_GUARD } from '@nestjs/core'
+import { Controller, Get, Req } from '@nestjs/common'
+import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify'
 import { Test } from '@nestjs/testing'
 
@@ -9,7 +9,7 @@ import type { ApiKey } from '../../database/models.js'
 import { ApiKeysRepository } from '../../database/repositories/api-keys.repository.js'
 import { AuthService } from '../../services/auth.service.js'
 import { Public, RequireScope } from '../decorators/auth.decorators.js'
-import { AppError } from '../errors.js'
+import { AllExceptionsFilter } from '../filters/all-exceptions.filter.js'
 import { generateApiKey } from '../lib/crypto.js'
 
 import { type AuthenticatedRequest, ApiKeyGuard } from './api-key.guard.js'
@@ -76,12 +76,6 @@ class ClassPublicController {
   }
 }
 
-// The error contract is the filter of step 4.2; until it exists the specs read AppError directly
-const toHttp = (error: unknown): HttpException =>
-  error instanceof AppError
-    ? new HttpException({ code: error.code, message: error.message }, error.status)
-    : (error as HttpException)
-
 describe('ApiKeyGuard', () => {
   let app: NestFastifyApplication
   let rows: ApiKey[]
@@ -116,6 +110,7 @@ describe('ApiKeyGuard', () => {
         {
           provide: APP_CONFIG,
           useValue: {
+            NODE_ENV: 'test',
             ADMIN_API_KEY: ADMIN_KEY,
             TRUST_PROXY_HOPS: trustProxyHops
           } satisfies Partial<AppConfig>
@@ -128,20 +123,11 @@ describe('ApiKeyGuard', () => {
             touchLastUsed: (): Promise<void> => Promise.resolve()
           }
         },
-        { provide: APP_GUARD, useClass: ApiKeyGuard }
+        { provide: APP_GUARD, useClass: ApiKeyGuard },
+        { provide: APP_FILTER, useClass: AllExceptionsFilter }
       ]
     }).compile()
     app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter())
-    app.useGlobalFilters({
-      catch(error: unknown, host) {
-        const http = toHttp(error)
-        host
-          .switchToHttp()
-          .getResponse<{ status(code: number): { send(body: unknown): void } }>()
-          .status(http.getStatus())
-          .send(http.getResponse())
-      }
-    })
     await app.init()
     await app.getHttpAdapter().getInstance().ready()
   }
@@ -175,7 +161,7 @@ describe('ApiKeyGuard', () => {
       const response = await get('/probe/read')
 
       expect(response.statusCode).toBe(401)
-      expect(response.json()).toMatchObject({ code: 'UNAUTHORIZED' })
+      expect(response.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } })
     })
 
     it('accepts the key in X-API-Key and in Authorization: Bearer', async () => {
@@ -189,7 +175,7 @@ describe('ApiKeyGuard', () => {
       const response = await get('/probe/read', { authorization: `Basic ${sender.raw}` })
 
       expect(response.statusCode).toBe(401)
-      expect(response.json()).toMatchObject({ code: 'UNAUTHORIZED' })
+      expect(response.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } })
     })
 
     it.each([
@@ -218,14 +204,14 @@ describe('ApiKeyGuard', () => {
       const response = await get('/probe/read', { 'x-api-key': revoked.raw })
 
       expect(response.statusCode).toBe(401)
-      expect(response.json()).toMatchObject({ code: 'UNAUTHORIZED' })
+      expect(response.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } })
     })
 
     it('answers 401 API_KEY_EXPIRED for an expired key', async () => {
       const response = await get('/probe/read', { 'x-api-key': expired.raw })
 
       expect(response.statusCode).toBe(401)
-      expect(response.json()).toMatchObject({ code: 'API_KEY_EXPIRED' })
+      expect(response.json()).toMatchObject({ error: { code: 'API_KEY_EXPIRED' } })
     })
 
     it('answers 401, not 403, for an unknown key on a scoped route', async () => {
@@ -252,7 +238,7 @@ describe('ApiKeyGuard', () => {
       const response = await get('/probe/webhooks', { 'x-api-key': sender.raw })
 
       expect(response.statusCode).toBe(403)
-      expect(response.json()).toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
+      expect(response.json()).toMatchObject({ error: { code: 'INSUFFICIENT_SCOPE' } })
     })
 
     it('keeps admin-scope routes for admin keys', async () => {
@@ -283,7 +269,7 @@ describe('ApiKeyGuard', () => {
       })
 
       expect(response.statusCode).toBe(403)
-      expect(response.json()).toMatchObject({ code: 'IP_NOT_ALLOWED' })
+      expect(response.json()).toMatchObject({ error: { code: 'IP_NOT_ALLOWED' } })
     })
   })
 

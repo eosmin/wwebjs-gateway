@@ -10,7 +10,7 @@ import { redactSensitive, scrubText } from './redaction.js'
 
 // An id from the caller is kept only when it is short and plain, so it cannot forge log lines
 const REQUEST_ID_PATTERN = /^[\w.-]{1,128}$/
-const REQUEST_ID_HEADER = 'x-request-id'
+export const REQUEST_ID_HEADER = 'x-request-id'
 
 export function resolveRequestId(header: string | string[] | undefined): string {
   const candidate = Array.isArray(header) ? header[0] : header
