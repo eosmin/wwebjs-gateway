@@ -67,7 +67,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **3.4** `tests/helpers/fake-whatsapp-client.ts`. *Done when:* it implements the whole port.
 - [x] **3.5** `inbound-order-buffer.ts`. *Done when:* all ordering cases of §6.4 pass.
 - [x] **3.6** `event-pipeline.service.ts`. *Done when:* dedupe, order, monotonic `seq` and crash recovery tests pass.
-- [ ] **3.7** `session-manager.service.ts`. *Done when:* status machine, reconnect backoff, restore stagger and `MAX_SESSIONS` tests pass.
+- [x] **3.7** `session-manager.service.ts`. *Done when:* status machine, reconnect backoff, restore stagger and `MAX_SESSIONS` tests pass.
 - [ ] **3.8** `watchdog.service.ts`. *Done when:* stuck-start and blocking-state tests pass.
 - [ ] **3.9** `reconciler.service.ts`. *Done when:* recovery, no-duplicates and lookback tests pass.
 - [ ] **3.10** `wwebjs-adapter.ts` (last), the `whatsapp-web.js` pin and `.github/workflows/wwebjs-watch.yml`. *Done when:* it compiles against the real library, covers every event, wraps calls in timeouts, and the lint boundary rule allows only this file to import `whatsapp-web.js`.
@@ -173,8 +173,11 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **10.2** The Redis restart test also checks the log: ioredis reports one error per retry (about every 2 s) and each becomes a log line; throttle it if it floods.
 - [ ] **5.4** An idempotency key whose process died between `claim` and `complete`/`fail` stays `pending` until the 24 h purge (step 2.4 repository). The service must treat a stale `pending` key as an unknown outcome (conflict, never resend) and may need a "mark stale" method.
 - [ ] **3.x, the order buffer** `listUnemitted` has no limit: batch it if a long outage can leave thousands of held rows (the recovery of step 3.6 reads them all on every `ready`). The ack of `upsert` still overwrites on a re-emitted message (`updateAck`, used by `message_ack`, is monotonic since 3.6).
-- [ ] **3.7** `seq` is a Redis `INCR`, and Redis runs with AOF `everysec`: a Redis crash can lose about a second of increments, so `seq` could repeat numbers already delivered, which breaks "strictly increasing". When a session starts, raise `seq:<id>` to at least the last `seq` known to have been delivered (keep a high-water mark in Postgres, written every N events and on session stop), or document the limit in the operations guide if that is judged too costly.
-- [ ] **3.7** The session manager must `await` `EventPipelineService.open(sessionId, client, { orderingEnabled: settings.ordering.enabled })` BEFORE it initializes the client (a new one on every start; events emitted earlier are not seen) and `close(sessionId)` when it stops it, and publish its own events (`session_status`, ...) with `EventPipelineService.publish` so they share the `seq` counter. Deleting a session must also delete its Redis keys `seq:<id>` and `dedupe:<id>:*`.
+- [x] **3.7** `seq` is a Redis `INCR`, and Redis runs with AOF `everysec`: a Redis crash can lose about a second of increments, so `seq` could repeat numbers already delivered, which breaks "strictly increasing". When a session starts, raise `seq:<id>` to at least the last `seq` known to have been delivered (keep a high-water mark in Postgres, written every N events and on session stop), or document the limit in the operations guide if that is judged too costly.
+- [x] **3.7** The session manager must `await` `EventPipelineService.open(sessionId, client, { orderingEnabled: settings.ordering.enabled })` BEFORE it initializes the client (a new one on every start; events emitted earlier are not seen) and `close(sessionId)` when it stops it, and publish its own events (`session_status`, ...) with `EventPipelineService.publish` so they share the `seq` counter. Deleting a session must also delete its Redis keys `seq:<id>` and `dedupe:<id>:*`.
+- [ ] **3.8** `SessionManager` keeps no `startedAt` and has no public way into its reconnect path yet: the watchdog needs both (stuck startup restarts the session; a blocking state sets `failed` + `lastError` instead of looping, a failed health check goes through the reconnect). Add them there, with `WATCHDOG_*` documented in `docs/sessions.md`.
+- [ ] **5.x, the sessions API** The `Session` rows that `SessionManager` returns carry `seqHighWater` (a `bigint`, which `JSON.stringify` rejects). The mapper to the session DTO must leave it out; add a test that a DTO serializes.
+- [ ] **3.9** The manager does not call the reconciler (it comes later in the dependency order): subscribe to `session_status` with `status: 'ready'` on the `EventBusService`.
 - [ ] **3.9** The reconciler feeds recovered messages with `InboundOrderBuffer.offer(message, 'reconcile')` through the same pipeline path (it needs a public entry point on `EventPipelineService`); the batch `reason` stays `reconcile` only for a buffer it opened.
 - [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
@@ -207,7 +210,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 3.4 | done | `feat/3-4-fake-client` | 2026-10-27 |
 | 3.5 | done | `feat/3-5-order-buffer` | 2026-10-27 |
 | 3.6 | done | `feat/3-6-event-pipeline` | 2026-10-27 |
-| 3.7 | todo | - | - |
+| 3.7 | done | `feat/3-7-session-manager` | 2026-10-28 |
 | 3.8 | todo | - | - |
 | 3.9 | todo | - | - |
 | 3.10 | todo | - | - |
