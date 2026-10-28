@@ -64,6 +64,11 @@ export const DEPRECATED_APIS: readonly DeprecatedApi[] = [
     name: "'incoming_call' / 'code_received' events",
     pattern: /['"](incoming_call|code_received)['"]/,
     replacement: "the real wwebjs events 'call' / 'code'"
+  },
+  {
+    name: 'patchNestJsSwagger(',
+    pattern: /\bpatchNestJsSwagger\(/,
+    replacement: 'cleanupOpenApiDoc(document) (nestjs-zod 5)'
   }
 ]
 

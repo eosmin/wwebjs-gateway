@@ -1,7 +1,8 @@
-import { BadRequestException, Controller, Get, Post } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common'
 import { APP_FILTER } from '@nestjs/core'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import { Test } from '@nestjs/testing'
+import { ZodValidationPipe, createZodDto } from 'nestjs-zod'
 import { z } from 'zod'
 
 import { APP_CONFIG } from '../../config/config.module.js'
@@ -10,6 +11,8 @@ import { createFastifyAdapter } from '../../infra/logger/fastify-adapter.js'
 import { ConflictError, InternalError, WhatsAppError } from '../errors.js'
 
 import { AllExceptionsFilter, type ErrorBody } from './all-exceptions.filter.js'
+
+class SendDto extends createZodDto(z.strictObject({ phone: z.string().min(5) })) {}
 
 @Controller('probe')
 class ProbeController {
@@ -45,6 +48,11 @@ class ProbeController {
   @Get('unexpected')
   unexpected(): never {
     throw new Error('connect ECONNREFUSED 10.0.0.5:5432')
+  }
+
+  @Post('validated')
+  validated(@Body(new ZodValidationPipe()) _body: SendDto): { ok: true } {
+    return { ok: true }
   }
 
   @Post('body')
@@ -116,6 +124,35 @@ describe('AllExceptionsFilter', () => {
 
       expect(response.statusCode).toBe(500)
       expect(response.json<ErrorBody>().error.code).toBe('INTERNAL')
+    })
+
+    it('answers a body the Zod pipe refuses with VALIDATION_ERROR and the tree of issues', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/probe/validated',
+        payload: { phone: '1', extra: true }
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json<ErrorBody>().error).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        message: 'The request does not match the expected shape',
+        details: {
+          errors: [expect.any(String)],
+          properties: { phone: { errors: [expect.any(String)] } }
+        }
+      })
+    })
+
+    it('keeps the submitted values out of the validation details', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/probe/validated',
+        payload: { phone: 'ab', extra: 'secret-1' }
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.body).not.toContain('secret-1')
     })
 
     it('maps the exceptions Nest raises on its own', async () => {

@@ -8,6 +8,8 @@ import {
   Logger
 } from '@nestjs/common'
 import type { FastifyReply, FastifyRequest } from 'fastify'
+import { ZodValidationException } from 'nestjs-zod'
+import { z } from 'zod'
 
 import { APP_CONFIG } from '../../config/config.module.js'
 import type { AppConfig } from '../../config/env.schema.js'
@@ -71,6 +73,16 @@ export function describeException(exception: unknown, hideInternal: boolean): De
       code: exception.code,
       message: hidden ? INTERNAL_MESSAGE : exception.message,
       ...(exception.details !== undefined && !hidden && { details: exception.details })
+    }
+  }
+  // A bad request body, query or params, caught by the global ZodValidationPipe
+  if (exception instanceof ZodValidationException) {
+    const zodError = exception.getZodError()
+    return {
+      status: HttpStatus.BAD_REQUEST,
+      code: ErrorCode.VALIDATION_ERROR,
+      message: 'The request does not match the expected shape',
+      ...(zodError instanceof z.ZodError && { details: z.treeifyError(zodError) })
     }
   }
   const status =

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core'
+import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core'
+import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod'
 
 import { ApiModule } from './api/api.module.js'
 import { HealthController } from './api/controllers/health.controller.js'
@@ -14,9 +15,11 @@ import { MetricsModule } from './infra/metrics/metrics.module.js'
   imports: [ConfigModule, LoggerModule, MetricsModule, ApiModule],
   controllers: [HealthController],
   providers: [
+    { provide: APP_PIPE, useClass: ZodValidationPipe },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor },
-    { provide: APP_INTERCEPTOR, useClass: TimeoutInterceptor }
+    { provide: APP_INTERCEPTOR, useClass: TimeoutInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: ZodSerializerInterceptor }
   ]
 })
 export class AppModule {}
