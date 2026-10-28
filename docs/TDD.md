@@ -1369,7 +1369,11 @@ wwebjs-gateway/
 │   │   ├── watchdog.service.ts
 │   │   ├── inbound-order-buffer.ts  # per-chat reorder buffer (§6.4)
 │   │   ├── reconciler.service.ts    # catch-up after ready/restart (§6.4)
-│   │   └── event-pipeline.service.ts# dedupe → order → seq → store → publish
+│   │   ├── event-pipeline.service.ts# per-session pipelines + `publish` for gateway-made events (dedupe → store → order → seq → publish)
+│   │   ├── event-pipeline.session.ts# the path of ONE session: dedupe, store, order buffer, replay
+│   │   ├── event-pipeline.sequencer.ts # stamps `seq` and publishes, one event at a time per session
+│   │   ├── event-pipeline.keys.ts   # which events are deduped and which follow a held message
+│   │   └── event-pipeline.storage.ts# DTO ↔ `messages` row
 │   ├── api/                         # ApiModule — the operation registry as decorators (§6.7)
 │   │   ├── wa-operation.decorator.ts        # @WaOperation({...}) metadata
 │   │   ├── operation-registry.service.ts    # DiscoveryService scan → registry (REST/socket/docs/parity)
@@ -1537,6 +1541,8 @@ For every event from a client, in order:
 **Crash safety:** held messages exist in `messages` with `emittedAt IS NULL`. On boot (after the session is `ready`) the pipeline re-feeds rows with `emittedAt IS NULL AND direction='in'` through the order buffer, so a crash mid-hold neither loses nor reorders messages.
 
 **Catch-up reconciliation (`reconciler.service.ts`)**: on every `ready` (first start, reconnect, process restart) and if `RECONCILE_ON_READY=true`: for up to `RECONCILE_MAX_CHATS` (50) chats with `unreadCount > 0` or `timestamp > lastEventAt`, `fetchMessages({limit: RECONCILE_FETCH_LIMIT})` (50), keep INCOMING messages with `sentAt > now − RECONCILE_LOOKBACK_HOURS` (48) that are absent from `messages`, and push them through the pipeline (they go through the order buffer; batch `reason: 'reconcile'`). This closes gaps from downtime or missed events.
+
+**Replay of a failed publish:** when stamping fails (Redis down) while a chat's messages are being published, the messages already out are marked, and the chat is replayed from its `emittedAt IS NULL` rows 5 s later through the same path as the boot replay (forced into the buffer), retrying with a doubling wait (max 60 s) until it works. The replayed remainder is a burst of its own, and its `message_batch` also lists the messages of that burst that already went out. `message_ack` only moves the stored ack forward.
 
 Pipeline errors are caught per event, counted in metrics, and never stop the stream. Ordering can be disabled per session (`settings.ordering.enabled=false`) or globally (`INBOUND_ORDERING_ENABLED=false`). `docs/ordering.md` documents the algorithm, knobs, the 1-second timestamp limit, and a recommended consumer pattern (react to `message_batch`, sort by `sentAt` as a safety net).
 

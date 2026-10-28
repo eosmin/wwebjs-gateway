@@ -291,7 +291,9 @@ export function eventEnvelope<E extends WaEventName>(event: E): EnvelopeSchema<E
     id: z
       .string()
       .regex(/^evt_/)
-      .describe('Unique per event; use it to drop duplicates')
+      .describe(
+        'Unique per event. A message published again after a failure or a restart gets a new id, so drop duplicates of a message by data.id too'
+      )
       .meta({ examples: ['evt_0f3c9a52-7d1e-4c0b-9a55-2f1d6e8b3a10'] }),
     event: z.literal(event),
     sessionId: z
