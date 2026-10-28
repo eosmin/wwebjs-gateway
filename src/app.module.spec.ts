@@ -20,6 +20,14 @@ import { createFastifyAdapter } from './infra/logger/fastify-adapter.js'
 import { MetricsService } from './infra/metrics/metrics.service.js'
 import { RedisService } from './infra/redis/redis.service.js'
 import { AuthService } from './services/auth.service.js'
+import { ReconcilerService } from './whatsapp/reconciler.service.js'
+import { SessionManager } from './whatsapp/session-manager.service.js'
+import { WatchdogService } from './whatsapp/watchdog.service.js'
+import {
+  WHATSAPP_CLIENT_FACTORY,
+  type WhatsAppClientFactory
+} from './whatsapp/whatsapp-client.port.js'
+import { WwebjsAdapter } from './whatsapp/wwebjs-adapter.js'
 
 const ADMIN = { 'x-api-key': 'a'.repeat(32) }
 
@@ -119,7 +127,14 @@ describe('AppModule over HTTP', () => {
       .overrideProvider(SessionsRepository)
       .useValue({
         findById: (id: string) => Promise.resolve(id === 'main' ? { id } : null),
-        list: () => Promise.resolve([{ status: 'ready' }, { status: 'qr' }, { status: 'ready' }])
+        listAutoStart: () => Promise.resolve([]),
+        update: () => Promise.resolve(null),
+        list: () =>
+          Promise.resolve([
+            { id: 'main', status: 'ready' },
+            { id: 'sales', status: 'qr' },
+            { id: 'support', status: 'ready' }
+          ])
       })
       .compile()
     app = moduleRef.createNestApplication<NestFastifyApplication>(createFastifyAdapter())
@@ -286,6 +301,18 @@ describe('AppModule over HTTP', () => {
       expect(document.paths['/v1/api-keys']?.get?.operationId).toBe('apiKeys.list')
       expect(document.paths['/v1/api-keys']?.post?.operationId).toBe('apiKeys.create')
       expect(document.paths['/v1/system/info']?.get?.operationId).toBe('system.info')
+      expect(document.paths['/v1/sessions']?.post?.operationId).toBe('sessions.create')
+      expect(document.paths['/v1/sessions/{sessionId}/qr']?.get?.operationId).toBe('sessions.qr')
+      expect(document.paths['/v1/sessions/{sessionId}/qr.png']?.get?.operationId).toBe(
+        'sessions.qrPng'
+      )
+      // The scope of the QR routes is part of the published contract
+      expect(document.paths['/v1/sessions/{sessionId}/qr']?.get).toMatchObject({
+        'x-scope': 'manage'
+      })
+      expect(document.paths['/v1/sessions/{sessionId}/qr.png']?.get).toMatchObject({
+        'x-scope': 'manage'
+      })
     })
 
     it('asks for no key on the probes and the scrape route, and for one on the rest', () => {
@@ -296,6 +323,103 @@ describe('AppModule over HTTP', () => {
       }
       expect(paths['/v1/api-keys']?.get).not.toHaveProperty('security')
       expect(paths['/v1/system/info']?.get).not.toHaveProperty('security')
+    })
+  })
+
+  describe('the sessions module', () => {
+    it('runs the manager, the watchdog and the reconciler as providers of the application', () => {
+      expect(app.get(SessionManager)).toBeInstanceOf(SessionManager)
+      expect(app.get(WatchdogService)).toBeInstanceOf(WatchdogService)
+      expect(app.get(ReconcilerService)).toBeInstanceOf(ReconcilerService)
+    })
+
+    it('resolves the client factory to the real one, whose clients do not launch a browser', () => {
+      const factory = app.get<WhatsAppClientFactory>(WHATSAPP_CLIENT_FACTORY)
+
+      // Building a client only configures wwebjs; the browser starts with initialize()
+      expect(factory('probe', {})).toBeInstanceOf(WwebjsAdapter)
+    })
+
+    it('asks for a key on every route', async () => {
+      const response = await app.inject({ method: 'GET', url: '/v1/sessions' })
+
+      expect(response.statusCode).toBe(401)
+    })
+
+    it('answers 404 with the error contract for the QR code of a session that does not exist', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/sessions/ghost/qr.png',
+        headers: ADMIN
+      })
+
+      expect(response.statusCode).toBe(404)
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } })
+    })
+
+    it('answers 400 for a session id that breaks the pattern', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/sessions/bad.id/qr',
+        headers: ADMIN
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } })
+    })
+
+    it('answers 403 before it looks at the id when a session key names another session', async () => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/api-keys',
+        headers: ADMIN,
+        payload: { name: 'bot', sessionId: 'main' }
+      })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/sessions/bad.id/qr',
+        headers: { 'x-api-key': created.json<{ key: string }>().key }
+      })
+
+      expect(response.statusCode).toBe(403)
+    })
+
+    it('closes the list and the creation to a session key', async () => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/api-keys',
+        headers: ADMIN,
+        payload: { name: 'bot', sessionId: 'main', scopes: ['read', 'manage'] }
+      })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/sessions',
+        headers: { 'x-api-key': created.json<{ key: string }>().key },
+        payload: { id: 'new' }
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.json()).toMatchObject({ error: { code: 'INSUFFICIENT_SCOPE' } })
+    })
+
+    it('keeps a session key out of another session', async () => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/api-keys',
+        headers: ADMIN,
+        payload: { name: 'bot', sessionId: 'main' }
+      })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/sessions/sales',
+        headers: { 'x-api-key': created.json<{ key: string }>().key }
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.json()).toMatchObject({ error: { code: 'FORBIDDEN' } })
     })
   })
 

@@ -4,6 +4,7 @@ import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod'
 
 import { ApiKeysModule } from './api/api-keys.module.js'
 import { ApiModule } from './api/api.module.js'
+import { SessionsModule } from './api/sessions.module.js'
 import { SystemModule } from './api/system.module.js'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js'
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor.js'
@@ -13,6 +14,7 @@ import { DatabaseModule } from './database/database.module.js'
 import { LoggerModule } from './infra/logger/logger.module.js'
 import { MetricsModule } from './infra/metrics/metrics.module.js'
 import { RedisModule } from './infra/redis/redis.module.js'
+import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
 
 @Module({
   imports: [
@@ -22,8 +24,10 @@ import { RedisModule } from './infra/redis/redis.module.js'
     DatabaseModule,
     RedisModule,
     ApiModule,
+    WhatsAppModule,
     SystemModule,
-    ApiKeysModule
+    ApiKeysModule,
+    SessionsModule
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

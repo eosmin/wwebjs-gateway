@@ -7,7 +7,12 @@ import type { AppConfig } from '../../config/env.schema.js'
 import { AuthService } from '../../services/auth.service.js'
 import { IS_PUBLIC_KEY, REQUIRED_SCOPE_KEY } from '../decorators/auth.decorators.js'
 import { requestClientIp } from '../lib/client-ip.js'
-import { type OperationScope, type Principal, assertScope } from '../principal.js'
+import {
+  type OperationScope,
+  type Principal,
+  assertScope,
+  assertSessionAccess
+} from '../principal.js'
 
 // The request carries the principal from here on
 export type AuthenticatedRequest = FastifyRequest & { principal?: Principal }
@@ -43,6 +48,9 @@ export class ApiKeyGuard implements CanActivate {
       this.reflector.getAllAndOverride<OperationScope | undefined>(REQUIRED_SCOPE_KEY, targets) ??
       'admin'
     assertScope(principal, scope)
+    // Every route under /v1/sessions/:sessionId goes through here, so a session key cannot reach another session
+    const { sessionId } = (request.params ?? {}) as { sessionId?: unknown }
+    if (typeof sessionId === 'string') assertSessionAccess(principal, sessionId)
     request.principal = principal
     return true
   }

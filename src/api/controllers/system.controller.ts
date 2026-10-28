@@ -16,7 +16,7 @@ export class SystemController {
     scope: 'admin',
     summary: 'Read the gateway version and the session counts',
     description:
-      'Versions of the gateway, whatsapp-web.js and Node, the uptime of the process and how many sessions are in each status.',
+      'Versions of the gateway, whatsapp-web.js and Node, the uptime of the process, how many sessions are in each status, and the status and WhatsApp Web version of each session.',
     errors: ['UNAUTHORIZED', 'INSUFFICIENT_SCOPE'],
     examples: {
       request: null,
@@ -25,7 +25,14 @@ export class SystemController {
         wwebjsVersion: '1.34.7',
         nodeVersion: '24.20.0',
         uptimeSeconds: 3600,
-        sessions: { total: 2, byStatus: { ready: 1, qr: 1 } }
+        sessions: {
+          total: 2,
+          byStatus: { ready: 1, qr: 1 },
+          items: [
+            { id: 'support-line', status: 'ready', wwebVersion: '2.3000.1000000000' },
+            { id: 'sales', status: 'qr', wwebVersion: null }
+          ]
+        }
       }
     },
     wwebjs: [],

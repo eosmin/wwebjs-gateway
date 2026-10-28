@@ -7,7 +7,7 @@ Probes, the metrics scrape and the system report. None of them needs a session.
 | `GET /health` | public | Liveness: `200` while the process runs. It does not look at Postgres or Redis, so an orchestrator does not restart a process that only needs its dependencies back, and it stays `200` during shutdown. |
 | `GET /ready` | public | Readiness: `200` when Postgres and Redis answer and the gateway is not shutting down, `503` otherwise. |
 | `GET /metrics` | `METRICS_TOKEN` bearer or an admin key | Prometheus text format; the series are listed in [metrics.md](metrics.md). |
-| `GET /v1/system/info` | admin key | Gateway, whatsapp-web.js and Node versions, uptime and the session count per status. |
+| `GET /v1/system/info` | admin key | Gateway, whatsapp-web.js and Node versions, uptime, the session count per status, and the status and WhatsApp Web version of each session. |
 
 ## Readiness
 
@@ -52,10 +52,18 @@ key is `403 INSUFFICIENT_SCOPE`.
   "wwebjsVersion": "1.34.7",
   "nodeVersion": "24.20.0",
   "uptimeSeconds": 3600,
-  "sessions": { "total": 2, "byStatus": { "ready": 1, "qr": 1, "failed": 0 } }
+  "sessions": {
+    "total": 2,
+    "byStatus": { "ready": 1, "qr": 1, "failed": 0 },
+    "items": [
+      { "id": "support-line", "status": "ready", "wwebVersion": "2.3000.1000000000" },
+      { "id": "sales", "status": "qr", "wwebVersion": null }
+    ]
+  }
 }
 ```
 
 The versions are those of `package.json` (whatsapp-web.js is pinned to an exact version) and of the
-running Node. `byStatus` has every status, zero included. The WhatsApp Web version of each session
-is added when the session controllers arrive (step 4.6).
+running Node. `byStatus` has every status, zero included. `items` lists every session; `wwebVersion` is
+read from the page of a session that is ready, and is `null` for any other (or when the page does not
+answer in time), so one stuck browser never fails the report. The pages are asked in parallel and each call is bounded by `WA_CALL_TIMEOUT_MS`, so the report takes at most that long. The `status` of a session that runs is the one in memory, which can be a moment ahead of the stored row.

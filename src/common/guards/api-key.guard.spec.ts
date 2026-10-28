@@ -57,6 +57,21 @@ class ProbeController {
   }
 }
 
+@Controller('v1/sessions')
+class SessionProbeController {
+  @RequireScope('read')
+  @Get(':sessionId/probe')
+  probe(): { ok: true } {
+    return { ok: true }
+  }
+
+  @RequireScope('manage')
+  @Get(':sessionId/manage')
+  manage(): { ok: true } {
+    return { ok: true }
+  }
+}
+
 // The metadata set on the class, which the handlers inherit
 @RequireScope('webhooks')
 @Controller('class-scoped')
@@ -83,6 +98,7 @@ describe('ApiKeyGuard', () => {
   const revoked = generateApiKey()
   const trusted = generateApiKey()
   const expired = generateApiKey()
+  const global = generateApiKey()
 
   function keyRow(id: string, hash: string, overrides: Partial<ApiKey> = {}): ApiKey {
     return {
@@ -104,7 +120,12 @@ describe('ApiKeyGuard', () => {
 
   async function bootstrap(trustProxyHops: number): Promise<void> {
     const moduleRef = await Test.createTestingModule({
-      controllers: [ProbeController, ClassScopedController, ClassPublicController],
+      controllers: [
+        ProbeController,
+        ClassScopedController,
+        ClassPublicController,
+        SessionProbeController
+      ],
       providers: [
         AuthService,
         {
@@ -137,7 +158,8 @@ describe('ApiKeyGuard', () => {
       keyRow('sender', sender.hash),
       keyRow('revoked', revoked.hash, { revokedAt: new Date() }),
       keyRow('trusted', trusted.hash, { allowedCidrs: ['198.51.100.0/24'] }),
-      keyRow('expired', expired.hash, { expiresAt: new Date(Date.now() - 1000) })
+      keyRow('expired', expired.hash, { expiresAt: new Date(Date.now() - 1000) }),
+      keyRow('global', global.hash, { sessionId: null })
     ]
   })
 
@@ -151,6 +173,41 @@ describe('ApiKeyGuard', () => {
   describe('without a proxy', () => {
     beforeEach(async () => {
       await bootstrap(0)
+    })
+
+    it('lets a session key into its own session and refuses it another one', async () => {
+      const headers = { 'x-api-key': sender.raw }
+
+      expect((await get('/v1/sessions/shop/probe', headers)).statusCode).toBe(200)
+
+      const other = await get('/v1/sessions/other/probe', headers)
+      expect(other.statusCode).toBe(403)
+      expect(other.json()).toMatchObject({ error: { code: 'FORBIDDEN' } })
+    })
+
+    it('refuses for the scope first when a key lacks it on another session', async () => {
+      const response = await get('/v1/sessions/other/manage', { 'x-api-key': sender.raw })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.json()).toMatchObject({ error: { code: 'INSUFFICIENT_SCOPE' } })
+    })
+
+    it('does not look for a session on a route that names none', async () => {
+      const response = await get('/probe/read', { 'x-api-key': sender.raw })
+
+      expect(response.statusCode).toBe(200)
+    })
+
+    it('lets a key that is not limited to a session into any of them, within its scopes', async () => {
+      const response = await get('/v1/sessions/other/probe', { 'x-api-key': global.raw })
+
+      expect(response.statusCode).toBe(200)
+    })
+
+    it('lets an admin key into any session', async () => {
+      const response = await get('/v1/sessions/other/probe', { 'x-api-key': ADMIN_KEY })
+
+      expect(response.statusCode).toBe(200)
     })
 
     it('leaves a @Public route open', async () => {
