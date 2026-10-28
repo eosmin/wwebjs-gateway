@@ -7,9 +7,11 @@ import { MessagesRepository } from '../database/repositories/messages.repository
 import { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import { RedisService } from '../infra/redis/redis.service.js'
+import type { MessageDto } from '../types/dto.js'
 import type { WaEventName, WaEventPayloadMap } from '../types/events.js'
 
 import { EventBusService } from './event-bus.service.js'
+import { ActivityRecorder } from './event-pipeline.activity.js'
 import { SeqAllocator } from './event-pipeline.seq-allocator.js'
 import { EventSequencer } from './event-pipeline.sequencer.js'
 import { SessionEventPipeline } from './event-pipeline.session.js'
@@ -41,6 +43,7 @@ export class EventPipelineService implements OnApplicationShutdown {
   private readonly pipelines = new Map<string, SessionEventPipeline>()
   private readonly sequencer: EventSequencer
   private readonly seqAllocator: SeqAllocator
+  private readonly activity: ActivityRecorder
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -56,6 +59,9 @@ export class EventPipelineService implements OnApplicationShutdown {
       loadReserved: sessionId => this.loadReservedSeq(sessionId),
       raiseReserved: (sessionId, value) => this.raiseReservedSeq(sessionId, value),
       setReserved: (sessionId, value) => this.setReservedSeq(sessionId, value)
+    })
+    this.activity = new ActivityRecorder({
+      save: (sessionId, at) => this.saveActivity(sessionId, at)
     })
     this.sequencer = new EventSequencer({
       nextSeq: sessionId => this.seqAllocator.next(sessionId),
@@ -95,6 +101,7 @@ export class EventPipelineService implements OnApplicationShutdown {
         sequencer: this.sequencer,
         claim: key => this.claim(key),
         unclaim: key => this.unclaim(key),
+        noteIncoming: sentAt => this.activity.note(sessionId, sentAt.getTime()),
         metrics: this.metrics.metrics
       }
     )
@@ -109,11 +116,19 @@ export class EventPipelineService implements OnApplicationShutdown {
     if (!pipeline) return
     this.pipelines.delete(sessionId)
     await pipeline.close()
+    await this.activity.flush(sessionId)
+  }
+
+  // Hands the reconciliation's finds to the session's pipeline (see SessionEventPipeline.reconcile).
+  // Zero when the session has none open.
+  async reconcile(sessionId: string, messages: MessageDto[]): Promise<number> {
+    return (await this.pipelines.get(sessionId)?.reconcile(messages)) ?? 0
   }
 
   // The session was deleted: its count starts from zero if the id is used again
   forget(sessionId: string): void {
     this.seqAllocator.forget(sessionId)
+    this.activity.forget(sessionId)
   }
 
   // An event the gateway makes up. It gets the next `seq` of the session, behind everything the
@@ -170,6 +185,14 @@ export class EventPipelineService implements OnApplicationShutdown {
       this.sessions.update(sessionId, { seqHighWater: BigInt(value) }),
       DB_TIMEOUT_MS,
       'seq save'
+    )
+  }
+
+  private async saveActivity(sessionId: string, at: Date): Promise<void> {
+    await withTimeout(
+      this.sessions.update(sessionId, { lastEventAt: at }),
+      DB_TIMEOUT_MS,
+      'activity save'
     )
   }
 

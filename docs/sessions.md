@@ -42,6 +42,8 @@ The `gw_sessions{status}` gauge counts the sessions of each status.
 
 On `ready` the manager stores `phoneNumber`, `pushName` and `lastConnectedAt`, clears `lastError`, sets `linkedAt` the first time, resets the reconnect counter and applies the flags of the session settings that are set: `autoDownloadAudio`, `autoDownloadDocuments`, `autoDownloadPhotos`, `autoDownloadVideos` and `backgroundSync`. A call that fails is logged and skipped. The catch-up of missed messages listens to the `session_status` event with `ready`.
 
+Once the session is `ready` the reconciler looks for messages that arrived while it was away (see [ordering](ordering.md#catch-up-reconciliation)).
+
 `settings.ordering.enabled` is read when the client starts and decides whether the pipeline orders the inbound messages of that session.
 
 ## Reconnecting

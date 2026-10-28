@@ -50,6 +50,8 @@ export interface SessionPipelineDeps {
   claim(key: string): Promise<boolean>
   // Gives a claim back, so a repeat of the event is processed
   unclaim(key: string): Promise<void>
+  // A live incoming message was stored (not a recovered one), written by the sender at `sentAt`
+  noteIncoming(sentAt: Date): void
   metrics: Metrics
 }
 
@@ -130,6 +132,18 @@ export class SessionEventPipeline {
     await Promise.allSettled([this.intake, ...this.publishing])
   }
 
+  // Messages the reconciliation found that no event delivered. They take the same path as a live
+  // message (dedupe, store, order buffer) behind the events already queued, and leave in a burst of
+  // reason `reconcile`. Resolves with how many were new once they are stored; their publishing
+  // follows the order buffer. Zero when the pipeline is closed.
+  reconcile(messages: MessageDto[]): Promise<number> {
+    return new Promise(resolve => {
+      this.enqueue(async () => {
+        resolve(await this.admit(messages))
+      })
+    })
+  }
+
   private accept(event: ClientEvent): void {
     if (this.closed) return
     this.deps.metrics.events.inc({ event: event.event })
@@ -146,12 +160,38 @@ export class SessionEventPipeline {
       const key = this.dedupeKey(event)
       if (this.closed || (key !== undefined && !(await this.claim(key)))) return
       // A message that was not stored cannot be replayed: its repeat must not be taken for a duplicate
-      if (!(await this.store(event)) && key !== undefined) await this.unclaim(key)
+      const stored = await this.store(event)
+      if (!stored && key !== undefined) await this.unclaim(key)
+      // Only what is stored moves the baseline: a message that was not cannot be replayed
+      if (stored && isMessageEvent(event) && !event.data.fromMe) {
+        this.deps.noteIncoming(new Date(event.data.sentAt))
+      }
       this.route(event)
       if (event.event === 'ready') await this.recover()
     } catch (error) {
       this.fail('event', error)
     }
+  }
+
+  private async admit(messages: MessageDto[]): Promise<number> {
+    let admitted = 0
+    for (const message of messages) {
+      if (this.closed) break
+      try {
+        const event: ClientEvent = { event: 'message', data: message }
+        const key = this.dedupeKey(event)
+        if (key !== undefined && !(await this.claim(key))) continue
+        if (!(await this.store(event))) {
+          if (key !== undefined) await this.unclaim(key)
+          continue
+        }
+        this.hold(message, 'reconcile')
+        admitted++
+      } catch (error) {
+        this.fail('event', error)
+      }
+    }
+    return admitted
   }
 
   private dedupeKey(event: ClientEvent): string | undefined {
@@ -438,16 +478,20 @@ export class SessionEventPipeline {
         unreadable.push(row.id)
         continue
       }
-      if (this.buffer) {
-        if (this.buffer.offer(message, 'burst', true) && !this.heldAs.has(message.id)) {
-          this.heldAs.set(message.id, 'message')
-        }
-      } else {
-        this.publishNow({ event: 'message', data: message })
-      }
+      this.hold(message, 'burst')
     }
     // It can never be published: leaving it unpublished would list and count it on every replay
     void this.markEmitted(unreadable)
+  }
+
+  // Into the order buffer even when the message is not late: it was stored first, so it must be
+  // sorted with the others of its chat. Without a buffer it goes out as it comes.
+  private hold(message: MessageDto, reason: BatchReason): void {
+    if (!this.buffer) {
+      this.publishNow({ event: 'message', data: message })
+    } else if (this.buffer.offer(message, reason, true) && !this.heldAs.has(message.id)) {
+      this.heldAs.set(message.id, 'message')
+    }
   }
 
   // Identifiers and the error class only: an error message can echo message content. A stage that

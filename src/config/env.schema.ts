@@ -162,12 +162,14 @@ export const envSchema = z
     RECONCILE_ON_READY: flag(true).describe(
       'Fetch the recent messages of the busiest chats when a session becomes ready'
     ),
-    RECONCILE_MAX_CHATS: count(50).describe('Chats the reconciler visits per session start'),
+    RECONCILE_MAX_CHATS: count(50).describe(
+      'Chats the reconciler visits per session start (0 turns the reconciliation off)'
+    ),
     RECONCILE_FETCH_LIMIT: count(50, { min: 1 }).describe(
       'Messages the reconciler fetches per chat'
     ),
     RECONCILE_LOOKBACK_HOURS: count(48).describe(
-      'Hours into the past the reconciler looks for missed messages'
+      'Hours into the past the reconciler looks for missed messages (0 turns the reconciliation off)'
     ),
 
     // Message data

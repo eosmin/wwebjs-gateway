@@ -126,6 +126,7 @@ describe('event pipeline (integration)', () => {
         client,
         messages,
         sequencer,
+        noteIncoming: () => undefined,
         claim: async key => (await redis.client.set(key, '1', 'EX', 600, 'NX')) === 'OK',
         unclaim: async key => {
           await redis.client.del(key)
