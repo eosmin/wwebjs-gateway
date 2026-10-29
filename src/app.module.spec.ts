@@ -21,6 +21,7 @@ import { createFastifyAdapter } from './infra/logger/fastify-adapter.js'
 import { MetricsService } from './infra/metrics/metrics.service.js'
 import { RedisService } from './infra/redis/redis.service.js'
 import { AuthService } from './services/auth.service.js'
+import { SendQueueService } from './services/send-queue.service.js'
 import { ReconcilerService } from './whatsapp/reconciler.service.js'
 import { SessionManager } from './whatsapp/session-manager.service.js'
 import { WatchdogService } from './whatsapp/watchdog.service.js'
@@ -113,6 +114,7 @@ describe('AppModule over HTTP', () => {
   const queryRaw = jest.fn()
   const ping = jest.fn()
   const keys = new FakeApiKeysRepository()
+  const sendQueue = { watchQueues: jest.fn(() => () => undefined), isSending: () => false }
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -123,6 +125,10 @@ describe('AppModule over HTTP', () => {
       .useValue({ $queryRaw: queryRaw })
       .overrideProvider(RedisService)
       .useValue({ client: { ping } })
+      // The queue is not what this suite is about, and it would open real BullMQ connections: the unit
+      // job has no Redis, and the stand-in above is not one
+      .overrideProvider(SendQueueService)
+      .useValue(sendQueue)
       .overrideProvider(ApiKeysRepository)
       .useValue(keys)
       .overrideProvider(SessionsRepository)
@@ -605,5 +611,22 @@ describe('AppModule over HTTP', () => {
     }[]
 
     expect(providers).toContainEqual({ provide: token, useClass: implementation })
+  })
+})
+
+describe('AppModule wiring of the send queue', () => {
+  // `compile()` resolves every dependency of every provider but does not run the lifecycle hooks, so
+  // the real SendQueueService is built without opening a queue: a missing provider fails here
+  it('builds the real send queue with everything it needs, and the watchdog it reports to', async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(PrismaService)
+      .useValue({})
+      .overrideProvider(RedisService)
+      .useValue({ client: {} })
+      .compile()
+
+    expect(moduleRef.get(SendQueueService)).toBeInstanceOf(SendQueueService)
+    expect(moduleRef.get(WatchdogService)).toBeInstanceOf(WatchdogService)
+    await moduleRef.close()
   })
 })
