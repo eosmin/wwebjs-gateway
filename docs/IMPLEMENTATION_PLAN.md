@@ -81,7 +81,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **4.5** System, health (`/ready`, `/metrics`) and api-keys controllers (incl. `rotate` with grace period; every operation declares its `scope`). *Done when:* `/ready` pings Postgres and Redis and fails without them. *Carried over from 4.4 (reviews):* (a) a test through `AppModule` where a bad body on a route with a Zod DTO answers 400 `VALIDATION_ERROR` via the global pipe; (b) a `@ZodResponse` route whose extra output field is stripped by `ZodSerializerInterceptor`; (c) `buildOpenApiDocument` sets `security: []` on routes marked `@Public()` (`IS_PUBLIC_KEY`), so `/ready` and `/metrics` do not ask for the API key.
 - [x] **4.6** Sessions and QR controllers. *Done when:* the server boots, creates a session and serves a QR (fake client).
 - [x] **4.7** `main.ts` finalized; `smoke-http` and CI checks move to `/ready`, `/metrics` and the error contract. *Done when:* the CI boot and image checks pass with the new probes. *Carried over from 4.4:* `smoke-http` must request `/docs/json` with `ENABLE_DOCS=true` (nothing else tests that `main.ts` calls `setupDocs`) and get 404 with `ENABLE_DOCS=false`.
-- [ ] **4.8** `tests/parity/` skeleton. *Done when:* the expected-failures list exists and the test runs.
+- [x] **4.8** `tests/parity/` skeleton. *Done when:* the expected-failures list exists and the test runs.
 
 ## Milestone 5 — Messaging (`feat/messaging`) — TDD §6.8, §6.8.1
 
@@ -234,7 +234,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 4.5 | done | `feat/4-5-system-health-keys` | 2026-10-28 |
 | 4.6 | done | `feat/4-6-sessions-qr` | 2026-10-28 |
 | 4.7 | done | `feat/4-7-main-ratelimit-guard` | 2026-10-29 |
-| 4.8 | todo | - | - |
+| 4.8 | done | `feat/4-8-parity-skeleton` | 2026-10-29 |
 | 5.1 | todo | - | - |
 | 5.2 | todo | - | - |
 | 5.3 | todo | - | - |
