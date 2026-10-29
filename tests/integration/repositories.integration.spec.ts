@@ -134,6 +134,32 @@ describe('repositories (integration)', () => {
       expect((await sessions.list()).map(s => s.id)).toContain(id)
     })
 
+    it('merges settings key by key, in one statement, and bumps updatedAt', async () => {
+      const id = await newSession('merge')
+      await sessions.update(id, { settings: { a: 1, nested: { x: 1 } } })
+      const before = await sessions.findById(id)
+      expect(before).not.toBeNull()
+      // `updatedAt` has millisecond precision: wait so that the merge cannot land in the same one
+      await new Promise(resolve => setTimeout(resolve, 5))
+
+      expect(await sessions.mergeSettings(id, { b: 2, nested: { y: 2 } })).toBe(true)
+
+      const after = await sessions.findById(id)
+      // A key that is given replaces the old value as a whole, the others stay
+      expect(after?.settings).toEqual({ a: 1, b: 2, nested: { y: 2 } })
+      expect(after?.updatedAt.getTime()).toBeGreaterThan(before?.updatedAt.getTime() as number) // reason: asserted not null above
+    })
+
+    it('replaces a stored value that is not an object, and answers false for a missing session', async () => {
+      const id = await newSession('merge-bad')
+      await sessions.update(id, { settings: ['not', 'an', 'object'] })
+
+      await sessions.mergeSettings(id, { a: 1 })
+
+      expect((await sessions.findById(id))?.settings).toEqual({ a: 1 })
+      expect(await sessions.mergeSettings(`ghost-${id}`, { a: 1 })).toBe(false)
+    })
+
     it('only raises the seq bound with raiseSeqHighWater', async () => {
       const id = await newSession('seq-bound')
       expect((await sessions.findById(id))?.seqHighWater).toBe(0n)

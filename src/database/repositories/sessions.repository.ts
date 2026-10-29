@@ -63,6 +63,20 @@ export class SessionsRepository {
     return nullIfMissing(this.prisma.session.update({ where: { id }, data: patch }))
   }
 
+  // Adds the keys of `patch` to `settings` in one statement, so two writers that each own other keys
+  // (this API, the send policy) never overwrite each other. A stored value that is not an object is
+  // replaced. `updatedAt` takes the clock of the process, as Prisma does for the other writes, so the
+  // two never disagree. False when the session does not exist.
+  async mergeSettings(id: string, patch: Readonly<Record<string, JsonInput>>): Promise<boolean> {
+    const count = await this.prisma.$executeRaw`
+      UPDATE "sessions"
+      SET "settings" = (CASE WHEN jsonb_typeof("settings") = 'object' THEN "settings" ELSE '{}'::jsonb END)
+                       || ${JSON.stringify(patch)}::jsonb,
+          "updatedAt" = ${new Date()}
+      WHERE "id" = ${id}`
+    return count > 0
+  }
+
   // Cascades to keys, webhooks, inbound hooks, messages and suppressions; false when it did not exist
   async delete(id: string): Promise<boolean> {
     const { count } = await this.prisma.session.deleteMany({ where: { id } })

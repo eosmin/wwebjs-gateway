@@ -95,6 +95,29 @@ The commands and the events of one session run one at a time, so a stop cannot o
 
 `MAX_SESSIONS` counts the sessions that run, including one that waits to reconnect. `create`, `start` and `restart` answer 409 `MAX_SESSIONS_REACHED` while that many run; a session that is stopped, failed or only created does not count.
 
+## REST API
+
+Every route is under `/v1/sessions` and needs an API key ([authentication](authentication.md)). The list and the creation touch every session, so they are `admin` (only admin keys). The routes with a `:sessionId` need the scope in the table, and a key limited to a session reaches only that session: any other id is `403 FORBIDDEN`, checked by the `ApiKeyGuard` for every route with a `:sessionId`.
+
+| Route | Scope | Does |
+| --- | --- | --- |
+| `POST /v1/sessions` | `admin` | Creates the session as `created` (`id`, `name?`, `autoStart?`, `settings?`). Nothing runs until it is started. `201`. |
+| `GET /v1/sessions` | `admin` | Every session, oldest first. |
+| `GET /v1/sessions/:sessionId` | `read` | The row: configuration and status. |
+| `PATCH /v1/sessions/:sessionId` | `manage` | `name`, `autoStart` and `settings`. It does not restart the session: a running one reads the new settings at its next start. |
+| `DELETE /v1/sessions/:sessionId` | `manage` | `remove`. `204`. |
+| `POST /v1/sessions/:sessionId/start` `/stop` `/restart` `/logout` | `manage` | The commands above; they answer the session. |
+| `POST /v1/sessions/:sessionId/reset-state` | `manage` | `resetState`. `204`; `409 SESSION_NOT_READY` unless the session is ready. |
+| `GET /v1/sessions/:sessionId/qr` | `manage` | `{ qr, status }`: the text WhatsApp encodes. `404` when the session shows no QR code. |
+| `GET /v1/sessions/:sessionId/qr.png` | `manage` | The same QR code as a PNG (`image/png`). |
+| `GET /v1/sessions/:sessionId/state` `/wweb-version` `/info` | `read` | What the client of a ready session answers: the connection state, the WhatsApp Web version and the linked account. `409 SESSION_NOT_READY` otherwise. |
+
+The session DTO has the columns of the row except `seqHighWater`, an internal bigint that never leaves the gateway. `settings` accepts the keys `ordering.enabled`, `autoDownloadAudio`, `autoDownloadDocuments`, `autoDownloadPhotos`, `autoDownloadVideos` and `backgroundSync`, and nothing else; a `PATCH` replaces the keys it names as a whole (the `ordering` object is replaced, its keys are not merged) and keeps the others, including those that other services keep in the same column. The merge is one SQL statement (`jsonb ||`), so concurrent requests, or another service writing its own keys, never overwrite each other. A `PATCH` with no field is `400 VALIDATION_ERROR`. `settings` is returned whole to any key that can read the session, so it never holds a secret: those live in their own tables.
+
+The QR code is a credential until it is scanned: whoever scans it links a device to the account and reads and sends as it, so both routes need `manage` and not `read`, which is in the default scopes of a key (a chatbot key must not be able to ask for it). Besides that, both routes answer `Cache-Control: no-store`, the code is kept in memory only, and it never reaches the logs or the database. WhatsApp renews it every few seconds, so read it again instead of keeping it.
+
+Not part of this pass: the pairing-code routes (`POST` and `DELETE …/pairing-code`) and the battery of the account; the manager has no way yet to reach a client that is not ready.
+
 ## Boot and shutdown
 
 When the gateway boots it does not wait for the sessions. In the background it:
