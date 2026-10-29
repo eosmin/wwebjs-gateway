@@ -2,6 +2,8 @@ import { z } from 'zod'
 
 import { isValidAllowlistEntry } from '../common/lib/ssrf.js'
 
+import { SEND_POLICY_LIMITS } from './send-policy-limits.js'
+
 // Environment variables arrive as strings: numbers are coerced, and booleans are spelled
 // exactly "true" or "false" (z.coerce.boolean would read the string "false" as true)
 const flag = (fallback: boolean) =>
@@ -236,27 +238,44 @@ export const envSchema = z
       'Hours after the last inbound message during which a chat counts as a conversation'
     ),
     ALLOW_COLD_SENDS: flag(false).describe('Allow sending to chats without a conversation'),
-    COLD_SENDS_PER_DAY: count(20).describe('Cold sends allowed per session per day'),
+    COLD_SENDS_PER_DAY: count(20, { max: SEND_POLICY_LIMITS.coldSendsPerDay }).describe(
+      'Cold sends allowed per session per day'
+    ),
     COLD_SEND_MIN_GAP_MS: count(60000).describe('Minimum milliseconds between two cold sends'),
-    LOOKUPS_PER_DAY: count(100).describe('Number lookups allowed per session per day'),
+    LOOKUPS_PER_DAY: count(100, { max: SEND_POLICY_LIMITS.lookupsPerDay }).describe(
+      'Number lookups allowed per session per day'
+    ),
     PER_CHAT_MIN_INTERVAL_MS: count(1500).describe(
       'Minimum milliseconds between two sends to the same chat'
     ),
-    PER_CHAT_MAX_PER_MINUTE: count(10, { min: 1 }).describe('Sends per minute to the same chat'),
-    SESSION_MAX_PER_MINUTE: count(20, { min: 1 }).describe('Sends per minute of a session'),
-    SESSION_MAX_PER_HOUR: count(300, { min: 1 }).describe('Sends per hour of a session'),
-    SESSION_MAX_PER_DAY: count(1500, { min: 1 }).describe('Sends per day of a session'),
-    DUPLICATE_RECIPIENTS_THRESHOLD: count(5, { min: 1 }).describe(
-      'Recipients of the same text inside the window that count as a mass send'
+    PER_CHAT_MAX_PER_MINUTE: count(10, {
+      min: 1,
+      max: SEND_POLICY_LIMITS.perChatMaxPerMinute
+    }).describe('Sends per minute to the same chat'),
+    SESSION_MAX_PER_MINUTE: count(20, {
+      min: 1,
+      max: SEND_POLICY_LIMITS.sessionMaxPerMinute
+    }).describe('Sends per minute of a session'),
+    SESSION_MAX_PER_HOUR: count(300, {
+      min: 1,
+      max: SEND_POLICY_LIMITS.sessionMaxPerHour
+    }).describe('Sends per hour of a session'),
+    SESSION_MAX_PER_DAY: count(1500, { min: 1, max: SEND_POLICY_LIMITS.sessionMaxPerDay }).describe(
+      'Sends per day of a session'
     ),
-    DUPLICATE_WINDOW_MINUTES: count(10, { min: 1 }).describe(
-      'Minutes in which identical texts are compared'
-    ),
+    DUPLICATE_RECIPIENTS_THRESHOLD: count(5, {
+      min: 1,
+      max: SEND_POLICY_LIMITS.duplicateRecipients
+    }).describe('Recipients of the same text inside the window that count as a mass send'),
+    DUPLICATE_WINDOW_MINUTES: count(10, {
+      min: 1,
+      max: SEND_POLICY_LIMITS.duplicateWindowMinutes
+    }).describe('Minutes in which identical texts are compared'),
     WARMUP_DAYS: count(14).describe('Days over which a new session ramps up to its full limits'),
     WARMUP_START_FRACTION: fraction(0.1).describe(
       'Fraction of the limits a session starts with on its first day'
     ),
-    UNREACHABLE_STREAK: count(5, { min: 1 }).describe(
+    UNREACHABLE_STREAK: count(5, { min: 1, max: SEND_POLICY_LIMITS.unreachableStreak }).describe(
       'Consecutive unanswered sends that mark a recipient as unreachable'
     ),
     UNREACHABLE_MIN_AGE_HOURS: count(72).describe(
@@ -265,7 +284,12 @@ export const envSchema = z
     SEND_POLICY_MAX_WAIT_MS: count(1800000, { min: 1 }).describe(
       'Longest milliseconds the send policy may delay a message'
     ),
-    HEALTH_WINDOW: count(50, { min: 1 }).describe('Recent sends the session health score uses'),
+    HEALTH_WINDOW: count(50, { min: 1, max: SEND_POLICY_LIMITS.healthWindow }).describe(
+      'Recent sends the session health score uses'
+    ),
+    HEALTH_MIN_SAMPLES: count(10, { min: 1, max: SEND_POLICY_LIMITS.healthWindow }).describe(
+      'Results the health score needs before it can pause a session (at most HEALTH_WINDOW counts)'
+    ),
     HEALTH_MAX_BAD_RATIO: fraction(0.2).describe(
       'Ratio of bad outcomes in the window that pauses the session'
     ),

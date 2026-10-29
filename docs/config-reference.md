@@ -65,22 +65,23 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `MAX_MEDIA_BYTES` | integer, 1 or more | no | `33554432` | Largest media file in bytes |
 | `CONVERSATION_WINDOW_HOURS` | integer, 1 or more | no | `24` | Hours after the last inbound message during which a chat counts as a conversation |
 | `ALLOW_COLD_SENDS` | `true`, `false` | no | `false` | Allow sending to chats without a conversation |
-| `COLD_SENDS_PER_DAY` | integer, 0 or more | no | `20` | Cold sends allowed per session per day |
+| `COLD_SENDS_PER_DAY` | integer, 0 to 1000 | no | `20` | Cold sends allowed per session per day |
 | `COLD_SEND_MIN_GAP_MS` | integer, 0 or more | no | `60000` | Minimum milliseconds between two cold sends |
-| `LOOKUPS_PER_DAY` | integer, 0 or more | no | `100` | Number lookups allowed per session per day |
+| `LOOKUPS_PER_DAY` | integer, 0 to 10000 | no | `100` | Number lookups allowed per session per day |
 | `PER_CHAT_MIN_INTERVAL_MS` | integer, 0 or more | no | `1500` | Minimum milliseconds between two sends to the same chat |
-| `PER_CHAT_MAX_PER_MINUTE` | integer, 1 or more | no | `10` | Sends per minute to the same chat |
-| `SESSION_MAX_PER_MINUTE` | integer, 1 or more | no | `20` | Sends per minute of a session |
-| `SESSION_MAX_PER_HOUR` | integer, 1 or more | no | `300` | Sends per hour of a session |
-| `SESSION_MAX_PER_DAY` | integer, 1 or more | no | `1500` | Sends per day of a session |
-| `DUPLICATE_RECIPIENTS_THRESHOLD` | integer, 1 or more | no | `5` | Recipients of the same text inside the window that count as a mass send |
-| `DUPLICATE_WINDOW_MINUTES` | integer, 1 or more | no | `10` | Minutes in which identical texts are compared |
+| `PER_CHAT_MAX_PER_MINUTE` | integer, 1 to 60 | no | `10` | Sends per minute to the same chat |
+| `SESSION_MAX_PER_MINUTE` | integer, 1 to 600 | no | `20` | Sends per minute of a session |
+| `SESSION_MAX_PER_HOUR` | integer, 1 to 10000 | no | `300` | Sends per hour of a session |
+| `SESSION_MAX_PER_DAY` | integer, 1 to 100000 | no | `1500` | Sends per day of a session |
+| `DUPLICATE_RECIPIENTS_THRESHOLD` | integer, 1 to 10000 | no | `5` | Recipients of the same text inside the window that count as a mass send |
+| `DUPLICATE_WINDOW_MINUTES` | integer, 1 to 1440 | no | `10` | Minutes in which identical texts are compared |
 | `WARMUP_DAYS` | integer, 0 or more | no | `14` | Days over which a new session ramps up to its full limits |
 | `WARMUP_START_FRACTION` | number, 0 to 1 | no | `0.1` | Fraction of the limits a session starts with on its first day |
-| `UNREACHABLE_STREAK` | integer, 1 or more | no | `5` | Consecutive unanswered sends that mark a recipient as unreachable |
+| `UNREACHABLE_STREAK` | integer, 1 to 100 | no | `5` | Consecutive unanswered sends that mark a recipient as unreachable |
 | `UNREACHABLE_MIN_AGE_HOURS` | integer, 0 or more | no | `72` | Hours a send must remain unanswered before it counts toward the unreachable streak |
 | `SEND_POLICY_MAX_WAIT_MS` | integer, 1 or more | no | `1800000` | Longest milliseconds the send policy may delay a message |
-| `HEALTH_WINDOW` | integer, 1 or more | no | `50` | Recent sends the session health score uses |
+| `HEALTH_WINDOW` | integer, 1 to 10000 | no | `50` | Recent sends the session health score uses |
+| `HEALTH_MIN_SAMPLES` | integer, 1 to 10000 | no | `10` | Results the health score needs before it can pause a session (at most HEALTH_WINDOW counts) |
 | `HEALTH_MAX_BAD_RATIO` | number, 0 to 1 | no | `0.2` | Ratio of bad outcomes in the window that pauses the session |
 | `HEALTH_COOLDOWN_MIN` | integer, 0 or more | no | `30` | Minutes a session stays paused after a bad window |
 | `HUMANIZE_MIN_REPLY_DELAY_MS` | integer, 0 or more | no | `1500` | Minimum milliseconds between an inbound message and the reply to it |

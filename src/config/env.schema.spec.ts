@@ -72,6 +72,7 @@ const DEFAULTS = {
   UNREACHABLE_MIN_AGE_HOURS: 72,
   SEND_POLICY_MAX_WAIT_MS: 1800000,
   HEALTH_WINDOW: 50,
+  HEALTH_MIN_SAMPLES: 10,
   HEALTH_MAX_BAD_RATIO: 0.2,
   HEALTH_COOLDOWN_MIN: 30,
   HUMANIZE_MIN_REPLY_DELAY_MS: 1500,
@@ -468,5 +469,22 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...valid, [key]: '' })).toThrow(
       new RegExp(`${key}: .*received undefined`)
     )
+  })
+
+  it.each([
+    ['HEALTH_WINDOW', 10_001],
+    ['HEALTH_MIN_SAMPLES', 10_001],
+    ['SESSION_MAX_PER_MINUTE', 601],
+    ['SESSION_MAX_PER_HOUR', 10_001],
+    ['SESSION_MAX_PER_DAY', 100_001],
+    ['PER_CHAT_MAX_PER_MINUTE', 61],
+    ['COLD_SENDS_PER_DAY', 1001],
+    ['LOOKUPS_PER_DAY', 10_001],
+    ['UNREACHABLE_STREAK', 101],
+    ['DUPLICATE_RECIPIENTS_THRESHOLD', 10_001],
+    ['DUPLICATE_WINDOW_MINUTES', 1441]
+  ])('refuses %s above its ceiling of the send policy', (key, value) => {
+    expect(() => parseEnv({ ...valid, [key]: String(value) })).toThrow(new RegExp(key))
+    expect(parseEnv({ ...valid, [key]: String(value - 1) })).toHaveProperty(key, value - 1)
   })
 })
