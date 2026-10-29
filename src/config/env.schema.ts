@@ -95,11 +95,13 @@ export const envSchema = z
       'Longest lifetime in days an API key may be given; 0 means no cap'
     ),
     TRUST_PROXY_HOPS: count(0).describe(
-      'Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP'
+      'Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP; behind a proxy it must be set, or every client shares the proxy address and its rate limit'
     ),
     BULL_BOARD_ENABLED: flag(false).describe('Serve the BullMQ dashboard to admin keys'),
     CORS_ORIGINS: list().describe('Comma-separated origins allowed by CORS and Socket.IO'),
-    RATE_LIMIT_MAX: count(300, { min: 1 }).describe('Requests per minute allowed per API key'),
+    RATE_LIMIT_MAX: count(300, { min: 1 }).describe(
+      'Requests per minute allowed per API key and, separately, per client address'
+    ),
     ENABLE_DOCS: optionalFlag().describe(
       'Serve Swagger UI and the OpenAPI JSON; when unset, true except in production'
     ),

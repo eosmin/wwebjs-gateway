@@ -43,7 +43,8 @@ const CODE_BY_STATUS: Readonly<Partial<Record<number, ErrorCode>>> = {
   [HttpStatus.BAD_REQUEST]: ErrorCode.VALIDATION_ERROR,
   [HttpStatus.UNAUTHORIZED]: ErrorCode.UNAUTHORIZED,
   [HttpStatus.FORBIDDEN]: ErrorCode.FORBIDDEN,
-  [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND
+  [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
+  [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.RATE_LIMITED
 }
 
 // Fastify's own errors (body too large, unsupported media type) carry a statusCode but are not HttpExceptions
