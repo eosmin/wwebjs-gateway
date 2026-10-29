@@ -13,6 +13,7 @@ import wwebjs, {
 import { z } from 'zod'
 
 import type { AppConfig } from '../config/env.schema.js'
+import { processTreeRssBytes } from '../infra/process/process-memory.js'
 import type {
   BatteryInfoDto,
   BroadcastDto,
@@ -744,6 +745,12 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       if (!info) throw notReady('getClientInfo')
       return Promise.resolve(mapClientInfo(info))
     })
+  }
+
+  // Not a call into WhatsApp Web, so it is not timed or counted like one
+  async getBrowserMemoryBytes(): Promise<number | undefined> {
+    const pid = this.client.pupBrowser?.process()?.pid
+    return pid === undefined ? undefined : await processTreeRssBytes(pid)
   }
 
   getBatteryStatus(): Promise<BatteryInfoDto> {

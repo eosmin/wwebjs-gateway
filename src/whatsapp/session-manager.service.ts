@@ -79,7 +79,7 @@ export interface RunningSession {
 
 // Why the watchdog acts; it is the `code` of the `session_error` event the consumers get
 export type WatchdogCode =
-  'WATCHDOG_START_TIMEOUT' | 'WATCHDOG_HEALTH_CHECK' | 'WATCHDOG_BLOCKED_STATE'
+  'WATCHDOG_START_TIMEOUT' | 'WATCHDOG_HEALTH_CHECK' | 'WATCHDOG_BLOCKED_STATE' | 'WATCHDOG_MEMORY'
 
 // What a request of the watchdog names to be sure it is about the run it looked at
 export type RunRef = Pick<RunningSession, 'id' | 'generation' | 'status' | 'phaseStartedAt'>

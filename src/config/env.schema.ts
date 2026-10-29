@@ -174,7 +174,7 @@ export const envSchema = z
       'Consecutive failed health checks before a session is restarted'
     ),
     MEMORY_RESTART_THRESHOLD_MB: count(0).describe(
-      'Resident memory in MB of the gateway process above which the largest idle session is restarted; 0 disables the check'
+      'Resident memory in MB of the gateway process plus the browsers of its sessions, above which the largest idle session is restarted; 0 disables the check'
     ),
 
     // Ordering and reconciliation

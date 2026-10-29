@@ -76,7 +76,7 @@ The time limit counts from the start of the phase: `authenticating` starts when 
 
 A `failed` session keeps `autoStart` on, so the next boot of the gateway tries it once more (a `DEPRECATED_VERSION` is solved by an upgrade, which is a new boot). The second read of a blocking state is a debounce: one transient answer does not end the retries.
 
-The memory guard (`MEMORY_RESTART_THRESHOLD_MB`, the resident memory of the gateway process) is not part of this pass yet: restarting the largest idle session needs the send queue, to know that a session is not sending.
+The memory guard (`MEMORY_RESTART_THRESHOLD_MB`, 0 = off) restarts the ready session with the biggest browser that is not sending when the gateway process plus the browsers of its sessions pass the limit, at most once every 10 minutes (`session_error` code `WATCHDOG_MEMORY`). How it measures and what "sending" means: [send-queue.md](send-queue.md#memory-guard).
 
 ## Commands
 

@@ -484,3 +484,197 @@ describe('WatchdogService blocking state bookkeeping', () => {
     expect(error.mock.calls.map(call => String(call[0])).join('\n')).not.toContain('sync boom')
   })
 })
+
+describe('WatchdogService memory guard', () => {
+  const MB = 1024 * 1024
+
+  const sized = (
+    id: string,
+    megabytes: number | undefined,
+    overrides: Partial<RunningSession> = {}
+  ) => {
+    const client = new FakeWhatsAppClient(id)
+    client.script('getBrowserMemoryBytes', () =>
+      megabytes === undefined ? undefined : megabytes * MB
+    )
+    return buildRun({ id, client, ...overrides })
+  }
+
+  // The gateway process itself counts 100 MB
+  beforeEach(() => {
+    jest.spyOn(process, 'memoryUsage').mockReturnValue({ rss: 100 * MB } as NodeJS.MemoryUsage)
+  })
+
+  it('does nothing when the limit is 0', async () => {
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '0' }, [sized('a', 99_999)])
+    await watchdog.check()
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+  })
+
+  it('does nothing while the gateway and the browsers stay under the limit', async () => {
+    const runs = [sized('a', 300), sized('b', 400)]
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, runs)
+    await watchdog.check()
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+  })
+
+  it('restarts the ready session with the biggest browser once the sum passes the limit', async () => {
+    const small = sized('small', 300)
+    const big = sized('big', 500)
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [small, big])
+    await watchdog.check()
+    expect(manager.reconnectRun).toHaveBeenCalledTimes(1)
+    expect(manager.reconnectRun).toHaveBeenCalledWith(
+      big,
+      'WATCHDOG_MEMORY',
+      expect.stringContaining('900 MB')
+    )
+  })
+
+  it('never picks a session that is sending, it takes the next biggest', async () => {
+    const small = sized('small', 300)
+    const big = sized('big', 500)
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [small, big])
+    watchdog.addBusyCheck(id => id === 'big')
+    await watchdog.check()
+    expect(manager.reconnectRun).toHaveBeenCalledWith(small, 'WATCHDOG_MEMORY', expect.any(String))
+  })
+
+  it('restarts nothing when every ready session is sending', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [sized('a', 900)])
+    watchdog.addBusyCheck(() => true)
+    await watchdog.check()
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no idle session'))
+  })
+
+  it('counts a session that is not ready in the total but never restarts it', async () => {
+    const starting = sized('starting', 600, { status: 'starting', phaseStartedAt: NOW.getTime() })
+    const ready = sized('ready', 200)
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [starting, ready])
+    await watchdog.check()
+    expect(manager.reconnectRun).toHaveBeenCalledTimes(1)
+    expect(manager.reconnectRun).toHaveBeenCalledWith(ready, 'WATCHDOG_MEMORY', expect.any(String))
+  })
+
+  it('does not guess when no browser reports its memory', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [
+      sized('a', undefined)
+    ])
+    await watchdog.check()
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+    // It got through the sum, not through the rule about the gateway's own memory
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('gateway process alone'))
+  })
+
+  it('keeps asking when the chosen session turned out busy: the cooldown has not started', async () => {
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [sized('a', 900)])
+    // free when chosen, busy when the restart is about to run, free on the next pass
+    const answers = [false, true, false, false]
+    watchdog.addBusyCheck(() => answers.shift() ?? false)
+    await watchdog.check()
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+    await watchdog.check()
+    expect(manager.reconnectRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits ten minutes before it restarts another session', async () => {
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [sized('a', 900)])
+    await watchdog.check()
+    await watchdog.check()
+    expect(manager.reconnectRun).toHaveBeenCalledTimes(1)
+
+    jest.setSystemTime(NOW.getTime() + 10 * 60_000 + 1)
+    await watchdog.check()
+    expect(manager.reconnectRun).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a browser whose memory read hangs as unknown', async () => {
+    const hung = sized('hung', 900)
+    ;(hung.client as FakeWhatsAppClient).script(
+      'getBrowserMemoryBytes',
+      () => new Promise<never>(() => undefined)
+    )
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [hung])
+    const pass = watchdog.check()
+    await jest.advanceTimersByTimeAsync(5001)
+    await pass
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+  })
+
+  it('warns again about a session whose memory became unreadable a second time', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const run = sized('a', undefined)
+    const client = run.client as FakeWhatsAppClient
+    const { watchdog } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [run])
+    await watchdog.check()
+    client.script('getBrowserMemoryBytes', () => 100 * MB)
+    await watchdog.check()
+    client.script('getBrowserMemoryBytes', () => undefined)
+    await watchdog.check()
+    const unreadable = warn.mock.calls.filter(([message]) =>
+      String(message).includes('cannot read')
+    )
+    expect(unreadable).toHaveLength(2)
+  })
+
+  it('forgets a session that left, so one created later with the same id is watched again', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const runs = [sized('a', undefined)]
+    const { watchdog } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, runs)
+    await watchdog.check()
+    runs.length = 0
+    await watchdog.check()
+    runs.push(sized('a', undefined))
+    await watchdog.check()
+    const unreadable = warn.mock.calls.filter(([message]) =>
+      String(message).includes('cannot read')
+    )
+    expect(unreadable).toHaveLength(2)
+  })
+
+  it('does not log a restart that was never asked for because one is already pending', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [sized('a', 900)])
+    manager.reconnectRun.mockImplementation(() => new Promise<void>(() => undefined))
+    await watchdog.check()
+    jest.setSystemTime(NOW.getTime() + 10 * 60_000 + 1)
+    await watchdog.check()
+    const restarting = warn.mock.calls.filter(([message]) =>
+      String(message).includes('restarting the largest')
+    )
+    expect(manager.reconnectRun).toHaveBeenCalledTimes(1)
+    expect(restarting).toHaveLength(1)
+  })
+
+  it('restarts nothing when the gateway process alone is over the limit, a browser cannot fix that', async () => {
+    jest.spyOn(process, 'memoryUsage').mockReturnValue({ rss: 900 * MB } as NodeJS.MemoryUsage)
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [sized('a', 300)])
+    await watchdog.check()
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('gateway process alone'))
+  })
+
+  it('does not restart a session that started to send after it was chosen', async () => {
+    const { watchdog, manager } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [sized('a', 900)])
+    let calls = 0
+    // free when the guard chooses, busy by the time the restart is about to run
+    watchdog.addBusyCheck(() => ++calls > 1)
+    await watchdog.check()
+    expect(manager.reconnectRun).not.toHaveBeenCalled()
+  })
+
+  it('says once per session that its memory cannot be read', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const { watchdog } = build({ MEMORY_RESTART_THRESHOLD_MB: '800' }, [sized('a', undefined)])
+    await watchdog.check()
+    await watchdog.check()
+    const unreadable = warn.mock.calls.filter(([message]) =>
+      String(message).includes('cannot read')
+    )
+    expect(unreadable).toHaveLength(1)
+  })
+})

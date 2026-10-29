@@ -261,6 +261,8 @@ export interface WhatsAppClientPort {
   getWWebVersion(): Promise<string>
   getClientInfo(): Promise<ClientInfoDto>
   getBatteryStatus(): Promise<BatteryInfoDto>
+  // Resident memory of the browser and every process it started; undefined when it cannot be read
+  getBrowserMemoryBytes(): Promise<number | undefined>
   requestPairingCode(request: PairingCodeRequest): Promise<string>
   cancelPairingCode(): Promise<void>
   // Delivers every event to the listener inside a try/catch; returns the way to stop listening
