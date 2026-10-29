@@ -15,6 +15,7 @@ import { DatabaseModule } from './database/database.module.js'
 import { LoggerModule } from './infra/logger/logger.module.js'
 import { MetricsModule } from './infra/metrics/metrics.module.js'
 import { RedisModule } from './infra/redis/redis.module.js'
+import { MessagingModule } from './services/messaging.module.js'
 import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
 
 @Module({
@@ -27,6 +28,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
     RedisModule,
     ApiModule,
     WhatsAppModule,
+    MessagingModule,
     SystemModule,
     ApiKeysModule,
     SessionsModule

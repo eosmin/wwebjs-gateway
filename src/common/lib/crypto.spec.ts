@@ -2,6 +2,7 @@ import {
   API_KEY_PREFIX,
   generateApiKey,
   generateToken,
+  keyedDigest,
   safeEqual,
   sha256Hex,
   signWebhook
@@ -58,5 +59,24 @@ describe('signWebhook', () => {
     expect(signWebhook('other', 1700000000, '{"a":1}')).not.toBe(
       signWebhook('key', 1700000000, '{"a":1}')
     )
+  })
+})
+
+describe('keyedDigest', () => {
+  const digest = (secret: string, purpose: string, value: string): string =>
+    keyedDigest(secret, purpose, value)
+
+  it('is stable for the same secret, purpose and value', () => {
+    expect(digest('s', 'p', 'v')).toBe(digest('s', 'p', 'v'))
+    expect(digest('s', 'p', 'v')).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('changes with any of the three, and is not a plain sha256 of the value', () => {
+    const base = digest('s', 'p', 'v')
+
+    expect(digest('other', 'p', 'v')).not.toBe(base)
+    expect(digest('s', 'other', 'v')).not.toBe(base)
+    expect(digest('s', 'p', 'other')).not.toBe(base)
+    expect(base).not.toBe(sha256Hex('v'))
   })
 })

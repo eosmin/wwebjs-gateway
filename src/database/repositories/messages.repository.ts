@@ -34,6 +34,11 @@ export interface StoredMessageQuery {
   limit: number
 }
 
+export interface OutgoingState {
+  ack: number
+  sentAt: Date
+}
+
 @Injectable()
 export class MessagesRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -105,6 +110,29 @@ export class MessagesRepository {
       },
       orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
       take: query.limit
+    })
+  }
+
+  // When the contact last wrote in this chat, by the gateway's clock (the arrival, not the sender's
+  // timestamp, which a wrong phone clock can put in the future); null when it never did, or the
+  // retention already removed it
+  async lastIncomingAt(sessionId: string, chatId: string): Promise<Date | null> {
+    const row = await this.prisma.storedMessage.findFirst({
+      where: { sessionId, chatId, direction: 'in' },
+      orderBy: { receivedAt: 'desc' },
+      select: { receivedAt: true }
+    })
+    return row?.receivedAt ?? null
+  }
+
+  // The last messages we sent to a chat, newest first, with the delivery state the send policy
+  // reads to tell an unreachable recipient
+  listRecentOutgoing(sessionId: string, chatId: string, limit: number): Promise<OutgoingState[]> {
+    return this.prisma.storedMessage.findMany({
+      where: { sessionId, chatId, direction: 'out' },
+      orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      select: { ack: true, sentAt: true }
     })
   }
 
