@@ -8,6 +8,13 @@ export function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
+// A digest of `value` that cannot be guessed from a dictionary of likely values without `secret`.
+// The key is derived per purpose, so the same secret gives unrelated digests for unrelated uses.
+export function keyedDigest(secret: string, purpose: string, value: string): string {
+  const key = createHmac('sha256', secret).update(purpose).digest()
+  return createHmac('sha256', key).update(value).digest('hex')
+}
+
 // 32 random bytes as 43 url-safe characters
 export function generateToken(): string {
   return randomBytes(32).toString('base64url')
