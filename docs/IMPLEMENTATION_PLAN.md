@@ -85,7 +85,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 5 — Messaging (`feat/messaging`) — TDD §6.8, §6.8.1
 
-- [ ] **5.1** `send-policy.service.ts`. *Done when:* every rule of §6.8.1 has a passing test, including the offline-recipient case.
+- [x] **5.1** `send-policy.service.ts`. *Done when:* every rule of §6.8.1 has a passing test, including the offline-recipient case.
 - [ ] **5.2** `send-queue.service.ts` and the Bull Board mount (`/admin/queues`, admin-only, flag `BULL_BOARD_ENABLED`). *Done when:* ordering, idempotency, restart durability and `UNKNOWN_OUTCOME` tests pass.
 - [ ] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
 - [ ] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
@@ -167,7 +167,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [x] **4.2** The request-id interceptor writes the `x-request-id` RESPONSE header with the id Fastify already chose (`createFastifyAdapter`, step 1.5). Today the id reaches the logs but not the response.
 - [x] **4.6** `GET /v1/system/info` adds the WhatsApp Web version and the live status of each session once `SessionManager` is registered (TDD §6.11 lists it; step 4.5 reports versions, uptime and counts by status only).
 - [x] **4.7** Rate limit (`@nestjs/throttler` 6.7.1, TDD §2 and §6.14, `RATE_LIMIT_MAX`) keyed by API key or IP, including the public routes `/ready`, `/metrics` and the failed-authentication path (each unknown key costs one database lookup, and `/ready` pings Postgres and Redis per call). No step owned it before; found in the security review of 4.5.
-- [ ] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
+- [x] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
 - [ ] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
 - [ ] **5.5 and 7.4** Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
 - [ ] **7.4** Decide and implement the production guard for `ALLOW_PRIVATE_WEBHOOK_TARGETS` (see TDD §11 PENDING).
@@ -235,7 +235,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 4.6 | done | `feat/4-6-sessions-qr` | 2026-10-28 |
 | 4.7 | done | `feat/4-7-main-ratelimit-guard` | 2026-10-29 |
 | 4.8 | done | `feat/4-8-parity-skeleton` | 2026-10-29 |
-| 5.1 | todo | - | - |
+| 5.1 | done | `feat/5-1-send-policy` | 2026-10-29 |
 | 5.2 | todo | - | - |
 | 5.3 | todo | - | - |
 | 5.4 | todo | - | - |

@@ -10,6 +10,7 @@ const REQUIRED_GUIDES = [
   'docs/config-reference.md',
   'docs/errors.md',
   'docs/events.md',
+  'docs/safety.md',
   'docs/sessions.md',
   'docs/system.md'
 ]
