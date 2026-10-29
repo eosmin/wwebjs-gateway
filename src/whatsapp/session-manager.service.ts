@@ -115,6 +115,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   // Every session of the database, running or not
   private readonly statuses = new Map<string, SessionStatus>()
   private readonly chains = new Map<string, Promise<void>>()
+  private readonly removedListeners = new Set<(sessionId: string) => Promise<void>>()
   private shuttingDown = false
   private restoreTimer: NodeJS.Timeout | undefined
   private wakeRestore: (() => void) | undefined
@@ -232,7 +233,15 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       this.refreshGauge()
       this.pipeline.forget(id)
       await this.deleteRedisKeys(id)
+      for (const listener of this.removedListeners) await listener(id)
     })
+  }
+
+  // For the services that keep something per session (the send queue): they hear of a deleted session
+  // after its row and keys are gone. A listener that throws fails the deletion call, not the deletion.
+  onRemoved(listener: (sessionId: string) => Promise<void>): () => void {
+    this.removedListeners.add(listener)
+    return () => this.removedListeners.delete(listener)
   }
 
   resetState(id: string): Promise<void> {
