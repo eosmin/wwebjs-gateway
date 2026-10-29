@@ -48,6 +48,7 @@
     "prisma/migrations/**/migration.sql": "pnpm validate:rollbacks"
   },
   "dependencies": {
+    "@bull-board/api": "9.10.5",
     "@fastify/cors": "11.3.1",
     "@fastify/helmet": "13.2.0",
     "@fastify/static": "10.1.8",
