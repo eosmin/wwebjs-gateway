@@ -122,10 +122,11 @@ jobs:
           touch api.log
           trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
           # The rest of the env is the one of .env.example. Node does not override a variable that is
-          # already set, so the services and NODE_ENV of this job win over the file, and the file is
-          # parsed, never executed as shell
+          # already set, so the services, NODE_ENV and the tokens of this job win over the file, and the
+          # file is parsed, never executed as shell. NODE_ENV=development leaves the docs on.
+          export METRICS_TOKEN="$(openssl rand -hex 24)"
           node --env-file=.env.example dist/main.js > api.log 2>&1 &
-          pnpm exec tsx scripts/smoke-http.ts http://localhost:3000
+          pnpm exec tsx scripts/smoke-http.ts http://localhost:3000 --docs=on
       - name: Service log
         if: failure()
         run: tail -n 60 api.log
@@ -186,20 +187,23 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # The scan reads the OS and the base image; run the image too, in the mode it has where deployed.
-      # The gateway listens on PORT, which .env.example sets to 3000, and answers
-      # /health until step 4.7 adds /ready.
+      # The probe script only needs Node (it strips the types itself), not the dependencies
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # The scan reads the OS and the base image; run the image too, in the mode it has where deployed:
+      # production, where the docs are off. The gateway listens on PORT, which .env.example sets to 3000.
       - name: The image starts and answers
         run: |
+          export METRICS_TOKEN="$(openssl rand -hex 24)"
           docker run -d --name service --network host --env-file .env.example \
             -e NODE_ENV=production \
             -e DATABASE_URL=postgresql://gateway:ci_password@localhost:5432/gateway_ci \
             -e REDIS_URL=redis://localhost:6379 \
             -e ADMIN_API_KEY="$(openssl rand -hex 24)" \
-            -e METRICS_TOKEN="$(openssl rand -hex 24)" \
+            -e METRICS_TOKEN \
             wwebjs-gateway:ci
-          curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-connrefused \
-            http://localhost:3000/health
+          node scripts/smoke-http.ts http://localhost:3000 --docs=off
       - name: Service log
         if: failure()
         run: docker logs service

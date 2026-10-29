@@ -15,6 +15,7 @@ export const ErrorCode = {
   MAX_SESSIONS_REACHED: 'MAX_SESSIONS_REACHED',
   SESSION_NOT_READY: 'SESSION_NOT_READY',
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
+  RATE_LIMITED: 'RATE_LIMITED',
   NUMBER_NOT_ON_WHATSAPP: 'NUMBER_NOT_ON_WHATSAPP',
   POLICY_BLOCKED: 'POLICY_BLOCKED',
   DUPLICATE_CONTENT: 'DUPLICATE_CONTENT',
@@ -85,6 +86,11 @@ export const ERROR_DEFINITIONS = {
   IDEMPOTENCY_KEY_REUSED: {
     status: HttpStatus.UNPROCESSABLE_ENTITY,
     meaning: 'The Idempotency-Key was already used with a different request.'
+  },
+  RATE_LIMITED: {
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    meaning:
+      'The API key or the client address sent more than RATE_LIMIT_MAX requests in a minute; wait the seconds in the Retry-After header.'
   },
   NUMBER_NOT_ON_WHATSAPP: {
     status: HttpStatus.UNPROCESSABLE_ENTITY,

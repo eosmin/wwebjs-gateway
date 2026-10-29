@@ -17,10 +17,10 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `METRICS_TOKEN` | string, 32 characters or more | no |  | Bearer token, 32 characters or more, that grants access to GET /metrics; when unset, only an admin key can read it |
 | `API_KEY_ROTATION_GRACE_MINUTES` | integer, 0 or more | no | `10` | Minutes the previous API key keeps working after a rotation |
 | `API_KEY_MAX_TTL_DAYS` | integer, 0 or more | no | `0` | Longest lifetime in days an API key may be given; 0 means no cap |
-| `TRUST_PROXY_HOPS` | integer, 0 or more | no | `0` | Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP |
+| `TRUST_PROXY_HOPS` | integer, 0 or more | no | `0` | Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP; behind a proxy it must be set, or every client shares the proxy address and its rate limit |
 | `BULL_BOARD_ENABLED` | `true`, `false` | no | `false` | Serve the BullMQ dashboard to admin keys |
 | `CORS_ORIGINS` | string | no |  | Comma-separated origins allowed by CORS and Socket.IO |
-| `RATE_LIMIT_MAX` | integer, 1 or more | no | `300` | Requests per minute allowed per API key |
+| `RATE_LIMIT_MAX` | integer, 1 or more | no | `300` | Requests per minute allowed per API key and, separately, per client address |
 | `ENABLE_DOCS` | `true`, `false` | no |  | Serve Swagger UI and the OpenAPI JSON; when unset, true except in production |
 | `WWEBJS_DATA_PATH` | string, 1 character or more | no | `./.wwebjs_auth` | Folder where whatsapp-web.js keeps the authenticated sessions |
 | `PUPPETEER_EXECUTABLE_PATH` | string, 1 character or more | no |  | Chromium or Chrome binary. Set it: the install does not download one (puppeteer build scripts are off), so a session cannot start without it |

@@ -4,6 +4,7 @@ import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod'
 
 import { ApiKeysModule } from './api/api-keys.module.js'
 import { ApiModule } from './api/api.module.js'
+import { RateLimitModule } from './api/rate-limit.module.js'
 import { SessionsModule } from './api/sessions.module.js'
 import { SystemModule } from './api/system.module.js'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js'
@@ -19,6 +20,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
 @Module({
   imports: [
     ConfigModule,
+    RateLimitModule,
     LoggerModule,
     MetricsModule,
     DatabaseModule,

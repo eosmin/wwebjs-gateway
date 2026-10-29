@@ -80,7 +80,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **4.4** Swagger and nestjs-zod wiring. *Done when:* `/docs/json` is valid OpenAPI.
 - [x] **4.5** System, health (`/ready`, `/metrics`) and api-keys controllers (incl. `rotate` with grace period; every operation declares its `scope`). *Done when:* `/ready` pings Postgres and Redis and fails without them. *Carried over from 4.4 (reviews):* (a) a test through `AppModule` where a bad body on a route with a Zod DTO answers 400 `VALIDATION_ERROR` via the global pipe; (b) a `@ZodResponse` route whose extra output field is stripped by `ZodSerializerInterceptor`; (c) `buildOpenApiDocument` sets `security: []` on routes marked `@Public()` (`IS_PUBLIC_KEY`), so `/ready` and `/metrics` do not ask for the API key.
 - [x] **4.6** Sessions and QR controllers. *Done when:* the server boots, creates a session and serves a QR (fake client).
-- [ ] **4.7** `main.ts` finalized; `smoke-http` and CI checks move to `/ready`, `/metrics` and the error contract. *Done when:* the CI boot and image checks pass with the new probes. *Carried over from 4.4:* `smoke-http` must request `/docs/json` with `ENABLE_DOCS=true` (nothing else tests that `main.ts` calls `setupDocs`) and get 404 with `ENABLE_DOCS=false`.
+- [x] **4.7** `main.ts` finalized; `smoke-http` and CI checks move to `/ready`, `/metrics` and the error contract. *Done when:* the CI boot and image checks pass with the new probes. *Carried over from 4.4:* `smoke-http` must request `/docs/json` with `ENABLE_DOCS=true` (nothing else tests that `main.ts` calls `setupDocs`) and get 404 with `ENABLE_DOCS=false`.
 - [ ] **4.8** `tests/parity/` skeleton. *Done when:* the expected-failures list exists and the test runs.
 
 ## Milestone 5 — Messaging (`feat/messaging`) — TDD §6.8, §6.8.1
@@ -89,7 +89,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [ ] **5.2** `send-queue.service.ts` and the Bull Board mount (`/admin/queues`, admin-only, flag `BULL_BOARD_ENABLED`). *Done when:* ordering, idempotency, restart durability and `UNKNOWN_OUTCOME` tests pass.
 - [ ] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
 - [ ] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
-- [ ] **5.5** Messages controller. *Done when:* every message type sends through the fake client.
+- [ ] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
 - [ ] **5.6** Polls and events controller.
 - [ ] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
 - [ ] **5.8** Presence, profile and settings controller.
@@ -132,7 +132,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 10 — Resilience (`feat/resilience-tests`) — TDD §7 Phase 10
 
-- [ ] **10.1** `tests/helpers/chaos.ts`.
+- [ ] **10.1** `tests/helpers/chaos.ts`. *Carried over from 4.7:* `pnpm test` ends with Jest's "A worker process has failed to exit gracefully" (it also does on `main` before 4.7; `--detectOpenHandles` and per-folder runs do not reproduce it). Find the spec that leaks a timer or connection (suspects: the specs that point at `127.0.0.1:1`: `redis.service.spec.ts`, `redis.factory.spec.ts`, `prisma.service.spec.ts`), fix its teardown, and make the warning fail the build once it is gone.
 - [ ] **10.2** Redis restart mid-queue.
 - [ ] **10.3** Postgres outage.
 - [ ] **10.4** Webhook consumer 500/timeout storm.
@@ -147,7 +147,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 - [ ] **11.1** Hardened `Dockerfile` (Debian, Chromium, non-root). *Done when:* the `security-scan` job builds, runs and scans it clean.
 - [ ] **11.2** `docker-entrypoint.sh`.
-- [ ] **11.3** `docker-compose.yml` (dev: api + postgres + redis). *Done when:* `docker compose up` brings the whole project up healthy.
+- [ ] **11.3** `docker-compose.yml` (dev: api + postgres + redis). *Carried over from 4.7:* every compose file and deploy doc sets `stop_grace_period` above the 30 s hard-exit timer (Docker's default is 10 s, so SIGKILL would arrive before the graceful shutdown ends). *Done when:* `docker compose up` brings the whole project up healthy.
 - [ ] **11.4** `docker-compose.prod.yml`.
 - [ ] **11.5** `deploy/` files and the VPS/Railway/backup guides verified end to end. *Needs the hosting decision (TDD §11).*
 - [ ] **11.6** `publish` job (GHCR on `main`) and optional deploy job.
@@ -166,7 +166,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 
 - [x] **4.2** The request-id interceptor writes the `x-request-id` RESPONSE header with the id Fastify already chose (`createFastifyAdapter`, step 1.5). Today the id reaches the logs but not the response.
 - [x] **4.6** `GET /v1/system/info` adds the WhatsApp Web version and the live status of each session once `SessionManager` is registered (TDD §6.11 lists it; step 4.5 reports versions, uptime and counts by status only).
-- [ ] **4.7** Rate limit (`@nestjs/throttler` 6.7.1, TDD §2 and §6.14, `RATE_LIMIT_MAX`) keyed by API key or IP, including the public routes `/ready`, `/metrics` and the failed-authentication path (each unknown key costs one database lookup, and `/ready` pings Postgres and Redis per call). No step owned it before; found in the security review of 4.5.
+- [x] **4.7** Rate limit (`@nestjs/throttler` 6.7.1, TDD §2 and §6.14, `RATE_LIMIT_MAX`) keyed by API key or IP, including the public routes `/ready`, `/metrics` and the failed-authentication path (each unknown key costs one database lookup, and `/ready` pings Postgres and Redis per call). No step owned it before; found in the security review of 4.5.
 - [ ] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
 - [ ] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
 - [ ] **5.5 and 7.4** Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
@@ -185,7 +185,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [x] **3.9** The reconciler feeds recovered messages with `InboundOrderBuffer.offer(message, 'reconcile')` through the same pipeline path (it needs a public entry point on `EventPipelineService`); the batch `reason` stays `reconcile` only for a buffer it opened.
 - [x] **4.6** Register `ReconcilerService` in the same module as `SessionManager` and `WatchdogService`; the boot test must cover it subscribing to `session_status` and unsubscribing at shutdown.
 - [x] **4.6** In the same module provide `WHATSAPP_CLIENT_FACTORY` with `createWwebjsClientFactory(config)` (`APP_CONFIG`); until then no session can start. The boot test must show the token resolves to the real factory and that building a client does not open a browser.
-- [ ] **4.7** The process guard for unhandled rejections: `isPuppeteerFailure` (exported by `wwebjs-adapter.ts`, defined in `wa-call.ts`) says whether a rejection is a Puppeteer death. A rejection raised inside wwebjs itself (its `framenavigated` handler, its `exposeFunction` callbacks) comes from no call of ours and names no session, so decide how it is attributed (for example, reconnect every session that is not `ready`) and test it; the adapter already reports a dead browser or page of its own session as `session_error`.
+- [x] **4.7** The process guard for unhandled rejections: `isPuppeteerFailure` (exported by `wwebjs-adapter.ts`, defined in `wa-call.ts`) says whether a rejection is a Puppeteer death. A rejection raised inside wwebjs itself (its `framenavigated` handler, its `exposeFunction` callbacks) comes from no call of ours and names no session, so decide how it is attributed (for example, reconnect every session that is not `ready`) and test it; the adapter already reports a dead browser or page of its own session as `session_error`.
 - [ ] **6.7, pairing code** `POST` and `DELETE /v1/sessions/:sessionId/pairing-code` (`Client.requestPairingCode`, `cancelPairingCode`) and the battery in `GET …/info` (`Client.getBatteryStatus`) were left out of 4.6: `SessionManager` only hands out the client of a ready session (`requireReady`), and a pairing code is requested while the session is in `qr`. Add a manager method that reaches a started client, with tests, then the two routes; `POST …/start` takes no body until then. 6.7 owns it because its "Done when" (parity expected-failures empty of Phase 5–6 items) cannot pass while `Client.requestPairingCode`, `cancelPairingCode` and `getBatteryStatus` are unmapped; step 12.1 (real E2E with pairing) needs it too.
 - [ ] **12.3** With a real account, check what 3.10 could only read in the source of wwebjs 1.34.7: a wid in `groupMentions[].groupJid`, `mentionedIds`, `PollVote.voter` and `Call.from`; `{ name, localId }` options in `pollOptions` and `selectedOptions`; the `event*` fields of `Message` (the typings declare them, `Message.js` never sets them: an event's data is only in `raw`); and the `disconnected` reason `Max qrcode retries reached` when `QR_MAX_RETRIES` runs out (the manager reconnects on it). Redacted fixtures go in `tests/fixtures/`.
 - [ ] **5.x, the send route** `SendOptions.extra` (and `EditOptions.extra`, `ChannelSendOptions.extra`) reaches wwebjs untouched, and wwebjs merges it into the message built inside the WhatsApp Web page. The request schema must be a `strictObject`, bound `extra` (key count, depth, size) and the docs must say it is a power-user escape hatch behind the `send` scope; decide with the owner whether to allow-list its keys.
@@ -233,7 +233,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 4.4 | done | `feat/4-4-swagger-zod` | 2026-10-28 |
 | 4.5 | done | `feat/4-5-system-health-keys` | 2026-10-28 |
 | 4.6 | done | `feat/4-6-sessions-qr` | 2026-10-28 |
-| 4.7 | todo | - | - |
+| 4.7 | done | `feat/4-7-main-ratelimit-guard` | 2026-10-29 |
 | 4.8 | todo | - | - |
 | 5.1 | todo | - | - |
 | 5.2 | todo | - | - |

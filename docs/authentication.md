@@ -44,6 +44,7 @@ is treated as `admin`, so a forgotten declaration closes the route instead of op
 | 403 | `IP_NOT_ALLOWED` | the client address is outside the key's `allowedCidrs` |
 | 403 | `INSUFFICIENT_SCOPE` | the key lacks the scope of the operation |
 | 403 | `FORBIDDEN` | a session key asks for another session |
+| 429 | `RATE_LIMITED` | the key or the client address went over `RATE_LIMIT_MAX` requests in a minute |
 
 The checks run in that order: key, revocation, expiry, address, scope, session.
 
@@ -63,6 +64,22 @@ proxy-less address of its own connection.
 
 The environment key (`ADMIN_API_KEY`) has no address list, so keep the admin endpoints behind a
 network restriction of their own.
+
+## Rate limit
+
+Every HTTP route is limited, the public ones (`/health`, `/ready`, `/metrics`) and the failed
+authentications included, because an unknown key costs a database lookup and `/ready` pings Postgres
+and Redis. Two buckets of `RATE_LIMIT_MAX` requests per minute apply to a request, both shared by all
+the routes:
+
+- **Per client address** (`TRUST_PROXY_HOPS` decides which address that is). It is checked first and
+  is what bounds a caller who invents a new key for every request.
+- **Per API key**, for a request that carries one (`X-API-Key` or `Authorization: Bearer`), whatever
+  the address, keyed by the hash of the key.
+
+The limit runs before the guard of the API key, so a refused request never reaches the key lookup. The
+answer is 429 `RATE_LIMITED` in the error contract, with a `Retry-After` header in seconds. The counters
+live in the memory of the process (the gateway runs as a single instance), so a restart resets them.
 
 ## Revocation and the cache
 
@@ -120,7 +137,8 @@ curl -X POST http://localhost:3000/v1/api-keys \
 
 Built: the guard, `AuthService`, the scopes, the address allowlist, the session helper and the key
 management operations above. `AuthModule` is imported by the modules that have controllers
-(`SystemModule`, `ApiKeysModule`) and registers the guard globally.
+(`SystemModule`, `ApiKeysModule`) and registers the guard globally. `RateLimitModule` is imported
+before them in `AppModule`, which is what puts the limit ahead of the guard.
 
 Not built yet:
 

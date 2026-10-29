@@ -12,6 +12,7 @@ import { AppModule } from './app.module.js'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js'
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor.js'
 import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor.js'
+import { envSchema } from './config/env.schema.js'
 import type { ApiKey } from './database/models.js'
 import { PrismaService } from './database/prisma.service.js'
 import { type NewApiKey, ApiKeysRepository } from './database/repositories/api-keys.repository.js'
@@ -170,6 +171,25 @@ describe('AppModule over HTTP', () => {
     expect(response.json()).toMatchObject({
       error: { code: 'NOT_FOUND', requestId: response.headers['x-request-id'] }
     })
+  })
+
+  it('limits a caller that keeps sending unknown keys before any key is looked up', async () => {
+    const send = () =>
+      app.inject({
+        method: 'GET',
+        url: '/v1/api-keys',
+        headers: { 'x-api-key': 'wgk_unknown' },
+        remoteAddress: '192.0.2.50'
+      })
+    const lookups = jest.spyOn(keys, 'findByHash')
+
+    for (let i = 0; i < envSchema.shape.RATE_LIMIT_MAX.parse(undefined); i++) await send()
+    const refused = await send()
+
+    expect(refused.statusCode).toBe(429)
+    expect(refused.json()).toMatchObject({ error: { code: 'RATE_LIMITED' } })
+    expect(lookups).toHaveBeenCalledTimes(envSchema.shape.RATE_LIMIT_MAX.parse(undefined))
+    lookups.mockRestore()
   })
 
   it('counts the responses in the metrics', async () => {

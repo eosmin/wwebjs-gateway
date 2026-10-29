@@ -32,6 +32,7 @@ optional: it carries extra data of some codes (the issues of a `VALIDATION_ERROR
 | `DUPLICATE_CONTENT` | 422 Unprocessable Entity | The same text was already sent to too many different chats in a short time (rule of the send policy). |
 | `RECIPIENT_SUPPRESSED` | 422 Unprocessable Entity | The chat is on the suppression list of the session (rule of the send policy). |
 | `RECIPIENT_UNREACHABLE` | 422 Unprocessable Entity | The chat is flagged unreachable, so cold sends to it are rejected (rule of the send policy). |
+| `RATE_LIMITED` | 429 Too Many Requests | The API key or the client address sent more than RATE_LIMIT_MAX requests in a minute; wait the seconds in the Retry-After header. |
 | `INTERNAL` | 500 Internal Server Error | Unexpected failure of the gateway; the message is hidden in production. |
 | `UNKNOWN_OUTCOME` | 502 Bad Gateway | The send timed out after it was dispatched, so whether it reached WhatsApp is unknown; it is never retried automatically. |
 | `ACK_ERROR` | 502 Bad Gateway | WhatsApp reported a delivery error (ack -1) for the message. |
