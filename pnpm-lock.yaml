@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@fastify/cors':
+        specifier: 11.3.1
+        version: 11.3.1
       '@fastify/helmet':
         specifier: 13.2.0
         version: 13.2.0
