@@ -172,5 +172,15 @@ export default defineConfig([
       '@typescript-eslint/no-require-imports': 'off'
     }
   },
-  { ignores: ['**/dist/**', '**/generated/**', '**/coverage/**', 'docs/**'] }
+  // .wwebjs_*: the browser profile of a session holds JavaScript downloaded by Chromium
+  {
+    ignores: [
+      '**/dist/**',
+      '**/generated/**',
+      '**/coverage/**',
+      '**/.wwebjs_auth/**',
+      '**/.wwebjs_cache/**',
+      'docs/**'
+    ]
+  }
 ])
