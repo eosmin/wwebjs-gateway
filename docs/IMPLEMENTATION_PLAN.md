@@ -86,7 +86,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 ## Milestone 5 — Messaging (`feat/messaging`) — TDD §6.8, §6.8.1
 
 - [x] **5.1** `send-policy.service.ts`. *Done when:* every rule of §6.8.1 has a passing test, including the offline-recipient case.
-- [ ] **5.2** `send-queue.service.ts` and the Bull Board mount (`/admin/queues`, admin-only, flag `BULL_BOARD_ENABLED`). *Done when:* ordering, idempotency, restart durability and `UNKNOWN_OUTCOME` tests pass.
+- [x] **5.2** `send-queue.service.ts` and the Bull Board mount (`/admin/queues`, admin-only, flag `BULL_BOARD_ENABLED`). *Done when:* ordering, idempotency, restart durability and `UNKNOWN_OUTCOME` tests pass.
 - [ ] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
 - [ ] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
 - [ ] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
@@ -168,7 +168,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [x] **4.6** `GET /v1/system/info` adds the WhatsApp Web version and the live status of each session once `SessionManager` is registered (TDD §6.11 lists it; step 4.5 reports versions, uptime and counts by status only).
 - [x] **4.7** Rate limit (`@nestjs/throttler` 6.7.1, TDD §2 and §6.14, `RATE_LIMIT_MAX`) keyed by API key or IP, including the public routes `/ready`, `/metrics` and the failed-authentication path (each unknown key costs one database lookup, and `/ready` pings Postgres and Redis per call). No step owned it before; found in the security review of 4.5.
 - [x] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
-- [ ] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
+- [x] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
 - [ ] **5.5 and 7.4** Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
 - [ ] **7.4** Decide and implement the production guard for `ALLOW_PRIVATE_WEBHOOK_TARGETS` (see TDD §11 PENDING).
 - [ ] **3.x, the first step that logs message data** Decide which keys count as message content beyond `body`, `text` and `caption` (see TDD §11 PENDING), and never pass a secret as a `child()` logger binding: bindings bypass redaction.
@@ -178,7 +178,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [x] **3.7** `seq` is a Redis `INCR`, and Redis runs with AOF `everysec`: a Redis crash can lose about a second of increments, so `seq` could repeat numbers already delivered, which breaks "strictly increasing". When a session starts, raise `seq:<id>` to at least the last `seq` known to have been delivered (keep a high-water mark in Postgres, written every N events and on session stop), or document the limit in the operations guide if that is judged too costly.
 - [x] **3.7** The session manager must `await` `EventPipelineService.open(sessionId, client, { orderingEnabled: settings.ordering.enabled })` BEFORE it initializes the client (a new one on every start; events emitted earlier are not seen) and `close(sessionId)` when it stops it, and publish its own events (`session_status`, ...) with `EventPipelineService.publish` so they share the `seq` counter. Deleting a session must also delete its Redis keys `seq:<id>` and `dedupe:<id>:*`.
 - [x] **3.8** `SessionManager` keeps no `startedAt` and has no public way into its reconnect path yet: the watchdog needs both (stuck startup restarts the session; a blocking state sets `failed` + `lastError` instead of looping, a failed health check goes through the reconnect). Add them there, with `WATCHDOG_*` documented in `docs/sessions.md`.
-- [ ] **5.2** The memory guard of the watchdog (TDD §6.5: process RSS above `MEMORY_RESTART_THRESHOLD_MB` restarts the largest idle session, never mid-send) was left out of 3.8: it needs the send queue to know a session is idle, and a way to tell which session is the largest (the port has no per-session memory). Add both here, with tests, and remove the "not part of this pass yet" note from `docs/sessions.md`.
+- [x] **5.2** The memory guard of the watchdog (TDD §6.5: process RSS above `MEMORY_RESTART_THRESHOLD_MB` restarts the largest idle session, never mid-send) was left out of 3.8: it needs the send queue to know a session is idle, and a way to tell which session is the largest (the port has no per-session memory). Add both here, with tests, and remove the "not part of this pass yet" note from `docs/sessions.md`.
 - [x] **4.6** Register `SessionManager` and `WatchdogService` in a module (none exists yet) and import it into `AppModule`: until then neither runs. The boot test of 4.6 must cover the watchdog timer starting and stopping with the app.
 - [x] **5.x, the sessions API** The `Session` rows that `SessionManager` returns carry `seqHighWater` (a `bigint`, which `JSON.stringify` rejects). The mapper to the session DTO must leave it out; add a test that a DTO serializes.
 - [x] **3.9** The manager does not call the reconciler (it comes later in the dependency order): subscribe to `session_status` with `status: 'ready'` on the `EventBusService`.
@@ -236,7 +236,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 4.7 | done | `feat/4-7-main-ratelimit-guard` | 2026-10-29 |
 | 4.8 | done | `feat/4-8-parity-skeleton` | 2026-10-29 |
 | 5.1 | done | `feat/5-1-send-policy` | 2026-10-29 |
-| 5.2 | todo | - | - |
+| 5.2 | done | `feat/5-2-send-queue` | 2026-10-29 |
 | 5.3 | todo | - | - |
 | 5.4 | todo | - | - |
 | 5.5 | todo | - | - |

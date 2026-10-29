@@ -4,10 +4,11 @@
 FROM node:24.20.0-bookworm-slim AS base
 # upgrade: the base image is pinned to a Node release, so the Debian fixes published since then are
 # applied here. OpenSSL is installed because the Prisma engines are picked by the OpenSSL they find,
-# in the stage that downloads them and in the one that loads them.
+# in the stage that downloads them and in the one that loads them. procps provides `ps`, which the
+# memory guard of the watchdog uses to measure the browsers (the slim image has none).
 RUN apt-get update \
   && apt-get upgrade -y \
-  && apt-get install -y --no-install-recommends openssl \
+  && apt-get install -y --no-install-recommends openssl procps \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 

@@ -254,7 +254,7 @@ export const WA_EVENTS = {
   },
   session_error: {
     fires:
-      'The session hit a failure before the manager reacted: Chromium crashed, WhatsApp calls time out, or sending degraded (SEND_HEALTH_DEGRADED).',
+      'The session hit a failure before the manager reacted: Chromium crashed, WhatsApp calls time out, or sending degraded (SEND_HEALTH_DEGRADED) or paused (SEND_BREAKER_OPEN).',
     payload: z.object({ code: z.string(), message: z.string() })
   },
   chat_suppressed: {

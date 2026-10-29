@@ -28,6 +28,6 @@ import { createWwebjsClientFactory } from './wwebjs-adapter.js'
       inject: [APP_CONFIG]
     }
   ],
-  exports: [EventBusService, EventPipelineService, SessionManager]
+  exports: [EventBusService, EventPipelineService, SessionManager, WatchdogService]
 })
 export class WhatsAppModule {}

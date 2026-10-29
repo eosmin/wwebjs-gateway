@@ -8,6 +8,7 @@ allowBuilds:
   puppeteer: false
   '@parcel/watcher': false
   '@scarf/scarf': false
+  msgpackr-extract: false
 
 # nestjs-zod 5.5.0 declares peers up to Nest 11 / @nestjs/swagger 11; it only uses the public decorator and
 # pipe APIs, which Nest 12 keeps. The boot test of the docs (src/api/docs) fails if that ever stops being true

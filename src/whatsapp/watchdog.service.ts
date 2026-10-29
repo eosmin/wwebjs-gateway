@@ -13,6 +13,11 @@ import type { AppConfig } from '../config/env.schema.js'
 import { SessionManager, type RunningSession } from './session-manager.service.js'
 
 const STATE_TIMEOUT_MS = 10_000
+const MEMORY_TIMEOUT_MS = 5000
+const BYTES_PER_MB = 1024 * 1024
+// After a restart for memory the guard waits this long before it can act again: a gateway that is
+// big on its own would otherwise restart one session after another
+const MEMORY_RESTART_COOLDOWN_MS = 10 * 60_000
 const HEALTHY_STATE = 'CONNECTED'
 // A blocking state must be read this many checks in a row before the session is failed: failing
 // ends the retries, so one transient answer (a phone that is briefly offline) must not do it
@@ -61,6 +66,10 @@ export class WatchdogService implements OnApplicationBootstrap, BeforeApplicatio
   private readonly blocked = new Map<string, FailureCount>()
   // Sessions with a request in flight: one at a time, so a busy queue does not collect copies
   private readonly pending = new Set<string>()
+  // Answers true for a session that must not be restarted now (it is sending)
+  private readonly busyChecks = new Set<(sessionId: string) => boolean>()
+  private readonly unreadableMemory = new Set<string>()
+  private lastMemoryRestartAt = Number.NEGATIVE_INFINITY
   private timer: NodeJS.Timeout | undefined
   private checking = false
 
@@ -81,6 +90,11 @@ export class WatchdogService implements OnApplicationBootstrap, BeforeApplicatio
     this.timer = undefined
   }
 
+  // The send queue registers here: the memory guard never restarts a session in the middle of a send
+  addBusyCheck(check: (sessionId: string) => boolean): void {
+    this.busyChecks.add(check)
+  }
+
   // One pass over every session. A pass that finds the previous one still running does nothing, so
   // a slow browser cannot pile up checks.
   async check(): Promise<void> {
@@ -92,6 +106,7 @@ export class WatchdogService implements OnApplicationBootstrap, BeforeApplicatio
       for (const counts of [this.failures, this.blocked]) {
         for (const id of counts.keys()) if (!ids.has(id)) counts.delete(id)
       }
+      for (const id of this.unreadableMemory) if (!ids.has(id)) this.unreadableMemory.delete(id)
       await Promise.all(
         runs.map(run =>
           this.inspect(run).catch((error: unknown) => {
@@ -99,9 +114,85 @@ export class WatchdogService implements OnApplicationBootstrap, BeforeApplicatio
           })
         )
       )
+      await this.guardMemory(runs).catch((error: unknown) => {
+        this.logger.error(`Memory guard failed to run (${errorKind(error)})`)
+      })
     } finally {
       this.checking = false
     }
+  }
+
+  // MEMORY_RESTART_THRESHOLD_MB counts the gateway process and the browsers of its sessions (each
+  // Chromium is a process of its own, so the gateway alone would never show the growth). Over the
+  // limit, the ready session with the biggest browser that is not sending is restarted.
+  private async guardMemory(runs: RunningSession[]): Promise<void> {
+    const limit = this.config.MEMORY_RESTART_THRESHOLD_MB * BYTES_PER_MB
+    if (limit === 0 || Date.now() - this.lastMemoryRestartAt < MEMORY_RESTART_COOLDOWN_MS) return
+    const sizes = await Promise.all(
+      runs.map(async run => ({ run, bytes: await this.readMemory(run) }))
+    )
+    const own = process.memoryUsage().rss
+    const total = sizes.reduce((sum, { bytes }) => sum + (bytes ?? 0), own)
+    if (total <= limit) return
+    // Restarting a browser cannot lower what the gateway itself holds, and it would only cycle the sessions
+    if (own > limit) {
+      this.logger.warn(
+        `The gateway process alone uses ${Math.round(own / BYTES_PER_MB)} MB, over the limit: no session is restarted for it`
+      )
+      return
+    }
+
+    const candidates = sizes.filter(
+      ({ run, bytes }) => run.status === 'ready' && bytes !== undefined && !this.isBusy(run.id)
+    )
+    const largest = candidates.reduce<(typeof candidates)[number] | undefined>(
+      (best, entry) => ((entry.bytes ?? 0) > (best?.bytes ?? -1) ? entry : best),
+      undefined
+    )
+    const totalMb = Math.round(total / BYTES_PER_MB)
+    if (!largest) {
+      this.logger.warn(
+        `Memory is ${totalMb} MB, over the limit, and no idle session can be restarted`
+      )
+      return
+    }
+    const sessionMb = Math.round((largest.bytes ?? 0) / BYTES_PER_MB)
+    this.request(largest.run, () => {
+      // The restart waits in the queue of the session: a send may have started since it was chosen
+      if (this.isBusy(largest.run.id)) return Promise.resolve()
+      // The cooldown starts when a restart is really asked for, not when a session was chosen
+      this.lastMemoryRestartAt = Date.now()
+      this.logger.warn(
+        `[${largest.run.id}] Memory is ${totalMb} MB, over the limit: restarting the largest idle session (${sessionMb} MB)`
+      )
+      return this.manager.reconnectRun(
+        largest.run,
+        'WATCHDOG_MEMORY',
+        `memory ${totalMb} MB over MEMORY_RESTART_THRESHOLD_MB`
+      )
+    })
+  }
+
+  private isBusy(sessionId: string): boolean {
+    for (const check of this.busyChecks) if (check(sessionId)) return true
+    return false
+  }
+
+  private async readMemory(run: RunningSession): Promise<number | undefined> {
+    let bytes: number | undefined
+    try {
+      bytes = await withTimeout(run.client.getBrowserMemoryBytes(), MEMORY_TIMEOUT_MS, 'memory')
+    } catch {
+      bytes = undefined
+    }
+    // Without it the guard is blind to this session, which is worth knowing once per outage
+    if (bytes !== undefined) {
+      this.unreadableMemory.delete(run.id)
+    } else if (!this.unreadableMemory.has(run.id)) {
+      this.unreadableMemory.add(run.id)
+      this.logger.warn(`[${run.id}] The memory guard cannot read the memory of the browser`)
+    }
+    return bytes
   }
 
   private async inspect(run: RunningSession): Promise<void> {

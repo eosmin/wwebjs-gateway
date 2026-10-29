@@ -450,7 +450,7 @@ A queued message failed for good.
 
 ### `session_error`
 
-The session hit a failure before the manager reacted: Chromium crashed, WhatsApp calls time out, or sending degraded (SEND_HEALTH_DEGRADED).
+The session hit a failure before the manager reacted: Chromium crashed, WhatsApp calls time out, or sending degraded (SEND_HEALTH_DEGRADED) or paused (SEND_BREAKER_OPEN).
 
 `data` holds:
 

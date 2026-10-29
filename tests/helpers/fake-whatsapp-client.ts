@@ -185,6 +185,7 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
     platform: 'android',
     pushname: 'Fake'
   }))
+  readonly getBrowserMemoryBytes = this.stub('getBrowserMemoryBytes', () => 100 * 1024 * 1024)
   readonly getBatteryStatus = this.stub('getBatteryStatus', () => ({ battery: 100, plugged: true }))
   readonly requestPairingCode = this.stub('requestPairingCode', () => 'ABCD-1234')
   readonly cancelPairingCode = this.stub('cancelPairingCode', () => undefined)
