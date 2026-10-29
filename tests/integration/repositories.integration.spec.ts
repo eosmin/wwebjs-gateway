@@ -868,6 +868,36 @@ describe('repositories (integration)', () => {
       expect(await messages.findById(id, 'm1')).toBeNull()
     })
 
+    it('tells when the contact last wrote in a chat by arrival, ignoring our own messages and other chats', async () => {
+      const sessionId = await newSession('msg-last-in')
+      const at = (second: number): Date => new Date(Date.UTC(2026, 5, 1, 10, 0, second))
+      // The sender's clock is wrong on the first message: it claims a time far in the future
+      await messages.upsert(message(sessionId, 'a', { sentAt: at(9000), receivedAt: at(1) }))
+      await messages.upsert(message(sessionId, 'b', { sentAt: at(2), receivedAt: at(5) }))
+      await messages.upsert(
+        message(sessionId, 'mine', { direction: 'out', fromMe: true, receivedAt: at(9) })
+      )
+      await messages.upsert(message(sessionId, 'x', { chatId: 'other@c.us', receivedAt: at(12) }))
+
+      expect(await messages.lastIncomingAt(sessionId, 'chat@c.us')).toEqual(at(5))
+      expect(await messages.lastIncomingAt(sessionId, 'nobody@c.us')).toBeNull()
+    })
+
+    it('lists the last messages we sent to a chat, newest first, with their ack', async () => {
+      const sessionId = await newSession('msg-recent-out')
+      const at = (second: number): Date => new Date(Date.UTC(2026, 5, 1, 10, 0, second))
+      const out = { direction: 'out', fromMe: true } as const
+      await messages.upsert(message(sessionId, 'o1', { ...out, ack: 3, sentAt: at(1) }))
+      await messages.upsert(message(sessionId, 'o2', { ...out, ack: 1, sentAt: at(2) }))
+      await messages.upsert(message(sessionId, 'o3', { ...out, ack: 1, sentAt: at(3) }))
+      await messages.upsert(message(sessionId, 'in', { sentAt: at(4) }))
+
+      expect(await messages.listRecentOutgoing(sessionId, 'chat@c.us', 2)).toEqual([
+        { ack: 1, sentAt: at(3) },
+        { ack: 1, sentAt: at(2) }
+      ])
+    })
+
     it('purges what arrived before the cutoff, but keeps a message that was never published', async () => {
       const sessionId = await newSession('msg-purge')
       const old = { receivedAt: LONG_AGO }
