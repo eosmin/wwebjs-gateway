@@ -87,7 +87,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 - [x] **5.1** `send-policy.service.ts`. *Done when:* every rule of §6.8.1 has a passing test, including the offline-recipient case.
 - [x] **5.2** `send-queue.service.ts` and the Bull Board mount (`/admin/queues`, admin-only, flag `BULL_BOARD_ENABLED`). *Done when:* ordering, idempotency, restart durability and `UNKNOWN_OUTCOME` tests pass.
-- [ ] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
+- [x] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
 - [ ] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
 - [ ] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
 - [ ] **5.6** Polls and events controller.
@@ -237,7 +237,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 4.8 | done | `feat/4-8-parity-skeleton` | 2026-10-29 |
 | 5.1 | done | `feat/5-1-send-policy` | 2026-10-29 |
 | 5.2 | done | `feat/5-2-send-queue` | 2026-10-29 |
-| 5.3 | todo | - | - |
+| 5.3 | done | `feat/5-3-message-store` | 2026-10-29 |
 | 5.4 | todo | - | - |
 | 5.5 | todo | - | - |
 | 5.6 | todo | - | - |
