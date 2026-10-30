@@ -2,8 +2,13 @@ import { Module } from '@nestjs/common'
 
 import { WhatsAppModule } from '../whatsapp/whatsapp.module.js'
 
+import { HumanizeDefaultsService } from './humanize-defaults.service.js'
 import { IdempotentSendService } from './idempotent-send.service.js'
+import { MediaResolverService } from './media-resolver.service.js'
+import { MessageSendService } from './message-send.service.js'
 import { MessageStoreService } from './message-store.service.js'
+import { MessagesService } from './messages.service.js'
+import { RecipientResolverService } from './recipient-resolver.service.js'
 import { SendPolicyService } from './send-policy.service.js'
 import { PolicyStateStore, RedisPolicyStateStore } from './send-policy.store.js'
 import { SendQueueService } from './send-queue.service.js'
@@ -16,8 +21,20 @@ import { SendQueueService } from './send-queue.service.js'
     SendQueueService,
     IdempotentSendService,
     MessageStoreService,
+    RecipientResolverService,
+    MediaResolverService,
+    HumanizeDefaultsService,
+    MessageSendService,
+    MessagesService,
     { provide: PolicyStateStore, useClass: RedisPolicyStateStore }
   ],
-  exports: [SendPolicyService, SendQueueService, IdempotentSendService, MessageStoreService]
+  exports: [
+    SendPolicyService,
+    SendQueueService,
+    IdempotentSendService,
+    MessageStoreService,
+    MessageSendService,
+    MessagesService
+  ]
 })
 export class MessagingModule {}
