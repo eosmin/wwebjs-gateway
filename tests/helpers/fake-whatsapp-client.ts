@@ -124,6 +124,12 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
     return this
   }
 
+  // Back to the default answer of `method`
+  unscript(method: PortMethod): this {
+    delete this.scripts[method]
+    return this
+  }
+
   // The next `times` calls of `method` reject with `error`, then it goes back to normal
   failNext(
     method: PortMethod,

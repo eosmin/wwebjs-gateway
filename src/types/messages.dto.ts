@@ -141,6 +141,16 @@ const MediaSource = z.union([
 
 export type MediaSource = z.infer<typeof MediaSource>
 
+// What defines a scheduled event, for sending one and for editing one
+export const EventFields = {
+  name: z.string().min(1).max(255),
+  startTime: z.iso.datetime(),
+  endTime: z.iso.datetime().optional(),
+  description: z.string().max(2048).optional(),
+  location: z.string().max(255).optional(),
+  callType: z.enum(['voice', 'video']).optional()
+}
+
 // The content variants, shared by the send and the reply bodies; `extra` is what differs between them
 function variants<E extends z.ZodRawShape>(extra: E) {
   const base = { ...commonShape, ...extra }
@@ -198,12 +208,7 @@ function variants<E extends z.ZodRawShape>(extra: E) {
     z.strictObject({
       ...base,
       type: z.literal('event'),
-      name: z.string().min(1).max(255),
-      startTime: z.iso.datetime(),
-      endTime: z.iso.datetime().optional(),
-      description: z.string().max(2048).optional(),
-      location: z.string().max(255).optional(),
-      callType: z.enum(['voice', 'video']).optional()
+      ...EventFields
     }),
     z.strictObject({
       ...base,

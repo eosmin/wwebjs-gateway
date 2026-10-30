@@ -5,6 +5,7 @@ import { Test } from '@nestjs/testing'
 
 import type { SessionsRepository } from '../../src/database/repositories/sessions.repository.js'
 import type { RedisService } from '../../src/infra/redis/redis.service.js'
+import type { MessageDto } from '../../src/types/dto.js'
 import { WaOperationError } from '../../src/whatsapp/wa-errors.js'
 import { REAL_ENV, TEST_ENV, setEnv } from '../helpers/env.js'
 import {
@@ -757,6 +758,389 @@ describe('messages API (integration)', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json<{ items: unknown[] }>().items.length).toBeLessThanOrEqual(2)
       expect(response.json()).toHaveProperty('nextCursor')
+    })
+  })
+
+  // Step 5.6
+  describe('polls, events and group invites', () => {
+    const messageId = 'false_x@c.us_POLL1'
+    const encoded = encodeURIComponent(messageId)
+    const path = (suffix: string) => `/v1/sessions/${id}/${suffix}`
+    const poll = buildMessageDto({
+      id: messageId,
+      type: 'poll_creation',
+      pollName: 'Dia de entrega',
+      pollOptions: ['Martes', 'Jueves']
+    })
+    const event = buildMessageDto({
+      id: messageId,
+      type: 'scheduled_event_creation',
+      fromMe: true
+    })
+    const invite = {
+      inviteCode: 'ABCDEF',
+      inviteCodeExp: 1_767_225_600,
+      groupId: '120363000000000001@g.us',
+      fromId: '5215500000002@c.us',
+      toId: '5215500000001@c.us'
+    }
+    const vote = {
+      voter: '5215500000002@c.us',
+      selectedOptions: [{ id: 0, name: 'Martes' }],
+      interactedAtTs: 1_767_225_600_000,
+      parentMessageId: messageId
+    }
+    const eventBody = {
+      name: 'Entrega',
+      startTime: '2026-02-01T18:00:00.000Z',
+      endTime: '2026-02-01T19:00:00.000Z',
+      description: 'Pedidos del mes',
+      location: 'Bodega',
+      callType: 'video',
+      isEventCanceled: false
+    }
+    const calls = (method: Parameters<FakeWhatsAppClient['callsOf']>[0]) =>
+      client().callsOf(method).length
+
+    // The scripts live on the client every test of the file shares
+    afterEach(() => {
+      for (const method of [
+        'getMessageById',
+        'getPollVotes',
+        'sendResponseToScheduledEvent',
+        'editScheduledEvent'
+      ] as const) {
+        client().unscript(method)
+      }
+    })
+
+    describe('poll votes', () => {
+      it('reads the votes from both routes, and an empty poll gives no items', async () => {
+        client().script('getMessageById', () => poll)
+        client().script('getPollVotes', () => [vote])
+
+        const byPoll = await call('GET', path(`polls/${encoded}/votes`))
+        const byMessage = await call('GET', path(`messages/${encoded}/poll-votes`))
+        client().unscript('getPollVotes')
+        const empty = await call('GET', path(`polls/${encoded}/votes`))
+
+        expect(byPoll.json()).toEqual({ items: [vote] })
+        expect(byMessage.json()).toEqual({ items: [vote] })
+        expect(empty.json()).toEqual({ items: [] })
+      })
+
+      it('404s on a missing message and 400s on a message that is not a poll', async () => {
+        client().script('getMessageById', () => null)
+        const missing = await call('GET', path(`polls/${encoded}/votes`))
+        client().script('getMessageById', () => event)
+        const notPoll = await call('GET', path(`messages/${encoded}/poll-votes`))
+
+        expect(missing.statusCode).toBe(404)
+        expect(notPoll.statusCode).toBe(400)
+        expect(notPoll.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } })
+      })
+
+      it('votes, and removes the vote with an empty list', async () => {
+        client().script('getMessageById', () => poll)
+        const before = calls('vote')
+
+        const voted = await post(`messages/${encoded}/vote`, { selectedOptions: ['Martes'] })
+        const removed = await post(`messages/${encoded}/vote`, { selectedOptions: [] })
+
+        expect(voted.statusCode).toBe(204)
+        expect(removed.statusCode).toBe(204)
+        expect(
+          client()
+            .callsOf('vote')
+            .slice(before)
+            .map(c => c.args)
+        ).toEqual([
+          [messageId, ['Martes']],
+          [messageId, []]
+        ])
+      })
+
+      it.each([
+        ['an unknown key', { selectedOptions: [], extra: 1 }],
+        ['no selectedOptions', {}],
+        [
+          'more than 12 options',
+          { selectedOptions: Array.from({ length: 13 }, (_, n) => `o${n}`) }
+        ],
+        ['an empty name', { selectedOptions: [''] }],
+        ['a name over 100 characters', { selectedOptions: ['x'.repeat(101)] }]
+      ])('refuses a vote body with %s, without calling the client', async (_label, body) => {
+        const before = calls('vote')
+
+        const response = await post(`messages/${encoded}/vote`, body)
+
+        expect(response.statusCode).toBe(400)
+        expect(calls('vote')).toBe(before)
+      })
+
+      it('refuses a name that matches no option, a message that is not a poll and a missing one', async () => {
+        const before = calls('vote')
+        client().script('getMessageById', () => poll)
+        const unknown = await post(`messages/${encoded}/vote`, { selectedOptions: ['Lunes'] })
+        client().script('getMessageById', () => event)
+        const notPoll = await post(`messages/${encoded}/vote`, { selectedOptions: [] })
+        client().script('getMessageById', () => null)
+        const missing = await post(`messages/${encoded}/vote`, { selectedOptions: [] })
+
+        expect(unknown.statusCode).toBe(400)
+        expect(unknown.json()).toMatchObject({
+          error: { details: { unknownOptions: ['Lunes'] } }
+        })
+        expect(notPoll.statusCode).toBe(400)
+        expect(missing.statusCode).toBe(404)
+        expect(calls('vote')).toBe(before)
+      })
+    })
+
+    describe('scheduled events', () => {
+      it.each([0, 1, 2, 3])('sends the response %i of the body', async response => {
+        client().script('getMessageById', () => event)
+        const before = calls('sendResponseToScheduledEvent')
+
+        const answered = await post(`events/${encoded}/response`, { response })
+
+        expect(answered.statusCode).toBe(204)
+        expect(client().callsOf('sendResponseToScheduledEvent').slice(before)[0]?.args).toEqual([
+          response,
+          messageId
+        ])
+      })
+
+      it.each([
+        ['4', { response: 4 }],
+        ['-1', { response: -1 }],
+        ['1.5', { response: 1.5 }],
+        ['a string', { response: '1' }],
+        ['a missing response', {}],
+        ['an unknown key', { response: 1, extra: true }]
+      ])('refuses %s, without calling the client', async (_label, body) => {
+        const before = calls('sendResponseToScheduledEvent')
+
+        const response = await post(`events/${encoded}/response`, body)
+
+        expect(response.statusCode).toBe(400)
+        expect(calls('sendResponseToScheduledEvent')).toBe(before)
+      })
+
+      it('404s when WhatsApp does not have the event', async () => {
+        client().script('getMessageById', () => event)
+        client().script('sendResponseToScheduledEvent', () => false)
+
+        expect((await post(`events/${encoded}/response`, { response: 2 })).statusCode).toBe(404)
+      })
+
+      it('404s on a missing message and 400s on one that is not an event, without sending', async () => {
+        const before = calls('sendResponseToScheduledEvent')
+        client().script('getMessageById', () => null)
+        const missing = await post(`events/${encoded}/response`, { response: 1 })
+        client().script('getMessageById', () => poll)
+        const notEvent = await post(`events/${encoded}/response`, { response: 1 })
+
+        expect(missing.statusCode).toBe(404)
+        expect(notEvent.statusCode).toBe(400)
+        expect(calls('sendResponseToScheduledEvent')).toBe(before)
+      })
+
+      it('edits an event and passes every field to the client as dates and options', async () => {
+        client().script('getMessageById', () => event)
+        client().script('editScheduledEvent', () => event)
+        const before = calls('editScheduledEvent')
+
+        const edited = await call('PATCH', path(`events/${encoded}`), eventBody)
+
+        expect(edited.statusCode).toBe(200)
+        expect(edited.json()).toMatchObject({ id: messageId })
+        expect(client().callsOf('editScheduledEvent').slice(before)[0]?.args).toEqual([
+          messageId,
+          {
+            type: 'event',
+            name: 'Entrega',
+            startTime: new Date(eventBody.startTime),
+            endTime: new Date(eventBody.endTime),
+            description: 'Pedidos del mes',
+            location: 'Bodega',
+            callType: 'video',
+            isEventCanceled: false
+          }
+        ])
+      })
+
+      it('fails with WHATSAPP_ERROR when WhatsApp does not edit, or the event is not ours', async () => {
+        client().script('getMessageById', () => event)
+        client().script('editScheduledEvent', () => null)
+        const refused = await call('PATCH', path(`events/${encoded}`), eventBody)
+        const before = calls('editScheduledEvent')
+        client().script('getMessageById', () => ({ ...event, fromMe: false }))
+        const foreign = await call('PATCH', path(`events/${encoded}`), eventBody)
+
+        expect(refused.statusCode).toBe(502)
+        expect(refused.json()).toMatchObject({ error: { code: 'WHATSAPP_ERROR' } })
+        expect(foreign.statusCode).toBe(502)
+        expect(calls('editScheduledEvent')).toBe(before)
+      })
+
+      it('404s on a missing message and 400s on one that is not an event', async () => {
+        client().script('getMessageById', () => null)
+        const missing = await call('PATCH', path(`events/${encoded}`), eventBody)
+        client().script('getMessageById', () => poll)
+        const notEvent = await call('PATCH', path(`events/${encoded}`), eventBody)
+
+        expect(missing.statusCode).toBe(404)
+        expect(notEvent.statusCode).toBe(400)
+      })
+
+      it.each([
+        ['an unknown key', { ...eventBody, extra: 1 }],
+        ['no startTime', { name: 'Entrega' }],
+        ['no name', { startTime: eventBody.startTime }],
+        ['a start that is not a date', { ...eventBody, startTime: 'mañana' }],
+        ['a canceled flag that is not a boolean', { ...eventBody, isEventCanceled: 'yes' }]
+      ])('refuses an edit with %s, without calling the client', async (_label, body) => {
+        const before = calls('editScheduledEvent')
+
+        const response = await call('PATCH', path(`events/${encoded}`), body)
+
+        expect(response.statusCode).toBe(400)
+        expect(calls('editScheduledEvent')).toBe(before)
+      })
+    })
+
+    describe('group invites', () => {
+      it('accepts the invite a message carries', async () => {
+        client().script('getMessageById', () =>
+          buildMessageDto({ id: messageId, inviteV4: invite })
+        )
+        const before = calls('acceptGroupV4Invite')
+
+        const accepted = await post(`messages/${encoded}/accept-group-invite`)
+
+        expect(accepted.statusCode).toBe(200)
+        expect(accepted.json()).toEqual({ status: 200 })
+        expect(client().callsOf('acceptGroupV4Invite').slice(before)).toHaveLength(1)
+        expect(client().callsOf('acceptGroupV4Invite').at(-1)?.args).toEqual([invite])
+      })
+
+      it('404s without an invite or a message, and 400s on an expired invite, without joining', async () => {
+        const before = calls('acceptGroupV4Invite')
+        client().script('getMessageById', () => buildMessageDto({ id: messageId }))
+        const none = await post(`messages/${encoded}/accept-group-invite`)
+        client().script('getMessageById', () => null)
+        const missing = await post(`messages/${encoded}/accept-group-invite`)
+        client().script('getMessageById', () =>
+          buildMessageDto({ id: messageId, inviteV4: { ...invite, inviteCodeExp: 0 } })
+        )
+        const expired = await post(`messages/${encoded}/accept-group-invite`)
+
+        expect(none.statusCode).toBe(404)
+        expect(missing.statusCode).toBe(404)
+        expect(expired.statusCode).toBe(400)
+        expect(calls('acceptGroupV4Invite')).toBe(before)
+      })
+    })
+
+    describe('permissions', () => {
+      const routes: [string, 'POST' | 'PATCH', string, object | undefined, string][] = [
+        ['vote', 'POST', `messages/${encoded}/vote`, { selectedOptions: [] }, 'vote'],
+        [
+          'events.respond',
+          'POST',
+          `events/${encoded}/response`,
+          { response: 1 },
+          'sendResponseToScheduledEvent'
+        ],
+        ['events.edit', 'PATCH', `events/${encoded}`, eventBody, 'editScheduledEvent'],
+        [
+          'accept-group-invite',
+          'POST',
+          `messages/${encoded}/accept-group-invite`,
+          undefined,
+          'acceptGroupV4Invite'
+        ]
+      ]
+
+      it.each(routes)(
+        'a read key cannot use %s, and the client is not called',
+        async (_label, method, suffix, body, clientMethod) => {
+          const created = await call('POST', '/v1/api-keys', {
+            name: 'poll-reader',
+            sessionId: id,
+            scopes: ['read']
+          })
+          const reader = { 'x-api-key': created.json<{ key: string }>().key }
+          const before = calls(clientMethod as Parameters<FakeWhatsAppClient['callsOf']>[0])
+
+          const denied = await call(method, path(suffix), body, reader)
+
+          expect(denied.statusCode).toBe(403)
+          expect(denied.json()).toMatchObject({ error: { code: 'INSUFFICIENT_SCOPE' } })
+          expect(calls(clientMethod as Parameters<FakeWhatsAppClient['callsOf']>[0])).toBe(before)
+        }
+      )
+
+      it.each([
+        ['send', 'vote', 'POST', `messages/${encoded}/vote`, { selectedOptions: [] }, 204],
+        ['send', 'events.respond', 'POST', `events/${encoded}/response`, { response: 1 }, 204],
+        ['send', 'events.edit', 'PATCH', `events/${encoded}`, eventBody, 200],
+        [
+          'manage',
+          'accept-group-invite',
+          'POST',
+          `messages/${encoded}/accept-group-invite`,
+          undefined,
+          200
+        ],
+        ['read', 'polls.votes', 'GET', `polls/${encoded}/votes`, undefined, 200]
+      ] as const)('a %s key can use %s', async (scope, _label, method, suffix, body, status) => {
+        const created = await call('POST', '/v1/api-keys', {
+          name: `poll-${scope}`,
+          sessionId: id,
+          scopes: [scope]
+        })
+        const key = { 'x-api-key': created.json<{ key: string }>().key }
+        const stored: Record<string, MessageDto> = {
+          vote: poll,
+          'polls.votes': poll,
+          'accept-group-invite': buildMessageDto({ id: messageId, inviteV4: invite })
+        }
+        client().script('getMessageById', () => stored[_label] ?? event)
+        client().script('editScheduledEvent', () => event)
+
+        const response = await call(method, path(suffix), body, key)
+
+        expect(response.statusCode).toBe(status)
+      })
+
+      it('a send key can neither read the votes nor accept an invite, and no key is 401', async () => {
+        const sender = await call('POST', '/v1/api-keys', {
+          name: 'poll-sender',
+          sessionId: id,
+          scopes: ['send']
+        })
+        const sendKey = { 'x-api-key': sender.json<{ key: string }>().key }
+        client().script('getMessageById', () => poll)
+        const pollReads = calls('getPollVotes')
+        const accepts = calls('acceptGroupV4Invite')
+
+        const votes = await call('GET', path(`polls/${encoded}/votes`), undefined, sendKey)
+        const accept = await call(
+          'POST',
+          path(`messages/${encoded}/accept-group-invite`),
+          undefined,
+          sendKey
+        )
+        const anonymous = await call('GET', path(`polls/${encoded}/votes`), undefined, {})
+        expect(calls('getPollVotes')).toBe(pollReads)
+        expect(calls('acceptGroupV4Invite')).toBe(accepts)
+
+        expect(votes.statusCode).toBe(403)
+        expect(accept.statusCode).toBe(403)
+        expect(anonymous.statusCode).toBe(401)
+      })
     })
   })
 })

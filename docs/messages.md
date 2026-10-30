@@ -49,6 +49,18 @@ A **forward** is a send like any other: it goes through the queue, the policy, t
 
 Scopes: `send` for sending, replying, reacting, forwarding and editing; `manage` for star, pin and delete; `read` for the rest.
 
+## Polls, events and group invites
+
+| Route | What it does |
+| ----- | ------------ |
+| `GET …/polls/:messageId/votes` and `GET …/messages/:messageId/poll-votes` | The votes of a poll message (`voter`, `selectedOptions`, `interactedAtTs`); `404` when the message does not exist, `400` when it is not a poll. Both routes give the same answer; votes also arrive as `vote_update` events |
+| `POST …/messages/:messageId/vote` | `{ selectedOptions }` (option names) votes in a poll, replacing the previous vote; an empty list removes it; `404` for a missing message, `400` when it is not a poll or a name matches no option. `204` |
+| `POST …/events/:messageId/response` | `{ response }`: `1` going, `2` not going, `3` maybe, `0` removes the answer. `204`; `404` for a missing message, `400` when it is not an event |
+| `PATCH …/events/:messageId` | Edits an event you created. Send the whole event (`name`, `startTime`, and optionally `endTime`, `description`, `location`, `callType`): a field left out is cleared. `isEventCanceled: true` cancels it. Answers with the message; `404`/`400` as a vote; `WHATSAPP_ERROR` for an event somebody else created or one already canceled |
+| `POST …/messages/:messageId/accept-group-invite` | Joins the group of the V4 invite the message carries and answers `{ status }`; `404` when the message is missing or has no invite, `400` when the invite has expired |
+
+Scopes: `read` for the votes, `send` to vote, answer or edit an event, `manage` to accept an invite. Polls and events are created with `messages.send` (`type: poll` or `event`).
+
 ## What a synchronous send does not publish
 
 A send that was accepted with `wait=true` and ended while the caller waited does not publish `message_sent` or `message_failed`: the caller already has the outcome (TDD §6.8, [send-queue.md](send-queue.md)). The events are for sends whose caller did not get the answer: `wait=false`, a timeout that ended in 202, a replay, and a restart. A consumer that follows only the event stream will not see a synchronous send; it sees the message itself as `message_create`, which the pipeline publishes for every message the account sends.
