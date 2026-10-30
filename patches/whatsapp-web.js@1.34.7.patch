@@ -1,0 +1,127 @@
+diff --git a/src/Client.js b/src/Client.js
+index 800109ebf7720d5f0f29091518a8a25f7fd8e381..41f3bd8bc0fbcef49dfc861eef45de51b8a0d181 100644
+--- a/src/Client.js
++++ b/src/Client.js
+@@ -1208,11 +1208,11 @@ class Client extends EventEmitter {
+                             const senderUserJid = sender._serialized;
+ 
+                             let parentMessage = Msg.get(
+-                                parentMsgKey._serialized,
++                                (parentMsgKey._serialized ?? String(parentMsgKey)),
+                             );
+                             if (!parentMessage) {
+                                 const fetched = await Msg.getMessagesById([
+-                                    parentMsgKey._serialized,
++                                    (parentMsgKey._serialized ?? String(parentMsgKey)),
+                                 ]);
+                                 parentMessage = fetched?.messages?.[0] || null;
+                             }
+diff --git a/src/structures/Message.js b/src/structures/Message.js
+index dd977e85b0c0c40d2625cd337264fc9ae3bed17b..e19bd2f554acc13d641901a97ee737a5bd8e6ce3 100644
+--- a/src/structures/Message.js
++++ b/src/structures/Message.js
+@@ -981,7 +981,7 @@ class Message extends Base {
+                     .sendEventEditMessage(eventOptions, msg);
+                 const editedMsg = window
+                     .require('WAWebCollections')
+-                    .Msg.get(msg.id._serialized);
++                    .Msg.get((msg.id._serialized ?? String(msg.id)));
+                 return editedMsg?.serialize();
+             },
+             this.id._serialized,
+diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
+index 540078a9d07b3df07ccd51b030556a72af4cf650..3c9b02102eb0da207ba697dfcd666ee70bbdfc81 100644
+--- a/src/util/Injected/Utils.js
++++ b/src/util/Injected/Utils.js
+@@ -582,7 +582,7 @@ exports.LoadUtils = () => {
+ 
+         return window
+             .require('WAWebCollections')
+-            .Msg.get(newMsgKey._serialized);
++            .Msg.get((newMsgKey._serialized ?? String(newMsgKey)));
+     };
+ 
+     window.WWebJS.editMessage = async (msg, content, options = {}) => {
+@@ -625,7 +625,9 @@ exports.LoadUtils = () => {
+         await window
+             .require('WAWebSendMessageEditAction')
+             .sendMessageEdit(msg, content, internalOptions);
+-        return window.require('WAWebCollections').Msg.get(msg.id._serialized);
++        return window
++            .require('WAWebCollections')
++            .Msg.get((msg.id._serialized ?? String(msg.id)));
+     };
+ 
+     window.WWebJS.toStickerData = async (mediaInfo) => {
+@@ -828,11 +830,12 @@ exports.LoadUtils = () => {
+             msg.replyButtons = JSON.parse(JSON.stringify(msg.replyButtons));
+         }
+ 
+-        if (typeof msg.id.remote === 'object') {
+-            msg.id = Object.assign({}, msg.id, {
+-                remote: msg.id.remote._serialized,
+-            });
+-        }
++        msg.id = Object.assign({}, msg.id, {
++            ...(typeof msg.id.remote === 'object'
++                ? { remote: msg.id.remote._serialized }
++                : {}),
++            _serialized: (msg.id._serialized ?? String(msg.id)),
++        });
+ 
+         delete msg.pendingAckUpdate;
+ 
+@@ -984,12 +987,12 @@ exports.LoadUtils = () => {
+             const lastMessage = chat.lastReceivedKey
+                 ? window
+                       .require('WAWebCollections')
+-                      .Msg.get(chat.lastReceivedKey._serialized) ||
++                      .Msg.get((chat.lastReceivedKey._serialized ?? String(chat.lastReceivedKey))) ||
+                   (
+                       await window
+                           .require('WAWebCollections')
+                           .Msg.getMessagesById([
+-                              chat.lastReceivedKey._serialized,
++                              (chat.lastReceivedKey._serialized ?? String(chat.lastReceivedKey)),
+                           ])
+                   )?.messages?.[0]
+                 : null;
+diff --git a/src/util/Puppeteer.js b/src/util/Puppeteer.js
+index 54df7005b474f00cd4e290eecd941e40caaf434e..5b495a954b844e4a81fd9066cf7d556279225402 100644
+--- a/src/util/Puppeteer.js
++++ b/src/util/Puppeteer.js
+@@ -11,13 +11,28 @@
+  * @param {Function} fn
+  */
+ async function exposeFunctionIfAbsent(page, name, fn) {
+-    const exist = await page.evaluate((name) => {
+-        return !!window[name];
+-    }, name);
+-    if (exist) {
+-        return;
++    // WhatsApp Web opens a short-lived iframe (webtp.whatsapp.net/pdf-viewer) right after
++    // authentication. exposeFunction also registers the binding in that iframe, so when it closes
++    // mid-call Puppeteer rejects with 'Target closed' although the main frame already has the
++    // binding. The check below sees it on the next pass; without a retry the ready event never
++    // fires.
++    const maxAttempts = 5;
++    for (let attempt = 1; ; attempt++) {
++        const exist = await page.evaluate((name) => {
++            return !!window[name];
++        }, name);
++        if (exist) {
++            return;
++        }
++        try {
++            await page.exposeFunction(name, fn);
++            return;
++        } catch (error) {
++            const retryable = /Target closed/.test(String(error && error.message));
++            if (!retryable || attempt === maxAttempts) throw error;
++            await new Promise((resolve) => setTimeout(resolve, 250));
++        }
+     }
+-    await page.exposeFunction(name, fn);
+ }
+ 
+ module.exports = { exposeFunctionIfAbsent };

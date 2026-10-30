@@ -102,6 +102,7 @@ jobs:
 
           - [ ] Branch \`chore/bump-wwebjs\`; change the exact pin in \`package.json\`; \`pnpm install\`
           - [ ] Read the release notes; re-check the event names in \`Constants.js\` and the compatibility notes of TDD §2.5
+          - [ ] The pin is patched (\`patches/\`, TDD §2.5): if the release fixes both defects, remove the patch, its \`patchedDependencies\` entry, \`COPY patches\` in the Dockerfile and \`wwebjs-patch.spec.ts\`; otherwise regenerate it with \`pnpm patch\` and keep the guard spec green
           - [ ] \`pnpm test\`: the parity test fails on every added or removed symbol until it is mapped or listed \`unsupported\` with a reason in \`src/parity/overrides.ts\`
           - [ ] Compare the runtime shapes with the typings again (ids typed as strings, poll options, \`event*\` fields): the mappers accept both
           - [ ] \`pnpm validate:all\` and the integration suites
