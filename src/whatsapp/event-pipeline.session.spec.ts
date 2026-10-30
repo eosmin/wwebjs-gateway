@@ -36,9 +36,10 @@ type Row = StoredMessage
 class MemoryMessages implements PipelineMessages {
   readonly rows = new Map<string, Row>()
   failUpsert = false
+  upsertError = new Error('db down')
 
   upsert(message: NewStoredMessage): Promise<unknown> {
-    if (this.failUpsert) return Promise.reject(new Error('db down'))
+    if (this.failUpsert) return Promise.reject(this.upsertError)
     if (!this.rows.has(message.id)) {
       this.rows.set(message.id, {
         ...message,
@@ -396,6 +397,30 @@ describe('SessionEventPipeline', () => {
       expect(logged).toContain('store failed')
       expect(logged).not.toContain('top secret')
       expect(logged).not.toContain('db down')
+    })
+
+    it('names the arguments Prisma refused, never their values', async () => {
+      const env = environment()
+      env.messages.failUpsert = true
+      env.messages.upsertError = Object.assign(
+        new Error(
+          'Invalid `prisma.storedMessage.upsert()` invocation:\n{ body: "top secret" }\n' +
+            'Argument `hasMedia` is missing.\n' +
+            'Invalid value for argument `sentAt`: Provided Date object is invalid.\n' +
+            'argument `leakedWord` was in the text'
+        ),
+        { name: 'PrismaClientValidationError' }
+      )
+      open(env)
+
+      env.client.emit(message(incoming('a', 0, { body: 'top secret' })))
+      await advance(0)
+
+      const logged = (errorLog.mock.calls as unknown[][]).flat().join(' ')
+      expect(logged).toContain('PrismaClientValidationError')
+      expect(logged).toContain('hasMedia, sentAt')
+      expect(logged).not.toContain('top secret')
+      expect(logged).not.toContain('leakedWord')
     })
   })
 

@@ -508,6 +508,37 @@ export class SessionEventPipeline {
     if (last !== undefined && now - last < LOG_INTERVAL_MS) return
     this.lastLogged.set(stage, now)
     const kind = error instanceof Error ? error.name : typeof error
-    this.logger.error(`Event pipeline ${stage} failed (session ${this.options.sessionId}): ${kind}`)
+    const fields = refusedFields(error)
+    this.logger.error(
+      `Event pipeline ${stage} failed (session ${this.options.sessionId}): ${kind}${fields}`
+    )
   }
+}
+
+// Prisma names the arguments it refused in a validation error, after a dump of the data that
+// carries message content. Only the names of the columns we write are logged: the dump can
+// contain any text, including something shaped like an argument.
+const REFUSED_ARGUMENT = /argument `([\w.]+)`/gi
+const COLUMNS: Record<keyof NewStoredMessage, true> = {
+  id: true,
+  sessionId: true,
+  chatId: true,
+  direction: true,
+  fromMe: true,
+  type: true,
+  body: true,
+  hasMedia: true,
+  ack: true,
+  sentAt: true,
+  receivedAt: true,
+  origin: true,
+  dto: true
+}
+
+function refusedFields(error: unknown): string {
+  if (!(error instanceof Error) || error.name !== 'PrismaClientValidationError') return ''
+  const names = [...error.message.matchAll(REFUSED_ARGUMENT)]
+    .map(match => match[1] ?? '')
+    .filter((name, index, all) => name in COLUMNS && all.indexOf(name) === index)
+  return names.length > 0 ? ` (fields: ${names.join(', ')})` : ''
 }
