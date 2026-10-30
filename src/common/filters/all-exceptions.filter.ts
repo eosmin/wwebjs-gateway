@@ -44,6 +44,7 @@ const CODE_BY_STATUS: Readonly<Partial<Record<number, ErrorCode>>> = {
   [HttpStatus.UNAUTHORIZED]: ErrorCode.UNAUTHORIZED,
   [HttpStatus.FORBIDDEN]: ErrorCode.FORBIDDEN,
   [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
+  [HttpStatus.PAYLOAD_TOO_LARGE]: ErrorCode.PAYLOAD_TOO_LARGE,
   [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.RATE_LIMITED
 }
 

@@ -16,6 +16,8 @@ export const ErrorCode = {
   SESSION_NOT_READY: 'SESSION_NOT_READY',
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   RATE_LIMITED: 'RATE_LIMITED',
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
+  MEDIA_FETCH_FAILED: 'MEDIA_FETCH_FAILED',
   NUMBER_NOT_ON_WHATSAPP: 'NUMBER_NOT_ON_WHATSAPP',
   POLICY_BLOCKED: 'POLICY_BLOCKED',
   DUPLICATE_CONTENT: 'DUPLICATE_CONTENT',
@@ -91,6 +93,16 @@ export const ERROR_DEFINITIONS = {
     status: HttpStatus.TOO_MANY_REQUESTS,
     meaning:
       'The API key or the client address sent more than RATE_LIMIT_MAX requests in a minute; wait the seconds in the Retry-After header.'
+  },
+  PAYLOAD_TOO_LARGE: {
+    status: HttpStatus.PAYLOAD_TOO_LARGE,
+    meaning:
+      'The request body is larger than the route accepts: 1 MiB in general, 40 MiB on the routes that send media.'
+  },
+  MEDIA_FETCH_FAILED: {
+    status: HttpStatus.UNPROCESSABLE_ENTITY,
+    meaning:
+      'The media of a send could not be downloaded from its URL: the server failed, redirected, was too slow, or the file is larger than MAX_MEDIA_BYTES.'
   },
   NUMBER_NOT_ON_WHATSAPP: {
     status: HttpStatus.UNPROCESSABLE_ENTITY,
@@ -175,6 +187,9 @@ export class UnauthorizedError extends StatusError<CodesWithStatus<HttpStatus.UN
 export class ForbiddenError extends StatusError<CodesWithStatus<HttpStatus.FORBIDDEN>> {}
 export class NotFoundError extends StatusError<CodesWithStatus<HttpStatus.NOT_FOUND>> {}
 export class ConflictError extends StatusError<CodesWithStatus<HttpStatus.CONFLICT>> {}
+export class PayloadTooLargeError extends StatusError<
+  CodesWithStatus<HttpStatus.PAYLOAD_TOO_LARGE>
+> {}
 export class UnprocessableError extends StatusError<
   CodesWithStatus<HttpStatus.UNPROCESSABLE_ENTITY>
 > {}

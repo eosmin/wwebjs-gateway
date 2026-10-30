@@ -26,7 +26,9 @@ optional: it carries extra data of some codes (the issues of a `VALIDATION_ERROR
 | `SESSION_ALREADY_EXISTS` | 409 Conflict | A session with that id already exists. |
 | `MAX_SESSIONS_REACHED` | 409 Conflict | The number of running sessions has reached MAX_SESSIONS. |
 | `SESSION_NOT_READY` | 409 Conflict | The session is not connected to WhatsApp yet; retry when it is ready. A queued send that waits longer than SEND_MAX_WAIT_MS ends with this code. |
+| `PAYLOAD_TOO_LARGE` | 413 Payload Too Large | The request body is larger than the route accepts: 1 MiB in general, 40 MiB on the routes that send media. |
 | `IDEMPOTENCY_KEY_REUSED` | 422 Unprocessable Entity | The Idempotency-Key was already used with a different request. |
+| `MEDIA_FETCH_FAILED` | 422 Unprocessable Entity | The media of a send could not be downloaded from its URL: the server failed, redirected, was too slow, or the file is larger than MAX_MEDIA_BYTES. |
 | `NUMBER_NOT_ON_WHATSAPP` | 422 Unprocessable Entity | The phone number is not registered on WhatsApp. |
 | `POLICY_BLOCKED` | 422 Unprocessable Entity | The send policy rejected the message by a rule that has no code of its own; details.rule names the rule. |
 | `DUPLICATE_CONTENT` | 422 Unprocessable Entity | The same text was already sent to too many different chats in a short time (rule of the send policy). |
