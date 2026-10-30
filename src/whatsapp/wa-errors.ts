@@ -38,8 +38,9 @@ export class WaOperationError extends WhatsAppError {
 }
 
 // The call ran, but our own code could not read what WhatsApp answered (a field the mappers did not
-// expect). It answers like WaOperationError, yet it is a bug of ours, so it is told apart to be
-// logged loudly instead of read as WhatsApp Web failing.
+// expect), or the library's Node code failed after the page sent a message. It answers like
+// WaOperationError, yet WhatsApp Web did not fail, so it is told apart to be logged loudly and, for a
+// send, to read as an unknown outcome.
 export class WaMappingError extends WhatsAppError {
   constructor(
     readonly operation: string,

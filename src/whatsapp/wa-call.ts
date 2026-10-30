@@ -43,6 +43,12 @@ export function isPuppeteerFailure(error: unknown): boolean {
   return PUPPETEER_FAILURE_PATTERNS.some(pattern => pattern.test(message))
 }
 
+// The patch of `Client.sendMessage` marks a failure of the library's own Node code that ran after the
+// page had sent the message. An error from before that point, or from the page, is never marked, and
+// the marker belongs to that patch alone: nothing else may set it.
+export const failedAfterDispatch = (error: unknown): error is Error & { afterDispatch: true } =>
+  error instanceof Error && 'afterDispatch' in error && error.afterDispatch === true
+
 const isTimeout = (error: unknown): boolean =>
   error instanceof WhatsAppError && error.code === 'WHATSAPP_TIMEOUT'
 
@@ -58,7 +64,7 @@ function translate(operation: string, error: unknown): Error {
   ) {
     return error
   }
-  if (error instanceof MapperFailure) {
+  if (error instanceof MapperFailure || failedAfterDispatch(error)) {
     return new WaMappingError(operation, `${operation}: the result could not be read`)
   }
   if (isTimeout(error)) return new WaTimeoutError(operation, true, `${operation} timed out`)

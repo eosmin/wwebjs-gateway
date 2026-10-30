@@ -1,5 +1,5 @@
 diff --git a/src/Client.js b/src/Client.js
-index 800109ebf7720d5f0f29091518a8a25f7fd8e381..41f3bd8bc0fbcef49dfc861eef45de51b8a0d181 100644
+index 800109ebf7720d5f0f29091518a8a25f7fd8e381..c6508dfe8859b667cbe0bce0abe5fe57dd621762 100644
 --- a/src/Client.js
 +++ b/src/Client.js
 @@ -1208,11 +1208,11 @@ class Client extends EventEmitter {
@@ -16,6 +16,25 @@ index 800109ebf7720d5f0f29091518a8a25f7fd8e381..41f3bd8bc0fbcef49dfc861eef45de51
                                  ]);
                                  parentMessage = fetched?.messages?.[0] || null;
                              }
+@@ -1555,7 +1555,17 @@ class Client extends EventEmitter {
+             sendSeen,
+         );
+ 
+-        return sentMsg ? new Message(this, sentMsg) : undefined;
++        // The page has sent the message by now: a failure of this Node code must not read as "not sent"
++        try {
++            return sentMsg ? new Message(this, sentMsg) : undefined;
++        } catch (error) {
++            throw Object.assign(
++                new Error('sendMessage: the message was sent, its result could not be built', {
++                    cause: error,
++                }),
++                { afterDispatch: true },
++            );
++        }
+     }
+ 
+     /**
 diff --git a/src/structures/Message.js b/src/structures/Message.js
 index dd977e85b0c0c40d2625cd337264fc9ae3bed17b..e19bd2f554acc13d641901a97ee737a5bd8e6ce3 100644
 --- a/src/structures/Message.js

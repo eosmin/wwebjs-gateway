@@ -1,6 +1,7 @@
 import { FakeWhatsAppClient } from '../../tests/helpers/fake-whatsapp-client.js'
 import { ConflictError } from '../common/errors.js'
 import type { PolicyDecision } from '../types/send-policy.dto.js'
+import { runWaCall } from '../whatsapp/wa-call.js'
 import * as waErrors from '../whatsapp/wa-errors.js'
 import {
   WaDisconnectedError,
@@ -250,6 +251,7 @@ describe('SendJobProcessor', () => {
         make: () => new WaTimeoutError('sendMessage', true),
         code: 'UNKNOWN_OUTCOME'
       },
+      // Also what the patched Client.sendMessage raises when its Node code fails after the page sent
       WaMappingError: { make: () => new WaMappingError('sendMessage'), code: 'UNKNOWN_OUTCOME' },
       WaOperationError: {
         make: () => new WaOperationError('sendMessage', 'rejected'),
@@ -276,6 +278,21 @@ describe('SendJobProcessor', () => {
       const result = await run(build())
 
       expect(result).toMatchObject({ outcome: { ok: false, error: { code } }, hardFailure: true })
+      expect(client.callsOf('sendMessage')).toHaveLength(1)
+    })
+
+    // The whole chain: the marker the patched library sets, translated by the real runWaCall
+    it('ends a library failure marked as after the dispatch as UNKNOWN_OUTCOME, sent once', async () => {
+      const marked = Object.assign(new Error('x is undefined'), { afterDispatch: true })
+      client.script('sendMessage', () =>
+        runWaCall('sendMessage', 1000, () => Promise.reject(marked))
+      )
+      const result = await run(build())
+
+      expect(result).toMatchObject({
+        outcome: { ok: false, error: { code: 'UNKNOWN_OUTCOME' } },
+        hardFailure: true
+      })
       expect(client.callsOf('sendMessage')).toHaveLength(1)
     })
 

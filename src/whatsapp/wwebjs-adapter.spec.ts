@@ -551,8 +551,9 @@ describe('calls', () => {
       .sendMessage('c@c.us', { type: 'text', body: 'hola' })
       .catch((e: unknown) => e)
 
-    expect(error).toBeInstanceOf(WaTimeoutError)
-    expect(error).toMatchObject({ operation: 'sendMessage', dispatched: true })
+    // Nothing timed out: it is a mapping failure, which the send worker also reads as unknown
+    expect(error).toBeInstanceOf(WaMappingError)
+    expect(error).toMatchObject({ operation: 'sendMessage', details: { kind: 'mapping' } })
   })
 
   it.each([
@@ -1016,6 +1017,40 @@ describe('deadlines', () => {
 })
 
 describe('sending', () => {
+  it('reads a library failure marked as after the dispatch as an unknown outcome and warns', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const marked = Object.assign(
+      new Error('sent, result not built', { cause: new TypeError('x') }),
+      {
+        afterDispatch: true
+      }
+    )
+    stub(h.client, 'sendMessage').mockRejectedValue(marked)
+    ready(h)
+
+    const error: unknown = await h.adapter
+      .sendMessage('c@c.us', { type: 'text', body: 'x' })
+      .catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(WaMappingError)
+    expect(error).toMatchObject({ operation: 'sendMessage', details: { kind: 'mapping' } })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sendMessage failed after the page'))
+  })
+
+  it('reads a send that answers nothing as an unknown outcome, not as a clean result', async () => {
+    const h = harness()
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    stub(h.client, 'sendMessage').mockResolvedValue(undefined)
+    ready(h)
+
+    const error: unknown = await h.adapter
+      .sendMessage('c@c.us', { type: 'text', body: 'x' })
+      .catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(WaMappingError)
+  })
+
   it('reports a send whose result cannot be read as an unknown outcome, never as not sent', async () => {
     const h = harness()
     jest.spyOn(Logger.prototype, 'warn').mockImplementation()
@@ -1026,8 +1061,8 @@ describe('sending', () => {
       .sendMessage('c@c.us', { type: 'text', body: 'x' })
       .catch((e: unknown) => e)
 
-    expect(error).toBeInstanceOf(WaTimeoutError)
-    expect(error).toMatchObject({ dispatched: true })
+    expect(error).toBeInstanceOf(WaMappingError)
+    expect(error).not.toBeInstanceOf(WaTimeoutError)
   })
 
   it('reports a send that died with the page as dispatched', async () => {
