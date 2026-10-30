@@ -330,6 +330,47 @@ describe('mapMessage', () => {
   })
 })
 
+describe('a message with the fields WhatsApp omits', () => {
+  const FLAGS = ['broadcast', 'isEphemeral', 'isForwarded'] as const
+
+  it.each(FLAGS)('defaults `%s` to false when it is omitted or null', flag => {
+    for (const value of [undefined, null]) {
+      const dto = mapMessage(message({ [flag]: value }), OPTIONS)
+
+      expect(MessageDto.parse(dto)).toEqual(dto)
+      expect(dto[flag]).toBe(false)
+    }
+  })
+
+  it('keeps a flag WhatsApp set', () => {
+    const dto = mapMessage(
+      message({ broadcast: true, isEphemeral: true, isForwarded: true }),
+      OPTIONS
+    )
+
+    expect(dto).toMatchObject({ broadcast: true, isEphemeral: true, isForwarded: true })
+  })
+
+  it('treats a timestamp of 0 as a real one and null as missing', () => {
+    expect(mapMessage(message({ timestamp: 0 }), OPTIONS)).toMatchObject({
+      timestamp: 0,
+      sentAt: '1970-01-01T00:00:00.000Z'
+    })
+    expect(mapMessage(message({ timestamp: null }), OPTIONS).timestamp).toBeNull()
+  })
+
+  it('maps a message without a timestamp, dated by its arrival', () => {
+    const source: Record<string, unknown> = { ...message() }
+    delete source['timestamp']
+
+    const dto = mapMessage(source as unknown as MessageSource, OPTIONS)
+
+    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dto.timestamp).toBeNull()
+    expect(dto.sentAt).toBe(dto.receivedAt)
+  })
+})
+
 describe('extractOrigin', () => {
   it('returns nothing without a ctwaContext', () => {
     expect(extractOrigin({ body: 'hi' })).toBeUndefined()
@@ -623,6 +664,34 @@ describe('the other mappers produce DTOs that pass their own schema', () => {
     expect(GroupChatDto.parse(dto)).toEqual(dto)
     expect(dto.createdAt).toBe('2026-01-02T03:04:05.000Z')
     expect(dto.participants[0]?.id).toBe('5215500000001@c.us')
+  })
+
+  it('chat without the flags and the timestamp WhatsApp omits', () => {
+    const source: Record<string, unknown> = { ...chat }
+    for (const key of ['archived', 'isReadOnly', 'isLocked', 'timestamp']) delete source[key]
+
+    const dto = mapChat(source as unknown as typeof chat, OPTIONS)
+
+    expect(ChatDto.parse(dto)).toEqual(dto)
+    expect(dto).toMatchObject({ archived: false, isReadOnly: false, isLocked: false })
+    expect(dto.timestamp).toBeNull()
+  })
+
+  it('group chat without owner and description', () => {
+    const dto = mapGroupChat(
+      {
+        ...chat,
+        id: id('120363000000000000@g.us'),
+        isGroup: true,
+        createdAt: new Date('2026-01-02T03:04:05.000Z'),
+        participants: []
+      },
+      OPTIONS
+    )
+
+    expect(GroupChatDto.parse(dto)).toEqual(dto)
+    expect(dto.owner).toBeNull()
+    expect(dto.description).toBeNull()
   })
 
   it('channel', () => {

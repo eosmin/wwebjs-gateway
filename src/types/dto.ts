@@ -136,7 +136,7 @@ export const MessageDto = dto('MessageDto', {
   mediaKey: z.string().optional(),
   mentionedIds: z.array(z.string()),
   groupMentions: z.array(z.object({ groupSubject: z.string(), groupJid: z.string() })),
-  timestamp: unixSeconds,
+  timestamp: unixSeconds.nullable().describe('Unix seconds; null when WhatsApp gave none'),
   to: z.string().meta({ examples: ['5215500000002@c.us'] }),
   type: z
     .string()
@@ -276,7 +276,7 @@ export const ChatDto = dto('ChatDto', {
   isMuted: z.boolean(),
   muteExpiration: unixSeconds,
   name: z.string(),
-  timestamp: unixSeconds,
+  timestamp: unixSeconds.nullable().describe('Unix seconds; null when WhatsApp gave none'),
   unreadCount: z.number().int(),
   lastMessage: MessageDto.optional(),
   pinned: z.boolean(),
@@ -293,9 +293,9 @@ export type GroupParticipantDto = z.infer<typeof GroupParticipantDto>
 
 export const GroupChatDto = dto('GroupChatDto', {
   ...ChatDto.shape,
-  owner: serializedId,
+  owner: serializedId.nullable().describe('null when WhatsApp gave none'),
   createdAt: isoDate,
-  description: z.string(),
+  description: z.string().nullable().describe('null when the group has none'),
   participants: z.array(GroupParticipantDto)
 })
 export type GroupChatDto = z.infer<typeof GroupChatDto>

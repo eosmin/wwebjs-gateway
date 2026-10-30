@@ -19,6 +19,7 @@ Every event of a session goes through the same steps, one event at a time, in th
 ## The algorithm
 
 1. A message is **late** when `receivedAt − sentAt` is greater than `INBOUND_LATE_THRESHOLD_S` (3 s by default). `sentAt` is the timestamp WhatsApp gives the message; `receivedAt` is when the gateway got it.
+   WhatsApp sometimes gives a message no timestamp (`timestamp` is then `null`). Its `sentAt` is the moment the gateway mapped it, so it is never late and it keeps its arrival position. That moment is taken on each mapping: the stored row keeps the first value, while a later `fetchMessages` of the same message answers a newer one. Deduplication and `seq` use the message id, never `sentAt`.
 2. A message that is not late, in a chat with nothing held, is published at once: normal chats pay no delay.
 3. Otherwise the message joins the buffer of its chat. A real-time message that arrives while the chat has a buffer open joins it too, so it cannot overtake the older ones.
 4. Every arrival restarts a debounce timer of `INBOUND_ORDER_WINDOW_MS`. The buffer is flushed early when it has been open `INBOUND_ORDER_MAX_HOLD_MS`, or holds `INBOUND_ORDER_MAX_MESSAGES` messages.

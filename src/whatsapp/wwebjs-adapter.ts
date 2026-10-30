@@ -421,7 +421,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       description: event.description,
       endTime: event.endTime,
       location: event.location,
-      callType: event.callType,
+      callType: event.callType ?? 'none',
       isEventCanceled: event.isEventCanceled,
       messageSecret: event.messageSecret
     })

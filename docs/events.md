@@ -595,7 +595,7 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | `isMuted` | boolean | yes |  |
 | `muteExpiration` | integer | yes |  |
 | `name` | string | yes |  |
-| `timestamp` | integer | yes |  |
+| `timestamp` | integer or null | yes | Unix seconds; null when WhatsApp gave none |
 | `unreadCount` | integer | yes |  |
 | `lastMessage` | [MessageDto](#messagedto) | no |  |
 | `pinned` | boolean | yes |  |
@@ -717,7 +717,7 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | `mediaKey` | string | no |  |
 | `mentionedIds` | string[] | yes |  |
 | `groupMentions` | object[] | yes |  |
-| `timestamp` | integer | yes |  |
+| `timestamp` | integer or null | yes | Unix seconds; null when WhatsApp gave none |
 | `to` | string | yes |  |
 | `type` | string | yes | The wwebjs message type, such as chat, image, ptt or poll_creation |
 | `links` | object[] | yes |  |
