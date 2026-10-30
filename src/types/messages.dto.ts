@@ -148,7 +148,10 @@ export const EventFields = {
   endTime: z.iso.datetime().optional(),
   description: z.string().max(2048).optional(),
   location: z.string().max(255).optional(),
-  callType: z.enum(['voice', 'video']).optional()
+  // Sending a call link needs a WhatsApp Web module that no longer exists: voice and video are refused
+  callType: z
+    .never({ error: 'callType is not accepted: call links are not supported by WhatsApp Web' })
+    .optional()
 }
 
 // The content variants, shared by the send and the reply bodies; `extra` is what differs between them
