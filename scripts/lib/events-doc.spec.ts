@@ -45,7 +45,7 @@ describe('renderEvents', () => {
     expect(names).toEqual(
       expect.arrayContaining(['MessageDto', 'OriginDto', 'GroupNotificationDto', 'PollVoteDto'])
     )
-    expect(types).toContain('| `ack` | integer | yes |')
+    expect(types).toContain('| `ack` | integer or null | yes |')
     expect(types).toContain('| `filename` | string or null | no |')
     expect(types).toContain('"kind": "click_to_whatsapp_ad"')
   })

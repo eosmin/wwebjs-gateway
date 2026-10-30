@@ -169,7 +169,8 @@ model StoredMessage {
   // Null when STORE_MESSAGE_BODIES=false
   body       String?
   hasMedia   Boolean
-  ack        Int
+  // Null when WhatsApp gave the message none (some incoming ones); unknown, not pending (0)
+  ack        Int?
   // Sender timestamp
   sentAt     DateTime         @db.Timestamptz(3)
   // Gateway arrival

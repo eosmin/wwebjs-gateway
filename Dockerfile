@@ -17,6 +17,8 @@ FROM base AS pnpm
 ENV HUSKY=0
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm applies the patch of whatsapp-web.js while it installs
+COPY patches patches
 
 # Everything the build needs, development tools included
 FROM pnpm AS build

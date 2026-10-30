@@ -725,6 +725,14 @@ describe('SendPolicyService', () => {
       expect(await policy.admit(intent())).toEqual(ALLOW)
     })
 
+    it('does not take a message of unknown ack for an undelivered one', async () => {
+      const { policy, world } = setup(cold)
+      world.incomingDefault = new Date(NOW.getTime() - 100 * HOUR)
+      world.outgoing = stuck().map((m, i) => (i === 0 ? { ...m, ack: null } : m))
+
+      expect(await policy.check(intent())).toEqual(ALLOW)
+    })
+
     it('counts an error ack as undelivered', async () => {
       const { policy, world } = setup(cold)
       world.incomingDefault = new Date(NOW.getTime() - 100 * HOUR)

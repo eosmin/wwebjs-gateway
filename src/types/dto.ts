@@ -107,7 +107,13 @@ export const MessageDto = dto('MessageDto', {
     .optional()
     .describe('Sanitized copy of rawData; its shape mirrors WhatsApp Web and may change'),
   // Fields of wwebjs Message
-  ack: z.number().int(),
+  ack: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      '-1 error, 0 pending, 1 server, 2 device, 3 read, 4 played; null when WhatsApp gave none'
+    ),
   author: z.string().optional(),
   deviceType: z.string(),
   body: z.string().meta({ examples: ['Hola, ¿cuál es el precio?'] }),

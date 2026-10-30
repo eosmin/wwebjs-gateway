@@ -20,3 +20,6 @@ peerDependencyRules:
 # Jest 30 only require()s the ESM-only packages of Nest 12 when Node runs with
 # --experimental-vm-modules; set here once for every pnpm script instead of repeating it per script
 nodeOptions: '${NODE_OPTIONS:- } --experimental-vm-modules --disable-warning=ExperimentalWarning'
+
+patchedDependencies:
+  whatsapp-web.js@1.34.7: patches/whatsapp-web.js@1.34.7.patch

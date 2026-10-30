@@ -52,7 +52,7 @@ class MemoryMessages implements PipelineMessages {
 
   updateAck(_sessionId: string, id: string, ack: number): Promise<boolean> {
     const row = this.rows.get(id)
-    if (!row || row.ack >= ack) return Promise.resolve(false)
+    if (!row || (row.ack !== null && row.ack >= ack)) return Promise.resolve(false)
     row.ack = ack
     return Promise.resolve(true)
   }
