@@ -13,9 +13,17 @@ The root `../CLAUDE.md` still applies: DRY/KISS/YAGNI/SOLID, strict typing (no `
 
 ## Git workflow (same as `omnichannel-platform`)
 
-- **AUTHORIZATION (hard rule): never run `git commit`, `git push` or `gh pr create` (or merge, rebase, tag, force anything) unless the user explicitly asks for that exact action in that exact moment.** Approving one commit, push or PR does not authorize the next. The plan in TDD §7 lists the commits and PRs a step produces; the agent PREPARES them (edits files, runs the checks, shows the diff summary and a proposed Conventional Commit message) and then WAITS. Allowed without asking: editing the working tree, running local checks and tests, `git status/diff/log`, `git init` and creating or switching local branches when starting a step. Anything that records history (`git add` for a commit, `git commit`) or leaves the machine (`git push`, `gh pr create`, any `gh` write, any GitHub API write) needs the explicit request. Hooks never get bypassed.
-- **Never work directly against `main`** (the step 0.1 commit and the one-time push of the initial `main` are the only exceptions, at the owner's explicit request). Create a feature branch first (`feat/`, `fix/`, `chore/`); when the owner asks, push only that branch and open a PR, then stop; the owner squash-merges.
-- **PR granularity:** commits per logical unit (one `chore(deps): add <package>` per dependency); one push + PR per step, grouped per the "PR grouping" table in `docs/IMPLEMENTATION_PLAN.md` (57 PRs; Phase 0 is one PR; step 0.1 is a local commit on `main` that precedes it). Branch name `<type>/<phase>-<n>-<slug>` (e.g. `feat/3-5-order-buffer`). One PR open at a time unless the owner asks for stacked branches. The owner's phrases: **"commitea"** = make this step's commits; **"sube y abre PR"** = push the branch and `gh pr create`; each is valid for that step only.
+- **AUTHORIZATION (standing, owner 2026-10-31):** when a step's "Done when" is verified, its review is done (see "Code review of a step") and `pnpm validate:all` is green, commit (one commit per logical unit), push the feature branch and open the PR **without asking**. Nothing else is authorized: never rebase, tag, force-push, `--no-verify`, or touch `main`; any other `gh` or GitHub API write (settings, rulesets, issues, releases) still needs the owner's explicit request. Hooks never get bypassed.
+- **Never work directly against `main`** (the step 0.1 commit and the one-time push of the initial `main` were the only exceptions). Create a feature branch first (`feat/`, `fix/`, `chore/`), push only that branch and open a PR against `main`.
+- **Merge (owner, 2026-10-31):** right after opening the PR run `gh pr merge --auto --squash`. GitHub merges by itself when every check required by the `protect-main` ruleset is green and never before; the ruleset is the gate, not the assistant. Never merge by hand, never bypass the ruleset, never disable a check to get a merge. Requires **Allow auto-merge** in the repository settings (owner's one-time switch). Do not start the next step until the PR is merged and `main` is pulled: **never stack branches**, a conflict in the first propagates to all the others.
+- **A red job unrelated to the change** (a flaky test) is rerun once. If it fails again, record it in the PR description and fix it in its own PR; do not widen the current one.
+- **Decisions (owner, 2026-10-31): when the TDD is ambiguous or silent, decide; do not ask the owner.** The owner is not expected to judge technical choices, so the decision is made here and made well.
+  - **Priority, in this order:** security and data safety, then correctness, then maintainability, then the smallest scope, then speed. Speed and token cost never outrank the first three. Among options that are equally safe and correct, take the one that least extends the TDD.
+  - **No shortcuts to finish sooner.** Never skip, loosen or delete a test, check, threshold, budget or lint rule; never add `any`, an ignore or a mock that hides the behavior under test; never leave a placeholder or a TODO; never pick the weaker option because the right one is bigger.
+  - **When the right option is too big for the PR,** do the correct part and add a task to `IMPLEMENTATION_PLAN.md` in the same PR, naming the step that owns the rest. A deferral that is not written in the plan is a shortcut.
+  - **Write it down** in a "Decisions" section of the PR description: what was chosen, the best alternative that was rejected, why, and any debt created with where it is tracked.
+  - **Stop and ask only** when the choice contradicts an explicit statement of the TDD, cannot be undone (data, secrets, money, a real account) or acts outside the repository.
+- **PR granularity:** commits per logical unit (one `chore(deps): add <package>` per dependency); one push + PR per step, grouped per the "PR grouping" table in `docs/IMPLEMENTATION_PLAN.md` (57 PRs; Phase 0 is one PR; step 0.1 is a local commit on `main` that precedes it). Branch name `<type>/<phase>-<n>-<slug>` (e.g. `feat/3-5-order-buffer`). One PR open at a time.
 - **No documentation-only PRs.** A PR carries a real change; doc fixes ride inside the PR of the work they describe.
 
 ## Git hooks (Husky) — installed by `pnpm install` (`prepare` script). NEVER `--no-verify`.
@@ -52,7 +60,7 @@ The root `../CLAUDE.md` still applies: DRY/KISS/YAGNI/SOLID, strict typing (no `
 - Every wwebjs call goes through the adapter's timeout + error translation; unhandled Puppeteer rejections must be attributed to a session, not crash the process.
 - Event names are the real wwebjs ones (`call`, `code`, `change_battery`, …); there is no incoming-typing event in the library.
 - **The repository is PUBLIC (`eosmin/wwebjs-gateway`)**: everything committed is world-readable forever. Never commit real phone numbers, message text, session data, hostnames or secrets; fixtures are redacted first (TDD §10). The production instance is private: no live demo, no screenshots, `ENABLE_DOCS=false` in production (intentional deviation from the root standards). The license is "all rights reserved" (root `LICENSE`; never add an open-source license). Open decisions (hosting, real test phones + ad message) are in TDD §11: ask the owner at the stated moment.
-- Branch + PR only: when the owner asks, push the feature branch and `gh pr create`, then stop; the owner squash-merges. Never touch `main` directly (the only exceptions, both at the owner's explicit request: the step 0.1 commit and the one-time push of the initial `main`).
+- Branch + PR only: push the feature branch, open the PR and enable auto-merge as above. Never touch `main` directly.
 
 ## Commands (once scaffolded)
 
@@ -69,7 +77,7 @@ Run `pnpm lint`, `pnpm type-check` and `pnpm test` after every change (`pnpm val
 3. Implement the step's files in dependency order, with its tests and its documentation (docs ship in the same PR as the behavior).
 4. Verify the step's "Done when" (below) for real: run it, do not assume it.
 5. Tick the step's checkbox and update its row in the progress table, as the last change of the step's PR.
-6. Propose the commit message(s) and the PR title; do not run `git commit`/`git push`/`gh pr create` until the user says "commitea" / "sube y abre PR" for this step (see Authorization and PR granularity above).
+6. Commit, push, open the PR and run `gh pr merge --auto --squash` (see Authorization and Merge above); then wait for the merge before the next step.
 7. Move to the next step.
 
 ## Definition of done for any step
@@ -99,15 +107,15 @@ This part applies to the `/code-review` skill, which reports at most 10 findings
 
 ### Using the `code-reviewer` subagent (`.claude/agents/code-reviewer.md`)
 
-The subagent gives independent, fresh-eyes findings; it never replaces the mechanical gates or reading the riskiest code yourself, and it never fixes anything. The agent does NOT launch it on its own initiative: it offers a review when a step is done and launches it only when the owner says yes (or has granted a standing "review every step").
+The subagent gives independent, fresh-eyes findings; it never replaces the mechanical gates or reading the riskiest code yourself, and it never fixes anything. The agent launches it itself, once per PR, for the critical code of a step (security, data, money, the WhatsApp adapter), and not for the rest.
 
 1. **Gates first:** `pnpm validate:all` (Jest with `--no-cache`) must be green before any review.
 2. **Pick a batch and a lens:** at most 10 files, one lens (correctness, security, tests, config-ci-docker). Every step gets correctness and tests; steps 3.5–3.10, 4.1, 4.2, 5.1, 5.2, 7.4 and 8.3 also get security; steps that touch CI, Docker, hooks or env get config-ci-docker.
 3. **Launch** with the step number, the exact file list, the lens and the TDD sections that apply.
 4. **Verify every finding** by running or reading the code before changing anything. A real bug gets a failing test first, then the fix. A false positive is dropped with a one-line reason.
-5. **No second round by default.** After fixing the real findings, move on. Repeat the batch and lens only when the code is critical (see above) and a BLOCKER/HIGH was fixed; stop after 2 rounds and ask the owner. Non-bug findings go to a backlog issue.
+5. **No second round by default.** After fixing the real findings, move on. Repeat the batch and lens only when the code is critical (see above) and a BLOCKER/HIGH was fixed; stop after 2 rounds and record what is left in a backlog issue. Non-bug findings go to a backlog issue.
 6. **Report to the owner:** findings (real / false positive / unverified), files read in full vs only run, files touched.
-7. **Then propose the commit message and wait** for the explicit request to commit (Authorization rule).
+7. **Then commit and open the PR** (Authorization rule).
 
 <!-- code-review-graph MCP tools -->
 
