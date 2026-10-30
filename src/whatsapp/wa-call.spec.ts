@@ -1,5 +1,11 @@
-import { isPuppeteerFailure, notReady, runWaCall } from './wa-call.js'
-import { WaDisconnectedError, WaOperationError, WaTimeoutError } from './wa-errors.js'
+import { isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
+import {
+  MapperFailure,
+  WaDisconnectedError,
+  WaMappingError,
+  WaOperationError,
+  WaTimeoutError
+} from './wa-errors.js'
 
 const never = (): Promise<never> => new Promise<never>(() => undefined)
 
@@ -80,6 +86,57 @@ describe('runWaCall', () => {
     // Nothing the library said travels on: it can hold chat ids or phone numbers
     expect((fromError as Error).message).toBe('getChatById failed')
     expect((fromString as Error).message).toBe('initialize failed')
+  })
+
+  // Only the adapter's own mappers raise MapperFailure: a TypeError out of the library or the page
+  // is still a failure of WhatsApp Web
+  it('tells a failure of our mappers apart from one of WhatsApp Web', async () => {
+    const fromMapper: unknown = await runWaCall('getChats', 1000, () =>
+      Promise.reject(new MapperFailure(new TypeError('x is undefined')))
+    ).catch((e: unknown) => e)
+    const fromLibrary: unknown = await runWaCall('getChats', 1000, () =>
+      Promise.reject(new TypeError('x is undefined'))
+    ).catch((e: unknown) => e)
+
+    expect(fromMapper).toBeInstanceOf(WaMappingError)
+    expect(fromMapper).toMatchObject({ code: 'WHATSAPP_ERROR', operation: 'getChats' })
+    expect(fromMapper).toHaveProperty('message', 'getChats: the result could not be read')
+    expect(fromLibrary).toBeInstanceOf(WaOperationError)
+  })
+
+  it('maps a call that returns, and wraps what its mapper throws', () => {
+    const cause = new TypeError('boom')
+
+    expect(mapping(() => 1)).toBe(1)
+    const thrown: unknown = (() => {
+      try {
+        return mapping(() => {
+          throw cause
+        })
+      } catch (error: unknown) {
+        return error
+      }
+    })()
+
+    expect(thrown).toBeInstanceOf(MapperFailure)
+    expect(thrown).toHaveProperty('cause', cause)
+  })
+
+  it('still takes a TypeError that means a dead browser for a disconnection', async () => {
+    const error: unknown = await runWaCall('getChats', 1000, () =>
+      Promise.reject(new TypeError("Cannot read properties of null (reading 'evaluate')"))
+    ).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(WaDisconnectedError)
+  })
+
+  it('hands a WaMappingError on unchanged', async () => {
+    const original = new WaMappingError('getChats', 'getChats: the result could not be read')
+    const error: unknown = await runWaCall('getChats', 1000, () => Promise.reject(original)).catch(
+      (e: unknown) => e
+    )
+
+    expect(error).toBe(original)
   })
 
   it('gives a failure without a message a message of its own', async () => {

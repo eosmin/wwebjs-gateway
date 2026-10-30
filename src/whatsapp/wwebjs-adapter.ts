@@ -55,8 +55,8 @@ import {
   type IdLike,
   type MessageMapOptions
 } from './mappers.js'
-import { isPuppeteerFailure, notReady, runWaCall } from './wa-call.js'
-import { WaOperationError, WaTimeoutError } from './wa-errors.js'
+import { isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
+import { MapperFailure, WaOperationError, WaTimeoutError } from './wa-errors.js'
 import type {
   AddParticipantsOptions,
   AddParticipantsResult,
@@ -292,7 +292,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       : this.config.WA_CALL_TIMEOUT_MS
     return await runWaCall(operation, timeoutMs, call, error => {
       // The kind only: the text of a library error can hold chat ids and phone numbers
-      this.logger.debug(`${operation} failed (${errorKind(error)})`)
+      const message = `${operation} failed (${errorKind(error)})`
+      // A mapper of ours meeting data it did not expect must not stay at debug
+      if (error instanceof MapperFailure) {
+        this.logger.warn(`${operation} failed (${errorKind(error.cause)})`)
+      } else this.logger.debug(message)
     })
   }
 
@@ -320,7 +324,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   private message(source: Message): MessageDto {
-    return mapMessage(source, this.mapOptions())
+    return mapping(() => mapMessage(source, this.mapOptions()))
   }
 
   private messages(sources: readonly Message[]): MessageDto[] {
@@ -354,9 +358,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
 
   private anyChat(chat: Chat | Channel): AnyChatDto {
     const options = this.mapOptions()
-    if (isChannel(chat)) return mapChannel(chat, options)
-    if (isGroupChat(chat)) return mapGroupChat(chat, options)
-    return mapChat(chat, options)
+    return mapping(() => {
+      if (isChannel(chat)) return mapChannel(chat, options)
+      if (isGroupChat(chat)) return mapGroupChat(chat, options)
+      return mapChat(chat, options)
+    })
   }
 
   private chatDtos(chats: readonly (Chat | Channel)[]): AnyChatDto[] {
@@ -364,18 +370,20 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   private groupChatDto(chat: GroupChat): GroupChatDto {
-    return mapGroupChat(chat, this.mapOptions())
+    return mapping(() => mapGroupChat(chat, this.mapOptions()))
   }
 
   private channelDto(channel: Channel): ChannelDto {
-    return mapChannel(channel, this.mapOptions())
+    return mapping(() => mapChannel(channel, this.mapOptions()))
   }
 
   private contactDto(contact: Contact): AnyContactDto {
     // BusinessContact assigns the property even when the profile is not loaded (undefined)
-    return 'businessProfile' in contact && contact.businessProfile
-      ? mapBusinessContact(contact as Parameters<typeof mapBusinessContact>[0]) // BusinessContact is a Contact with a profile
-      : mapContact(contact)
+    return mapping(() =>
+      'businessProfile' in contact && contact.businessProfile
+        ? mapBusinessContact(contact as Parameters<typeof mapBusinessContact>[0]) // BusinessContact is a Contact with a profile
+        : mapContact(contact)
+    )
   }
 
   private contactDtos(contacts: readonly Contact[]): AnyContactDto[] {
@@ -383,7 +391,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   private broadcastDto(source: Parameters<typeof mapBroadcast>[0]): BroadcastDto {
-    return mapBroadcast(source, this.mapOptions())
+    return mapping(() => mapBroadcast(source, this.mapOptions()))
   }
 
   private async media(media: OutboundMedia): Promise<InstanceType<typeof MessageMedia>> {
@@ -743,7 +751,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('getClientInfo', () => {
       const info: typeof this.client.info | undefined = this.client.info
       if (!info) throw notReady('getClientInfo')
-      return Promise.resolve(mapClientInfo(info))
+      return Promise.resolve(mapping(() => mapClientInfo(info)))
     })
   }
 
@@ -754,9 +762,10 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   getBatteryStatus(): Promise<BatteryInfoDto> {
-    return this.run('getBatteryStatus', async () =>
-      mapBatteryInfo(await this.client.info.getBatteryStatus())
-    )
+    return this.run('getBatteryStatus', async () => {
+      const battery = await this.client.info.getBatteryStatus()
+      return mapping(() => mapBatteryInfo(battery))
+    })
   }
 
   requestPairingCode(request: PairingCodeRequest): Promise<string> {
@@ -1029,38 +1038,43 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   getMessageInfo(messageId: string): Promise<MessageInfoDto | null> {
     return this.run('getMessageInfo', async () => {
       const info = await (await this.messageById('getMessageInfo', messageId)).getInfo()
-      return info ? mapMessageInfo(info) : null
+      return mapping(() => (info ? mapMessageInfo(info) : null))
     })
   }
 
   getMessageOrder(messageId: string): Promise<OrderDto> {
-    return this.run('getMessageOrder', async () =>
-      mapOrder(await (await this.messageById('getMessageOrder', messageId)).getOrder())
-    )
+    return this.run('getMessageOrder', async () => {
+      const order = await (await this.messageById('getMessageOrder', messageId)).getOrder()
+      return mapping(() => mapOrder(order))
+    })
   }
 
   getMessagePayment(messageId: string): Promise<PaymentDto> {
     return this.run('getMessagePayment', async () => {
       const payment = await (await this.messageById('getMessagePayment', messageId)).getPayment()
-      return mapPayment({
-        ...payment,
-        id: toIdLike(payment.id),
-        paymentMessageReceiverJid: toIdLike(payment.paymentMessageReceiverJid)
-      })
+      return mapping(() =>
+        mapPayment({
+          ...payment,
+          id: toIdLike(payment.id),
+          paymentMessageReceiverJid: toIdLike(payment.paymentMessageReceiverJid)
+        })
+      )
     })
   }
 
   getMessageReactions(messageId: string): Promise<ReactionListDto[]> {
     return this.run('getMessageReactions', async () => {
       const message = await this.messageById('getMessageReactions', messageId)
-      return (await message.getReactions()).map(mapReactionList)
+      const reactions = await message.getReactions()
+      return mapping(() => reactions.map(mapReactionList))
     })
   }
 
   getPollVotes(messageId: string): Promise<PollVoteDto[]> {
-    return this.run('getPollVotes', async () =>
-      (await this.client.getPollVotes(messageId)).map(mapPollVote)
-    )
+    return this.run('getPollVotes', async () => {
+      const votes = await this.client.getPollVotes(messageId)
+      return mapping(() => votes.map(mapPollVote))
+    })
   }
 
   vote(messageId: string, selectedOptions: string[]): Promise<void> {
@@ -1374,17 +1388,20 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   getGroupMembershipRequests(groupId: string): Promise<MembershipRequestDto[]> {
-    return this.run('getGroupMembershipRequests', async () =>
-      (await this.client.getGroupMembershipRequests(groupId)).map(request =>
-        mapMembershipRequest({
-          id: toIdLike(request.id),
-          addedBy: toIdLike(request.addedBy),
-          parentGroupId: toIdLikeOrNull(request.parentGroupId),
-          requestMethod: request.requestMethod,
-          t: request.t
-        })
+    return this.run('getGroupMembershipRequests', async () => {
+      const requests = await this.client.getGroupMembershipRequests(groupId)
+      return mapping(() =>
+        requests.map(request =>
+          mapMembershipRequest({
+            id: toIdLike(request.id),
+            addedBy: toIdLike(request.addedBy),
+            parentGroupId: toIdLikeOrNull(request.parentGroupId),
+            requestMethod: request.requestMethod,
+            t: request.t
+          })
+        )
       )
-    )
+    })
   }
 
   approveGroupMembershipRequests(
@@ -1578,17 +1595,24 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // ---- Labels, broadcasts and calls ------------------------------------------------------------
 
   getLabels(): Promise<LabelDto[]> {
-    return this.run('getLabels', async () => (await this.client.getLabels()).map(mapLabel))
+    return this.run('getLabels', async () => {
+      const labels = await this.client.getLabels()
+      return mapping(() => labels.map(mapLabel))
+    })
   }
 
   getLabelById(labelId: string): Promise<LabelDto> {
-    return this.run('getLabelById', async () => mapLabel(await this.client.getLabelById(labelId)))
+    return this.run('getLabelById', async () => {
+      const label = await this.client.getLabelById(labelId)
+      return mapping(() => mapLabel(label))
+    })
   }
 
   getChatLabels(chatId: string): Promise<LabelDto[]> {
-    return this.run('getChatLabels', async () =>
-      (await this.client.getChatLabels(chatId)).map(mapLabel)
-    )
+    return this.run('getChatLabels', async () => {
+      const labels = await this.client.getChatLabels(chatId)
+      return mapping(() => labels.map(mapLabel))
+    })
   }
 
   getChatsByLabelId(labelId: string): Promise<AnyChatDto[]> {

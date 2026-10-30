@@ -1,7 +1,13 @@
 import { FakeWhatsAppClient } from '../../tests/helpers/fake-whatsapp-client.js'
 import { ConflictError } from '../common/errors.js'
 import type { PolicyDecision } from '../types/send-policy.dto.js'
-import { WaDisconnectedError, WaOperationError, WaTimeoutError } from '../whatsapp/wa-errors.js'
+import * as waErrors from '../whatsapp/wa-errors.js'
+import {
+  WaDisconnectedError,
+  WaMappingError,
+  WaOperationError,
+  WaTimeoutError
+} from '../whatsapp/wa-errors.js'
 
 import type { SendJobData } from './send-queue.job.js'
 import {
@@ -233,17 +239,43 @@ describe('SendJobProcessor', () => {
       expect(result.outcome).toMatchObject({ ok: false, error: { code: 'WHATSAPP_TIMEOUT' } })
     })
 
-    it.each([
-      ['a timeout after the dispatch', new WaTimeoutError('sendMessage', true)],
-      ['a disconnection with the call in flight', new WaDisconnectedError('sendMessage', true)]
-    ])('is UNKNOWN_OUTCOME and never retried after %s', async (_name, error) => {
-      client.failNext('sendMessage', error)
+    // Every error the adapter can raise needs a decision here: did the message possibly leave? A new
+    // class in wa-errors.ts fails the coverage test below until it gets a row.
+    const SEND_OUTCOMES = {
+      WaDisconnectedError: {
+        make: () => new WaDisconnectedError('sendMessage', true),
+        code: 'UNKNOWN_OUTCOME'
+      },
+      WaTimeoutError: {
+        make: () => new WaTimeoutError('sendMessage', true),
+        code: 'UNKNOWN_OUTCOME'
+      },
+      WaMappingError: { make: () => new WaMappingError('sendMessage'), code: 'UNKNOWN_OUTCOME' },
+      WaOperationError: {
+        make: () => new WaOperationError('sendMessage', 'rejected'),
+        code: 'WHATSAPP_ERROR'
+      },
+      // Raised inside the adapter and always translated by runWaCall; it never reaches a worker
+      MapperFailure: { make: undefined, code: undefined }
+    } as const
+
+    it('has a decided send outcome for every error class of wa-errors.ts', () => {
+      const classes = Object.entries(waErrors)
+        .filter(([, value]) => typeof value === 'function' && value.prototype instanceof Error)
+        .map(([name]) => name)
+
+      expect(classes.sort()).toEqual(Object.keys(SEND_OUTCOMES).sort())
+    })
+
+    it.each(
+      Object.entries(SEND_OUTCOMES).flatMap(([name, row]) =>
+        row.make === undefined ? [] : [[name, row.make, row.code] as const]
+      )
+    )('ends %s as %s after the dispatch, never retried', async (_name, make, code) => {
+      client.failNext('sendMessage', make())
       const result = await run(build())
 
-      expect(result).toMatchObject({
-        outcome: { ok: false, error: { code: 'UNKNOWN_OUTCOME' } },
-        hardFailure: true
-      })
+      expect(result).toMatchObject({ outcome: { ok: false, error: { code } }, hardFailure: true })
       expect(client.callsOf('sendMessage')).toHaveLength(1)
     })
 

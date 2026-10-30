@@ -8,7 +8,12 @@ import { parseEnv } from '../config/env.schema.js'
 import { MessageDto } from '../types/dto.js'
 import { WA_EVENTS, type WaEventName } from '../types/events.js'
 
-import { WaDisconnectedError, WaOperationError, WaTimeoutError } from './wa-errors.js'
+import {
+  WaDisconnectedError,
+  WaMappingError,
+  WaOperationError,
+  WaTimeoutError
+} from './wa-errors.js'
 import type { ClientEvent } from './whatsapp-client.port.js'
 import {
   buildClientOptions,
@@ -484,6 +489,67 @@ describe('calls', () => {
 
     await expect(h.adapter.getChatById('c@c.us')).rejects.toBeInstanceOf(WaTimeoutError)
   })
+
+  it('tells a mapper that fails from a library that fails, in the error and in the log', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
+    const getChats = stub(h.client, 'getChats')
+    ready(h)
+
+    // A chat whose data the mapper cannot read
+    getChats.mockResolvedValueOnce([{ id: undefined }])
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaMappingError)
+    expect(warn).toHaveBeenCalledWith('getChats failed (TypeError)')
+
+    // A TypeError that comes out of the library itself is not a mapper of ours
+    warn.mockClear()
+    getChats.mockRejectedValueOnce(new TypeError('x is undefined'))
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
+    expect(warn).not.toHaveBeenCalled()
+    expect(debug).toHaveBeenCalledWith('getChats failed (TypeError)')
+  })
+
+  // WhatsApp took the message by the time the answer is mapped: it must read as an unknown outcome,
+  // never as "not sent"
+  it('reports a send whose result cannot be mapped as dispatched and unknown', async () => {
+    const h = harness()
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    stub(h.client, 'sendMessage').mockResolvedValue(waMessage({ id: undefined }))
+    ready(h)
+
+    const error: unknown = await h.adapter
+      .sendMessage('c@c.us', { type: 'text', body: 'hola' })
+      .catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(WaTimeoutError)
+    expect(error).toMatchObject({ operation: 'sendMessage', dispatched: true })
+  })
+
+  it.each([
+    [
+      'getPollVotes',
+      'getPollVotes',
+      [{ voter: undefined }],
+      (a: WwebjsAdapter) => a.getPollVotes('m')
+    ],
+    [
+      'getGroupMembershipRequests',
+      'getGroupMembershipRequests',
+      [{ id: undefined }],
+      (a: WwebjsAdapter) => a.getGroupMembershipRequests('g@g.us')
+    ]
+  ] as const)(
+    'maps the answer of %s inside the mapping wrapper',
+    async (_name, method, data, call) => {
+      const h = harness()
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      stub(h.client, method).mockResolvedValue(data)
+      ready(h)
+
+      await expect(call(h.adapter)).rejects.toBeInstanceOf(WaMappingError)
+    }
+  )
 
   it('answers null for a message that is not in the page', async () => {
     const h = harness()

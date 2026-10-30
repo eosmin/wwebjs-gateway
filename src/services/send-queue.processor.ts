@@ -6,7 +6,7 @@ import { resolveTypingMs, typingSegments } from '../common/lib/humanize.js'
 import { IntervalThrottle } from '../common/lib/throttle.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { MessageDto } from '../types/dto.js'
-import { WaDisconnectedError, WaTimeoutError } from '../whatsapp/wa-errors.js'
+import { WaDisconnectedError, WaMappingError, WaTimeoutError } from '../whatsapp/wa-errors.js'
 import type { WhatsAppClientPort } from '../whatsapp/whatsapp-client.port.js'
 
 import type { SendPolicyService } from './send-policy.service.js'
@@ -229,11 +229,14 @@ export class SendJobProcessor {
     return { outcome: { ok: true, message }, hardFailure: isAckError(message) }
   }
 
-  // Whatever went wrong once the call may have reached WhatsApp
+  // Whatever went wrong once the call may have reached WhatsApp. A WaOperationError is WhatsApp Web
+  // saying the call failed, so it is a definite failure; every other class of wa-errors.ts needs a
+  // row in the SEND_OUTCOMES table of the processor spec, which fails until it has one.
   private afterDispatch(error: unknown): SendJobResult {
     const dispatched =
       error instanceof WaTimeoutError ||
       error instanceof WaDisconnectedError ||
+      error instanceof WaMappingError ||
       !(error instanceof AppError)
     if (dispatched) {
       return failure(
