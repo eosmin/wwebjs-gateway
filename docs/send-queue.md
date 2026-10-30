@@ -34,6 +34,21 @@ If the worker itself throws (Postgres or Redis failing in the middle of a job), 
 - **Sync caller** (`wait=true`): `submit` waits up to the time the caller gives (`SEND_SYNC_TIMEOUT_MS` for the API) and returns the outcome. No event is published for it, because the caller already has it.
 - **Async or timed-out caller**: the result arrives as `message_sent` or `message_failed` (with the `jobId` and the `idempotencyKey`). The event is published after BullMQ has recorded the job as completed, so a client that reacts to it finds the same answer at `GET …/send-jobs/:jobId`. A crash between the two loses the event, never the result.
 
+## Idempotency
+
+`IdempotentSendService.send` is the entry point for every send that can carry an `Idempotency-Key` (at most 128 characters; the key is scoped to the session). Without a key it queues the send as it is.
+
+- **First use**: the key is claimed in Postgres (`INSERT … ON CONFLICT DO NOTHING`, so two concurrent requests cannot both win) with a hash of the request: chat, content, options and `humanize`, with the keys sorted, so the order of the fields does not matter. The job gets an id that follows from the key, so even a second add would not queue a second message.
+- **Same key, same request**: nothing is queued. A finished send answers with the stored outcome (`sent` or `failed`, the same one the first caller got); one still queued or active answers with its `jobId` and no outcome, to be read at `GET …/send-jobs/:jobId` or from `message_sent` / `message_failed`. A replay never waits.
+- **Same key, other request**: `422 IDEMPOTENCY_KEY_REUSED`, also after the first send ended.
+- **The result is stored when the job ends**, by the send queue, so a replay still gets it after BullMQ has dropped the job (completed jobs are kept one hour, the key 24 hours). A key ends once: a `done` key never turns `failed`.
+- **A process that died**: a key still `pending` for 5 minutes with no job in the queue is closed as `failed` with `UNKNOWN_OUTCOME`. It is never sent again; the client checks the chat and uses a new key. A younger `pending` key without a job is taken as a send being queued right now (the replay answers with a `jobId` that may not exist yet).
+- **A failed key is final**: even when the failure is certain and nothing was sent (policy refusal, session not ready), the key keeps answering with that failure for 24 hours; the client uses a new key to try again.
+- **A send refused before the queue** because the session does not exist releases its key. Any other error while queueing (Redis down, a lost reply) keeps the key `pending`, because the job may be in Redis: the replay finds it, or closes the key as `UNKNOWN_OUTCOME` after the margin above.
+- **Limit**: the result is written to Postgres when the job ends. If that write fails and the job is dropped by BullMQ (one hour) before any replay, the key closes as `UNKNOWN_OUTCOME` although the message went out. Nothing is ever resent.
+- A row older than 24 hours still counts until the purge runs.
+- Keys older than 24 hours are purged by the retention job (step 7.5; until it exists they stay).
+
 ## Failure handling
 
 - **Health throttle.** Every outcome goes to `SendPolicyService.recordOutcome`: a WhatsApp error, an `UNKNOWN_OUTCOME` or an ack of -1 counts as bad. When the bad ratio passes `HEALTH_MAX_BAD_RATIO` the budgets are halved for `HEALTH_COOLDOWN_MIN` and `session_error` (`SEND_HEALTH_DEGRADED`) is published.

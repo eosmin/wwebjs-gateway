@@ -993,6 +993,25 @@ describe('repositories (integration)', () => {
       })
     })
 
+    it('releases a pending key and leaves a finished one alone', async () => {
+      const sessionId = await newSession('idem-release')
+      await idempotency.claim(sessionId, 'pending', 'h')
+      await idempotency.claim(sessionId, 'done', 'h')
+      await idempotency.complete(sessionId, 'done', { messageId: 'm1', response: { ok: true } })
+      await idempotency.claim(sessionId, 'failed', 'h')
+      await idempotency.fail(sessionId, 'failed', { response: { ok: false } })
+
+      expect(await idempotency.release(sessionId, 'pending')).toBe(true)
+      expect(await idempotency.release(sessionId, 'done')).toBe(false)
+      expect(await idempotency.release(sessionId, 'failed')).toBe(false)
+      expect(await idempotency.release(sessionId, 'unknown')).toBe(false)
+
+      expect(await idempotency.find(sessionId, 'pending')).toBeNull()
+      expect(await idempotency.find(sessionId, 'done')).toMatchObject({ status: 'done' })
+      expect(await idempotency.find(sessionId, 'failed')).toMatchObject({ status: 'failed' })
+      expect(await idempotency.claim(sessionId, 'pending', 'h2')).toEqual({ claimed: true })
+    })
+
     it('purges only what is older than the cutoff', async () => {
       const sessionId = await newSession('idem-purge')
       await idempotency.claim(sessionId, 'old', 'h')

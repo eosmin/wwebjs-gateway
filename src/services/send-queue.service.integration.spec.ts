@@ -7,6 +7,7 @@ import { REAL_ENV, TEST_ENV } from '../../tests/helpers/env.js'
 import { buildMessageDto, FakeWhatsAppClient } from '../../tests/helpers/fake-whatsapp-client.js'
 import { ConflictError, NotFoundError } from '../common/errors.js'
 import { parseEnv } from '../config/env.schema.js'
+import type { IdempotencyRepository } from '../database/repositories/idempotency.repository.js'
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import { RedisService } from '../infra/redis/redis.service.js'
@@ -53,6 +54,10 @@ describe('send queue (integration)', () => {
   let policy: {
     admit: jest.Mock<Promise<PolicyDecision>>
     recordOutcome: jest.Mock<Promise<boolean>>
+  }
+  let idempotency: {
+    complete: jest.Mock<Promise<boolean>>
+    fail: jest.Mock<Promise<boolean>>
   }
   const open: { service: SendQueueService; redis: RedisService }[] = []
 
@@ -106,7 +111,8 @@ describe('send queue (integration)', () => {
       policy as unknown as SendPolicyService,
       pipeline,
       brokenMetrics(onMetric),
-      { addBusyCheck: jest.fn() } as unknown as WatchdogService
+      { addBusyCheck: jest.fn() } as unknown as WatchdogService,
+      idempotency as unknown as IdempotencyRepository
     )
     open.push({ service, redis })
     await service.onModuleInit()
@@ -141,6 +147,10 @@ describe('send queue (integration)', () => {
     ready = true
     exists = true
     published = []
+    idempotency = {
+      complete: jest.fn<Promise<boolean>, []>().mockResolvedValue(true),
+      fail: jest.fn<Promise<boolean>, []>().mockResolvedValue(true)
+    }
     policy = {
       admit: jest.fn<Promise<PolicyDecision>, []>().mockResolvedValue(ALLOW),
       recordOutcome: jest.fn<Promise<boolean>, []>().mockResolvedValue(false)
@@ -225,6 +235,78 @@ describe('send queue (integration)', () => {
     await expect(service.status(sessionId, jobId)).resolves.toMatchObject({
       status: 'failed',
       error: { code: 'POLICY_BLOCKED' }
+    })
+  })
+
+  it('ends the idempotency key with the outcome of the job, sent or failed', async () => {
+    const service = await boot()
+    const sent = await service.submit(text('uno', { idempotencyKey: 'k-ok' }), { waitMs: 5000 })
+    policy.admit.mockResolvedValue({
+      decision: 'reject',
+      code: 'POLICY_BLOCKED',
+      rule: 'cold_sends_disabled'
+    })
+    await service.submit(text('dos', { idempotencyKey: 'k-bad' }), { waitMs: 5000 })
+
+    expect(idempotency.complete).toHaveBeenCalledWith(sessionId, 'k-ok', {
+      messageId: sent.outcome?.ok ? sent.outcome.message.id : 'missing',
+      response: sent.outcome
+    })
+    expect(idempotency.fail).toHaveBeenCalledWith(sessionId, 'k-bad', {
+      response: {
+        ok: false,
+        error: expect.objectContaining({ code: 'POLICY_BLOCKED' }) as Record<string, unknown>
+      }
+    })
+  })
+
+  it('does not touch the idempotency table for a send without a key', async () => {
+    const service = await boot()
+    await service.submit(text('sin llave'), { waitMs: 5000 })
+
+    expect(idempotency.complete).not.toHaveBeenCalled()
+    expect(idempotency.fail).not.toHaveBeenCalled()
+  })
+
+  it('queues one job when the same jobId is submitted twice at once', async () => {
+    const service = await boot()
+    const [first, second] = await Promise.all([
+      service.submit(text('una vez'), { jobId: 'fixed-id' }),
+      service.submit(text('una vez'), { jobId: 'fixed-id' })
+    ])
+
+    expect(first.jobId).toBe(second.jobId)
+    await until(() => sentBodies().length > 0)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(sentBodies()).toEqual(['una vez'])
+    expect(policy.admit).toHaveBeenCalledTimes(1)
+  })
+
+  it('still answers the caller when the idempotency write fails', async () => {
+    const service = await boot()
+    idempotency.complete.mockRejectedValue(new Error('postgres down'))
+
+    const result = await service.submit(text('uno', { idempotencyKey: 'k-down' }), {
+      waitMs: 5000
+    })
+
+    expect(result.outcome).toMatchObject({ ok: true })
+  })
+
+  it('records an UNKNOWN_OUTCOME against the key', async () => {
+    const service = await boot()
+    policy.admit.mockRejectedValue(new Error('boom'))
+
+    const result = await service.submit(text('uno', { idempotencyKey: 'k-throw' }), {
+      waitMs: 5000
+    })
+
+    expect(result.outcome).toMatchObject({ ok: false })
+    expect(idempotency.fail).toHaveBeenCalledWith(sessionId, 'k-throw', {
+      response: {
+        ok: false,
+        error: expect.objectContaining({ code: 'INTERNAL' }) as Record<string, unknown>
+      }
     })
   })
 
