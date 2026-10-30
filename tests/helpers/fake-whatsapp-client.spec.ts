@@ -33,6 +33,18 @@ const LIFECYCLE = [
 const READY: ClientEvent = { event: 'ready', data: {} }
 
 describe('FakeWhatsAppClient', () => {
+  it('tells the skipped listeners which event was dropped, until they unsubscribe', () => {
+    const fake = new FakeWhatsAppClient()
+    const seen: string[] = []
+    const stop = fake.onSkipped(event => seen.push(event))
+
+    fake.skip('message')
+    stop()
+    fake.skip('qr')
+
+    expect(seen).toEqual(['message'])
+  })
+
   it('implements every method of the port, each one through the shared plumbing', async () => {
     const names = portMethodNames()
     // A regex that silently lost methods must not pass: pin the multi-line ones and both ends
@@ -52,12 +64,14 @@ describe('FakeWhatsAppClient', () => {
       if (typeof fn !== 'function') throw new Error(`${name} is not a function`)
       return fn as () => Promise<unknown>
     }
-    for (const name of names.filter(n => n !== 'onEvent' && !LIFECYCLE.includes(n))) {
+    for (const name of names.filter(
+      n => n !== 'onEvent' && n !== 'onSkipped' && !LIFECYCLE.includes(n)
+    )) {
       // Rejecting with WaDisconnectedError and recording proves the method goes through stub()
       await expect(method(name)()).rejects.toBeInstanceOf(WaDisconnectedError)
     }
     expect(fake.calls.map(call => call.method as string)).toEqual(
-      names.filter(n => n !== 'onEvent' && !LIFECYCLE.includes(n))
+      names.filter(n => n !== 'onEvent' && n !== 'onSkipped' && !LIFECYCLE.includes(n))
     )
   })
 

@@ -67,6 +67,8 @@ import type {
   ChatStateKind,
   ClientEvent,
   ClientEventListener,
+  ClientEventName,
+  SkippedEventListener,
   CreateChannelOptions,
   CreateChannelResult,
   CreateGroupOptions,
@@ -264,6 +266,7 @@ const isGroupChat = (chat: Chat | Channel): chat is GroupChat =>
 export class WwebjsAdapter implements WhatsAppClientPort {
   private readonly logger: Logger
   private readonly listeners = new Set<ClientEventListener>()
+  private readonly skippedListeners = new Set<SkippedEventListener>()
   // Calls received, so that `rejectCall` finds the wwebjs object of the call it is asked about
   private readonly calls = new Map<string, wwebjs.Call>()
   private readonly guardedBrowsers = new WeakSet<object>()
@@ -448,6 +451,13 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     }
   }
 
+  onSkipped(listener: SkippedEventListener): () => void {
+    this.skippedListeners.add(listener)
+    return () => {
+      this.skippedListeners.delete(listener)
+    }
+  }
+
   private deliver(event: ClientEvent): void {
     for (const listener of [...this.listeners]) {
       try {
@@ -465,6 +475,18 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       if (event) this.deliver(event)
     } catch (error: unknown) {
       this.logger.warn(`Mapping the ${name} event failed (${errorKind(error)})`)
+      this.notifySkipped(name as ClientEventName)
+    }
+  }
+
+  // A listener that throws must not stop the others, nor bring the event handler of wwebjs down
+  private notifySkipped(name: ClientEventName): void {
+    for (const listener of [...this.skippedListeners]) {
+      try {
+        listener(name)
+      } catch (error: unknown) {
+        this.logger.warn(`A skipped-event listener failed (${errorKind(error)})`)
+      }
     }
   }
 

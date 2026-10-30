@@ -47,6 +47,7 @@ export type ClientEvent = {
 }[ClientEventName]
 
 export type ClientEventListener = (event: ClientEvent) => void
+export type SkippedEventListener = (event: ClientEventName) => void
 
 // ---- Content and options -----------------------------------------------------------------------
 
@@ -267,6 +268,8 @@ export interface WhatsAppClientPort {
   cancelPairingCode(): Promise<void>
   // Delivers every event to the listener inside a try/catch; returns the way to stop listening
   onEvent(listener: ClientEventListener): () => void
+  // Tells which event the adapter could not map and dropped, so that the drop is counted
+  onSkipped(listener: SkippedEventListener): () => void
 
   // Presence and profile
   sendPresenceAvailable(): Promise<void>

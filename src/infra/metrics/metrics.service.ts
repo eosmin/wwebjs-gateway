@@ -25,6 +25,7 @@ export interface Metrics {
   httpRequests: Counter<'method' | 'route' | 'status'>
   httpDurationSeconds: Histogram<'method' | 'route'>
   events: Counter<'event'>
+  eventsSkipped: Counter<'event'>
   orderingHeld: Counter
   orderingReordered: Counter
   orderingHoldSeconds: Histogram
@@ -47,6 +48,7 @@ export function createMetrics(registry: Registry): Metrics {
     httpRequests: counter(registry, d.httpRequests),
     httpDurationSeconds: histogram(registry, d.httpDurationSeconds),
     events: counter(registry, d.events),
+    eventsSkipped: counter(registry, d.eventsSkipped),
     orderingHeld: counter(registry, d.orderingHeld),
     orderingReordered: counter(registry, d.orderingReordered),
     orderingHoldSeconds: histogram(registry, d.orderingHoldSeconds),

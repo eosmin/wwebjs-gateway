@@ -34,6 +34,7 @@ describe('MetricsService', () => {
     metrics.httpRequests.inc({ method: 'GET', route: '/health', status: '200' })
     metrics.httpDurationSeconds.observe({ method: 'GET', route: '/health' }, 0.01)
     metrics.events.inc({ event: 'message' })
+    metrics.eventsSkipped.inc({ event: 'message' })
     metrics.orderingHeld.inc()
     metrics.orderingReordered.inc()
     metrics.orderingHoldSeconds.observe(1)
@@ -66,7 +67,8 @@ describe('MetricsService', () => {
       'gw_wa_call_duration_seconds_count{op="sendMessage"} 1',
       'gw_wa_call_errors_total{op="sendMessage",type="timeout"} 1',
       'gw_watchdog_restarts_total 1',
-      'gw_reconcile_recovered_total 1'
+      'gw_reconcile_recovered_total 1',
+      'gw_events_skipped_total{event="message"} 1'
     ]) {
       expect(body).toContain(line)
     }

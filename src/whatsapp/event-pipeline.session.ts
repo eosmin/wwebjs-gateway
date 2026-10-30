@@ -43,7 +43,7 @@ export interface SessionPipelineOptions {
 }
 
 export interface SessionPipelineDeps {
-  client: Pick<WhatsAppClientPort, 'onEvent' | 'fetchMessages'>
+  client: Pick<WhatsAppClientPort, 'onEvent' | 'onSkipped' | 'fetchMessages'>
   messages: PipelineMessages
   sequencer: EventSequencer
   // true the first time a key is seen (Redis SET NX EX)
@@ -94,6 +94,7 @@ export class SessionEventPipeline {
   private readonly lastLogged = new Map<PipelineStage, number>()
   private intake: Promise<void> = Promise.resolve()
   private stopListening: (() => void) | undefined
+  private stopListeningSkipped: (() => void) | undefined
   private closed = false
 
   constructor(
@@ -117,6 +118,9 @@ export class SessionEventPipeline {
   start(): void {
     if (this.closed) return
     this.stopListening = this.deps.client.onEvent(event => this.accept(event))
+    this.stopListeningSkipped = this.deps.client.onSkipped(event => {
+      this.deps.metrics.eventsSkipped.inc({ event })
+    })
   }
 
   // Stops listening and drops what the buffer holds (it stays stored, unpublished, for the next
@@ -125,6 +129,7 @@ export class SessionEventPipeline {
     if (this.closed) return
     this.closed = true
     this.stopListening?.()
+    this.stopListeningSkipped?.()
     this.buffer?.close()
     for (const timer of this.replays.values()) clearTimeout(timer)
     this.replays.clear()

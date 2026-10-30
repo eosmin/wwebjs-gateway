@@ -75,7 +75,7 @@ export class EventPipelineService implements OnApplicationShutdown {
   // is not seen. Rejects when the reserved `seq` bound of the session cannot be read.
   async open(
     sessionId: string,
-    client: Pick<WhatsAppClientPort, 'onEvent' | 'fetchMessages'>,
+    client: Pick<WhatsAppClientPort, 'onEvent' | 'onSkipped' | 'fetchMessages'>,
     options: OpenSessionOptions
   ): Promise<void> {
     await this.seqAllocator.open(sessionId)

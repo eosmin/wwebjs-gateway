@@ -7,13 +7,15 @@ import {
 import type {
   ClientEvent,
   ClientEventListener,
+  ClientEventName,
+  SkippedEventListener,
   OutboundContent,
   WhatsAppClientFactory,
   WhatsAppClientOptions,
   WhatsAppClientPort
 } from '../../src/whatsapp/whatsapp-client.port.js'
 
-type PortMethod = Exclude<keyof WhatsAppClientPort, 'onEvent'>
+type PortMethod = Exclude<keyof WhatsAppClientPort, 'onEvent' | 'onSkipped'>
 type Args<K extends PortMethod> = Parameters<WhatsAppClientPort[K]>
 type Result<K extends PortMethod> = Awaited<ReturnType<WhatsAppClientPort[K]>>
 
@@ -105,6 +107,7 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
   readonly sent: MessageDto[] = []
   private connected = true
   private readonly listeners = new Set<ClientEventListener>()
+  private readonly skippedListeners = new Set<SkippedEventListener>()
   private readonly scripts: Scripts = {}
   private readonly failures = new Map<
     PortMethod,
@@ -201,6 +204,18 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
     return () => {
       this.listeners.delete(listener)
     }
+  }
+
+  onSkipped(listener: SkippedEventListener): () => void {
+    this.skippedListeners.add(listener)
+    return () => {
+      this.skippedListeners.delete(listener)
+    }
+  }
+
+  // The adapter could not map an event of that name and dropped it
+  skip(event: ClientEventName): void {
+    for (const listener of [...this.skippedListeners]) listener(event)
   }
 
   // ---- Presence and profile --------------------------------------------------------------------

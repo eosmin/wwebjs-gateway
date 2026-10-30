@@ -410,6 +410,35 @@ describe('events', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('secret text')
   })
 
+  it('tells the skipped listener which event it could not map', () => {
+    const { client, adapter } = harness()
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const skipped: string[] = []
+    const stop = adapter.onSkipped(event => skipped.push(event))
+
+    client.emit('message', { body: 'a message without an id' })
+    stop()
+    client.emit('message', { body: 'another one' })
+
+    expect(skipped).toEqual(['message'])
+  })
+
+  it('isolates a skipped listener that throws from the others', () => {
+    const { client, adapter } = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const seen: string[] = []
+    adapter.onSkipped(() => {
+      throw new Error('boom')
+    })
+    adapter.onSkipped(event => seen.push(event))
+
+    expect(() => client.emit('message', { body: 'no id' })).not.toThrow()
+    expect(() => client.emit('qr', undefined)).not.toThrow()
+
+    expect(seen).toEqual(['message'])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped-event listener failed'))
+  })
+
   it('isolates a listener that throws from the others', () => {
     const { client, adapter, events } = harness()
     jest.spyOn(Logger.prototype, 'warn').mockImplementation()

@@ -11,6 +11,7 @@ an admin key is also accepted, and when `METRICS_TOKEN` is unset only an admin k
 | `gw_http_requests_total` | counter | `method`, `route`, `status` | HTTP responses, by method, route pattern and status (`unmatched` when no route matched). |
 | `gw_http_request_duration_seconds` | histogram | `method`, `route` | Seconds from receiving an HTTP request to the end of its response, by method and route pattern. |
 | `gw_events_total` | counter | `event` | Events received from WhatsApp, by event name. |
+| `gw_events_skipped_total` | counter | `event` | Events the adapter could not map and dropped, by event name. |
 | `gw_ordering_held_total` | counter | - | Inbound messages the order buffer held back to wait for earlier ones. |
 | `gw_ordering_reordered_total` | counter | - | Inbound messages published in a different order than they arrived. |
 | `gw_ordering_hold_seconds` | histogram | - | Seconds a held inbound message waited in the order buffer. |

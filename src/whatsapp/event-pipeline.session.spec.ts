@@ -249,6 +249,17 @@ describe('SessionEventPipeline', () => {
       expect(body).toContain('gw_events_total{event="message"} 1')
     })
 
+    it('counts an event the adapter could not map, until it is closed', async () => {
+      const env = environment()
+      const pipeline = open(env)
+
+      env.client.skip('message')
+      await pipeline.close()
+      env.client.skip('message')
+
+      expect(await env.metrics.scrape()).toContain('gw_events_skipped_total{event="message"} 1')
+    })
+
     it('stops listening and ignores events once closed', async () => {
       const env = environment()
       const pipeline = open(env)
