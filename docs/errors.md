@@ -38,7 +38,7 @@ optional: it carries extra data of some codes (the issues of a `VALIDATION_ERROR
 | `INTERNAL` | 500 Internal Server Error | Unexpected failure of the gateway; the message is hidden in production. |
 | `UNKNOWN_OUTCOME` | 502 Bad Gateway | The send timed out after it was dispatched, so whether it reached WhatsApp is unknown; it is never retried automatically. |
 | `ACK_ERROR` | 502 Bad Gateway | WhatsApp reported a delivery error (ack -1) for the message. |
-| `WHATSAPP_ERROR` | 502 Bad Gateway | WhatsApp Web failed to carry out the operation. `details.kind: "mapping"` marks the case where the operation ran but the gateway could not read its answer. |
+| `WHATSAPP_ERROR` | 502 Bad Gateway | WhatsApp Web failed to carry out the operation. `details.kind: "mapping"` marks the case where the operation ran but the gateway could not read its answer (a send made through the send queue ends as `UNKNOWN_OUTCOME` in that case). |
 | `POLICY_DELAY_EXCEEDED` | 504 Gateway Timeout | The send policy kept the message waiting longer than SEND_POLICY_MAX_WAIT_MS, so it was given up. |
 | `WHATSAPP_TIMEOUT` | 504 Gateway Timeout | WhatsApp Web did not answer within WA_CALL_TIMEOUT_MS. |
 

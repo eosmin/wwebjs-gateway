@@ -144,7 +144,7 @@ export const ERROR_DEFINITIONS = {
   WHATSAPP_ERROR: {
     status: HttpStatus.BAD_GATEWAY,
     meaning:
-      'WhatsApp Web failed to carry out the operation. `details.kind: "mapping"` marks the case where the operation ran but the gateway could not read its answer.'
+      'WhatsApp Web failed to carry out the operation. `details.kind: "mapping"` marks the case where the operation ran but the gateway could not read its answer (a send made through the send queue ends as `UNKNOWN_OUTCOME` in that case).'
   },
   WHATSAPP_TIMEOUT: {
     status: HttpStatus.GATEWAY_TIMEOUT,

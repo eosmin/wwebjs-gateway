@@ -55,8 +55,8 @@ import {
   type IdLike,
   type MessageMapOptions
 } from './mappers.js'
-import { isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
-import { MapperFailure, WaOperationError, WaTimeoutError } from './wa-errors.js'
+import { failedAfterDispatch, isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
+import { MapperFailure, WaMappingError, WaOperationError } from './wa-errors.js'
 import type {
   AddParticipantsOptions,
   AddParticipantsResult,
@@ -296,9 +296,12 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return await runWaCall(operation, timeoutMs, call, error => {
       // The kind only: the text of a library error can hold chat ids and phone numbers
       const message = `${operation} failed (${errorKind(error)})`
-      // A mapper of ours meeting data it did not expect must not stay at debug
+      // A mapper of ours meeting data it did not expect, or the library failing after the page sent a
+      // message, must not stay at debug
       if (error instanceof MapperFailure) {
         this.logger.warn(`${operation} failed (${errorKind(error.cause)})`)
+      } else if (failedAfterDispatch(error)) {
+        this.logger.warn(`${operation} failed after the page sent it (${errorKind(error.cause)})`)
       } else this.logger.debug(message)
     })
   }
@@ -310,11 +313,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       return this.message(source)
     } catch (error: unknown) {
       this.logger.warn(`Mapping the result of ${operation} failed (${errorKind(error)})`)
-      throw new WaTimeoutError(
-        operation,
-        true,
-        `${operation}: sent, but the result could not be read`
-      )
+      throw new WaMappingError(operation, `${operation}: the result could not be read`)
     }
   }
 

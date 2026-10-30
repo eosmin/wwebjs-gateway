@@ -46,6 +46,48 @@ describe('the patched whatsapp-web.js', () => {
     expect(fallbacks('structures/Message.js')).toBe(1)
   })
 
+  // The tests run the real Client.sendMessage with a page we control: the library builds its Message
+  // in Node after the page sent, and only a failure there may carry the marker
+  describe('Client.sendMessage', () => {
+    type SendMessage = (this: unknown, chatId: string, content: string) => Promise<unknown>
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const { prototype } = require(join(libraryRoot, 'Client.js')) as {
+      prototype: { sendMessage: SendMessage }
+    }
+    const send = async (answer: () => Promise<unknown>): Promise<unknown> => {
+      const evaluate = jest.fn(answer)
+      try {
+        return await prototype.sendMessage.call({ pupPage: { evaluate } }, 'c@c.us', 'hola')
+      } finally {
+        // A failure before the page was reached would pass these tests for the wrong reason
+        expect(evaluate).toHaveBeenCalledTimes(1)
+      }
+    }
+
+    it('marks a failure of the Node side after the page sent the message', async () => {
+      const unreadable = {
+        get id(): never {
+          throw new TypeError('x is undefined')
+        }
+      }
+
+      const error: unknown = await send(() => Promise.resolve(unreadable)).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toHaveProperty('afterDispatch', true)
+      expect(error).toHaveProperty('cause', expect.any(TypeError))
+    })
+
+    it('leaves a failure of the page unmarked: the message did not leave', async () => {
+      const error: unknown = await send(() =>
+        Promise.reject(new Error('Evaluation failed: not a chat'))
+      ).catch((e: unknown) => e)
+
+      expect(error).toHaveProperty('message', 'Evaluation failed: not a chat')
+      expect(error).not.toHaveProperty('afterDispatch')
+    })
+  })
+
   describe('exposeFunctionIfAbsent', () => {
     type Helper = (page: FakePage, name: string, fn: () => void) => Promise<void>
     interface FakePage {

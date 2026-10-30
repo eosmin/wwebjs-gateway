@@ -130,6 +130,46 @@ describe('runWaCall', () => {
     expect(error).toBeInstanceOf(WaDisconnectedError)
   })
 
+  // The library marks the failure of its own Node-side code after the page sent the message (see the
+  // patch of Client.sendMessage); a failure before that point is still WhatsApp Web's
+  it('reads a failure the library marked as after the dispatch as an unknown outcome, not a rejection', async () => {
+    const marked = Object.assign(new Error('x is undefined'), { afterDispatch: true })
+    const fromMarked: unknown = await runWaCall('sendMessage', 1000, () =>
+      Promise.reject(marked)
+    ).catch((e: unknown) => e)
+    const unmarked: unknown = await runWaCall('sendMessage', 1000, () =>
+      Promise.reject(new Error('Evaluation failed: not a chat'))
+    ).catch((e: unknown) => e)
+
+    expect(fromMarked).toBeInstanceOf(WaMappingError)
+    expect(fromMarked).toMatchObject({ operation: 'sendMessage', details: { kind: 'mapping' } })
+    expect(fromMarked).toHaveProperty('message', 'sendMessage: the result could not be read')
+    expect(unmarked).toBeInstanceOf(WaOperationError)
+  })
+
+  it.each([
+    ['a marker that is not true', Object.assign(new Error('x'), { afterDispatch: 'yes' })],
+    ['a marker on something that is not an Error', { afterDispatch: true }]
+  ])('does not take %s for a failure after the dispatch', async (_name, thrown) => {
+    const error: unknown = await runWaCall(
+      'sendMessage',
+      1000,
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- wwebjs rejects with non-Errors too
+      () => Promise.reject(thrown)
+    ).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(WaOperationError)
+  })
+
+  it('keeps a marked failure that is also a dead browser a disconnection, which is unknown too', async () => {
+    const marked = Object.assign(new Error('Target closed'), { afterDispatch: true })
+    const error: unknown = await runWaCall('sendMessage', 1000, () => Promise.reject(marked)).catch(
+      (e: unknown) => e
+    )
+
+    expect(error).toBeInstanceOf(WaMappingError)
+  })
+
   it('hands a WaMappingError on unchanged', async () => {
     const original = new WaMappingError('getChats', 'getChats: the result could not be read')
     const error: unknown = await runWaCall('getChats', 1000, () => Promise.reject(original)).catch(

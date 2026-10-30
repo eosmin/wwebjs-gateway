@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  whatsapp-web.js@1.34.7: c4e2a2a3f10bf9041b95f53846699dec41d2dd64796e1c76f2eadfd22cdcd9b1
+  whatsapp-web.js@1.34.7: f0fcd5a0baf30385fa181ceaa89ad6a807e4e930257d43aa5e79a0bf1c62f2c3
 
 importers:
 
@@ -100,7 +100,7 @@ importers:
         version: 7.8.2
       whatsapp-web.js:
         specifier: 1.34.7
-        version: 1.34.7(patch_hash=c4e2a2a3f10bf9041b95f53846699dec41d2dd64796e1c76f2eadfd22cdcd9b1)(supports-color@8.1.1)(typescript@5.9.3)
+        version: 1.34.7(patch_hash=f0fcd5a0baf30385fa181ceaa89ad6a807e4e930257d43aa5e79a0bf1c62f2c3)(supports-color@8.1.1)(typescript@5.9.3)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -8650,7 +8650,7 @@ snapshots:
 
   webidl-conversions@3.0.1: {}
 
-  whatsapp-web.js@1.34.7(patch_hash=c4e2a2a3f10bf9041b95f53846699dec41d2dd64796e1c76f2eadfd22cdcd9b1)(supports-color@8.1.1)(typescript@5.9.3):
+  whatsapp-web.js@1.34.7(patch_hash=f0fcd5a0baf30385fa181ceaa89ad6a807e4e930257d43aa5e79a0bf1c62f2c3)(supports-color@8.1.1)(typescript@5.9.3):
     dependencies:
       fluent-ffmpeg: 2.1.3
       mime: 3.0.0
