@@ -50,6 +50,15 @@ export class IdempotencyRepository {
     return this.finish(sessionId, key, 'failed', outcome)
   }
 
+  // Gives the key back when the send never reached the queue, so the client can retry with it. A key
+  // that finished is never released: its result is the answer to every replay.
+  async release(sessionId: string, key: string): Promise<boolean> {
+    const { count } = await this.prisma.idempotencyKey.deleteMany({
+      where: { sessionId, key, status: 'pending' }
+    })
+    return count > 0
+  }
+
   async deleteOlderThan(cutoff: Date): Promise<number> {
     const { count } = await this.prisma.idempotencyKey.deleteMany({
       where: { createdAt: { lt: cutoff } }

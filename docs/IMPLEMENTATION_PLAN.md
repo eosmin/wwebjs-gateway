@@ -88,7 +88,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **5.1** `send-policy.service.ts`. *Done when:* every rule of §6.8.1 has a passing test, including the offline-recipient case.
 - [x] **5.2** `send-queue.service.ts` and the Bull Board mount (`/admin/queues`, admin-only, flag `BULL_BOARD_ENABLED`). *Done when:* ordering, idempotency, restart durability and `UNKNOWN_OUTCOME` tests pass.
 - [x] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
-- [ ] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
+- [x] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
 - [ ] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
 - [ ] **5.6** Polls and events controller.
 - [ ] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
@@ -112,7 +112,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [ ] **7.2** Webhooks controller (CRUD, rotate-secret, test, deliveries, retry, retry-failed).
 - [ ] **7.3** `webhook-dispatcher.service.ts`.
 - [ ] **7.4** `delivery.processor.ts`. *Done when:* signature, retry and SSRF tests pass.
-- [ ] **7.5** `retention.service.ts`.
+- [ ] **7.5** `retention.service.ts`. *Carried over from 5.4:* it also calls `IdempotencyRepository.deleteOlderThan` with a 24 h cutoff.
 - [ ] **7.6** `webhook-receiver.ts` helper and the integration suite. *Done when:* every scenario listed in §7 Phase 7 passes.
 
 ## Milestone 8 — Inbound hooks and realtime (`feat/inbound-and-realtime`) — TDD §6.10
@@ -173,7 +173,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **7.4** Decide and implement the production guard for `ALLOW_PRIVATE_WEBHOOK_TARGETS` (see TDD §11 PENDING).
 - [ ] **3.x, the first step that logs message data** Decide which keys count as message content beyond `body`, `text` and `caption` (see TDD §11 PENDING), and never pass a secret as a `child()` logger binding: bindings bypass redaction.
 - [ ] **10.2** The Redis restart test also checks the log: ioredis reports one error per retry (about every 2 s) and each becomes a log line; throttle it if it floods.
-- [ ] **5.4** An idempotency key whose process died between `claim` and `complete`/`fail` stays `pending` until the 24 h purge (step 2.4 repository). The service must treat a stale `pending` key as an unknown outcome (conflict, never resend) and may need a "mark stale" method.
+- [x] **5.4** An idempotency key whose process died between `claim` and `complete`/`fail` stays `pending` until the 24 h purge (step 2.4 repository). The service must treat a stale `pending` key as an unknown outcome (conflict, never resend) and may need a "mark stale" method.
 - [ ] **3.x, the order buffer** `listUnemitted` has no limit: batch it if a long outage can leave thousands of held rows (the recovery of step 3.6 reads them all on every `ready`). The ack of `upsert` still overwrites on a re-emitted message (`updateAck`, used by `message_ack`, is monotonic since 3.6).
 - [x] **3.7** `seq` is a Redis `INCR`, and Redis runs with AOF `everysec`: a Redis crash can lose about a second of increments, so `seq` could repeat numbers already delivered, which breaks "strictly increasing". When a session starts, raise `seq:<id>` to at least the last `seq` known to have been delivered (keep a high-water mark in Postgres, written every N events and on session stop), or document the limit in the operations guide if that is judged too costly.
 - [x] **3.7** The session manager must `await` `EventPipelineService.open(sessionId, client, { orderingEnabled: settings.ordering.enabled })` BEFORE it initializes the client (a new one on every start; events emitted earlier are not seen) and `close(sessionId)` when it stops it, and publish its own events (`session_status`, ...) with `EventPipelineService.publish` so they share the `seq` counter. Deleting a session must also delete its Redis keys `seq:<id>` and `dedupe:<id>:*`.
@@ -238,7 +238,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 5.1 | done | `feat/5-1-send-policy` | 2026-10-29 |
 | 5.2 | done | `feat/5-2-send-queue` | 2026-10-29 |
 | 5.3 | done | `feat/5-3-message-store` | 2026-10-29 |
-| 5.4 | todo | - | - |
+| 5.4 | done | `feat/5-4-idempotency` | 2026-10-30 |
 | 5.5 | todo | - | - |
 | 5.6 | todo | - | - |
 | 5.7 | todo | - | - |

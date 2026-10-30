@@ -1,4 +1,5 @@
 import { AppError, type ErrorCode } from '../common/errors.js'
+import type { JsonInput } from '../database/models.js'
 import type { MessageDto } from '../types/dto.js'
 import type { OutboundContent, SendOptions } from '../whatsapp/whatsapp-client.port.js'
 
@@ -76,3 +77,8 @@ export const failure = (error: SendErrorBody, hardFailure = false): SendJobResul
   outcome: { ok: false, error },
   hardFailure
 })
+
+// What the idempotency table stores of an outcome. The round trip drops what JSON cannot hold, and the
+// cast is safe because the result is JSON by construction.
+export const outcomeToJson = (outcome: SendJobOutcome): JsonInput =>
+  JSON.parse(JSON.stringify(outcome)) as JsonInput

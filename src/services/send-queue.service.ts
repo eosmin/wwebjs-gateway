@@ -7,6 +7,7 @@ import { NotFoundError } from '../common/errors.js'
 import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
+import { IdempotencyRepository } from '../database/repositories/idempotency.repository.js'
 import { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import { RedisService } from '../infra/redis/redis.service.js'
@@ -22,7 +23,8 @@ import {
   type SendJobData,
   type SendJobOutcome,
   type SendJobResult,
-  type SendJobStatus
+  type SendJobStatus,
+  outcomeToJson
 } from './send-queue.job.js'
 import { SendJobProcessor, SendJobYield } from './send-queue.processor.js'
 
@@ -91,7 +93,8 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     @Inject(SendPolicyService) private readonly policy: SendPolicyService,
     @Inject(EventPipelineService) private readonly pipeline: EventPipelineService,
     @Inject(MetricsService) private readonly metrics: MetricsService,
-    @Inject(WatchdogService) private readonly watchdog: WatchdogService
+    @Inject(WatchdogService) private readonly watchdog: WatchdogService,
+    @Inject(IdempotencyRepository) private readonly idempotency: IdempotencyRepository
   ) {}
 
   // Opens a lane for every session so the jobs left by the last run drain as soon as it is ready
@@ -113,14 +116,18 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
   // ---- API -------------------------------------------------------------------------------------
 
   // Queues a send. With `waitMs` it also waits that long for the result, and the caller then owns
-  // announcing it; without, or when the wait runs out, the result is published as an event.
-  async submit(job: NewSendJob, options: { waitMs?: number } = {}): Promise<SubmitResult> {
+  // announcing it; without, or when the wait runs out, the result is published as an event. A `jobId`
+  // chosen by the caller makes the add idempotent: BullMQ ignores a second job with the same id.
+  async submit(
+    job: NewSendJob,
+    options: { waitMs?: number; jobId?: string } = {}
+  ): Promise<SubmitResult> {
     // 404 for a session that does not exist, before any queue is made for it
     this.sessions.status(job.sessionId)
     // Taken before any await, so the order of the stamps is the order in which sends were accepted
     const stamp = this.nextStamp()
     const lane = await this.lane(job.sessionId)
-    const jobId = randomUUID()
+    const jobId = options.jobId ?? randomUUID()
     const waiting =
       options.waitMs === undefined ? undefined : this.waitFor(job.sessionId, jobId, options.waitMs)
     try {
@@ -466,6 +473,7 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     result: SendJobResult
   ): Promise<void> {
     const jobId = job.id ?? ''
+    await this.guarded(lane, 'idempotency', () => this.recordIdempotency(job.data, result.outcome))
     const waiter = this.waiters.get(jobId)
     if (waiter) {
       waiter.settle(result.outcome)
@@ -473,6 +481,21 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
       await this.guarded(lane, 'event', () => this.announce(lane, jobId, job.data, result.outcome))
     }
     await this.refreshDepth(lane)
+  }
+
+  // The key ends with the job, so a replay after BullMQ has dropped the job still gets the answer
+  private async recordIdempotency(data: SendJobData, outcome: SendJobOutcome): Promise<void> {
+    if (data.idempotencyKey === undefined) return
+    if (outcome.ok) {
+      await this.idempotency.complete(data.sessionId, data.idempotencyKey, {
+        messageId: outcome.message.id,
+        response: outcomeToJson(outcome)
+      })
+    } else {
+      await this.idempotency.fail(data.sessionId, data.idempotencyKey, {
+        response: outcomeToJson(outcome)
+      })
+    }
   }
 
   private async announce(
