@@ -251,8 +251,9 @@ describe('SendJobProcessor', () => {
         make: () => new WaTimeoutError('sendMessage', true),
         code: 'UNKNOWN_OUTCOME'
       },
-      // Also what the patched Client.sendMessage raises when its Node code fails after the page sent
+      // Also what the patched Client.sendMessage raises when its Node code or the page fails after the message was added
       WaMappingError: { make: () => new WaMappingError('sendMessage'), code: 'UNKNOWN_OUTCOME' },
+      // Includes a chat that does not exist: nothing was sent
       WaOperationError: {
         make: () => new WaOperationError('sendMessage', 'rejected'),
         code: 'WHATSAPP_ERROR'

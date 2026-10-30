@@ -88,7 +88,10 @@ This part applies to the `/code-review` skill, which reports at most 10 findings
 
 - Review in small batches (one library, or at most 8 to 10 files), never the whole step at once.
 - Give each pass one lens: correctness, security (secrets, permissions, WhatsApp credentials, personal data), tests, or configuration/CI/Docker.
-- **Fewer than 10 findings means the cap did not bind**: that batch is complete. Exactly 10 means fix what was reported and run the same batch again, saying what was fixed, until it returns fewer.
+- **One pass per PR.** Run the review once per batch and lens, at `/code-review medium`. Fix what is real and verifiable, drop the rest, and do not run the same batch again. A run that returns 10 findings does not oblige another run.
+- **Repeat only on critical code:** security, personal data, money, credentials, the adapter boundary, the send queue and policy. CI, tests and docs get one pass.
+- **New findings that are not bugs** (hardening, style, extra tests for unlikely cases) go to a backlog issue, not into this PR.
+- **"Done" is decided by green CI** (`pnpm validate:all` and the required jobs), not by the number of findings.
 - Check every finding by running the code before changing anything. Some are false positives, and a fix without a test that fails first proves nothing.
 - Read the riskiest code yourself (the adapter boundary, the send queue and policy, the order buffer, auth, SSRF guard, anything touching credentials). The tool says where to look first, not that the rest is fine.
 - The mechanical gates have no cap and run on every step: `tsc`, ESLint, the tests (run Jest with `--no-cache` so a cached success cannot hide a failure), the parity and docs tests, the integration suites and Trivy.
@@ -102,7 +105,7 @@ The subagent gives independent, fresh-eyes findings; it never replaces the mecha
 2. **Pick a batch and a lens:** at most 10 files, one lens (correctness, security, tests, config-ci-docker). Every step gets correctness and tests; steps 3.5–3.10, 4.1, 4.2, 5.1, 5.2, 7.4 and 8.3 also get security; steps that touch CI, Docker, hooks or env get config-ci-docker.
 3. **Launch** with the step number, the exact file list, the lens and the TDD sections that apply.
 4. **Verify every finding** by running or reading the code before changing anything. A real bug gets a failing test first, then the fix. A false positive is dropped with a one-line reason.
-5. **Repeat** the same batch and lens after fixing, until a pass returns no BLOCKER/HIGH (stop after 3 rounds and ask the owner).
+5. **No second round by default.** After fixing the real findings, move on. Repeat the batch and lens only when the code is critical (see above) and a BLOCKER/HIGH was fixed; stop after 2 rounds and ask the owner. Non-bug findings go to a backlog issue.
 6. **Report to the owner:** findings (real / false positive / unverified), files read in full vs only run, files touched.
 7. **Then propose the commit message and wait** for the explicit request to commit (Authorization rule).
 
