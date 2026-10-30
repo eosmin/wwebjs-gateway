@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { NotFoundError, UnprocessableError } from '../common/errors.js'
+import { ErrorCode, NotFoundError, UnprocessableError } from '../common/errors.js'
 import { canonicalJson } from '../common/lib/canonical-json.js'
 import { sha256Hex } from '../common/lib/crypto.js'
 import type { IdempotencyKey } from '../database/models.js'
@@ -46,8 +46,23 @@ const requestHash = (job: NewSendJob): string =>
     })
   )
 
-const isOutcome = (value: unknown): value is SendJobOutcome =>
-  typeof value === 'object' && value !== null && 'ok' in value && typeof value.ok === 'boolean'
+// A stored answer is trusted only when it has the shape of one: a failure whose code no longer
+// exists would otherwise turn a replay into a 500
+const isOutcome = (value: unknown): value is SendJobOutcome => {
+  if (typeof value !== 'object' || value === null || !('ok' in value)) return false
+  if (value.ok === true) return true
+  if (value.ok !== false || !('error' in value)) return false
+  const { error } = value
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code in ErrorCode &&
+    'message' in error &&
+    typeof error.message === 'string'
+  )
+}
 
 // Idempotent sends: the same key with the same request gives back the original result and never
 // queues a second send; the same key with another request is refused.
@@ -58,11 +73,30 @@ export class IdempotentSendService {
     @Inject(SendQueueService) private readonly queue: SendQueueService
   ) {}
 
-  async send(job: NewSendJob, options: { waitMs?: number } = {}): Promise<IdempotentSendResult> {
+  // The stored answer of a key that was used before, or undefined when it was not. It queues and
+  // claims nothing, so a caller can look before it does work a replay does not need (resolving the
+  // recipient, downloading media) and before the send policy, which may say no by now to a request
+  // that already succeeded.
+  async peek(
+    sessionId: string,
+    key: string,
+    hash: string
+  ): Promise<IdempotentSendResult | undefined> {
+    const existing = await this.keys.find(sessionId, key)
+    return existing ? this.replay(sessionId, existing, hash) : undefined
+  }
+
+  // `requestHash` is what makes two requests the same; a caller that has the raw request passes the
+  // hash of that, because the job holds resolved values (downloaded bytes, session defaults) that can
+  // differ between two identical requests
+  async send(
+    job: NewSendJob,
+    { requestHash: given, ...options }: { waitMs?: number; requestHash?: string } = {}
+  ): Promise<IdempotentSendResult> {
     const key = job.idempotencyKey
     if (key === undefined) return { ...(await this.queue.submit(job, options)), replayed: false }
 
-    const hash = requestHash(job)
+    const hash = given ?? requestHash(job)
     const claim = await this.keys.claim(job.sessionId, key, hash)
     if (!claim.claimed) return this.replay(job.sessionId, claim.existing, hash)
 
@@ -114,7 +148,7 @@ export class IdempotentSendService {
       // The job ended but the key did not hear about it (the process died in between)
       const outcome: SendJobOutcome =
         status.status === 'sent'
-          ? { ok: true, message: status.message }
+          ? { ok: true, ...(status.message !== undefined && { message: status.message }) }
           : { ok: false, error: status.error }
       await this.end(sessionId, existing.key, outcome)
       return { jobId, outcome, replayed: true }
@@ -132,7 +166,7 @@ export class IdempotentSendService {
   private async end(sessionId: string, key: string, outcome: SendJobOutcome): Promise<void> {
     if (outcome.ok) {
       await this.keys.complete(sessionId, key, {
-        messageId: outcome.message.id,
+        messageId: outcome.message?.id ?? null,
         response: outcomeToJson(outcome)
       })
     } else {

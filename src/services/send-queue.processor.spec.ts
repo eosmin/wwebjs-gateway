@@ -91,6 +91,41 @@ describe('SendJobProcessor', () => {
       expect(sent).toEqual(expect.objectContaining({ startTime: new Date(1_000) }))
     })
 
+    it('forwards a message through the port and reports success without a message', async () => {
+      const result = await run(
+        build(),
+        job({ content: { type: 'forward', messageId: 'm-1' }, chatId: '5215500000009@c.us' })
+      )
+
+      expect(result).toEqual({ outcome: { ok: true }, hardFailure: false })
+      expect(client.callsOf('forwardMessage')[0]?.args).toEqual(['m-1', '5215500000009@c.us'])
+      expect(client.callsOf('sendMessage')).toHaveLength(0)
+      expect(hooks.markDispatched).toHaveBeenCalledTimes(1)
+    })
+
+    it('ends a forward whose outcome is unknown as UNKNOWN_OUTCOME, marked first and never retried', async () => {
+      const order: string[] = []
+      hooks.markDispatched.mockImplementation(() => order.push('mark'))
+      client.script('forwardMessage', () => {
+        order.push('forward')
+        throw new Error('page crashed')
+      })
+      const result = await run(build(), job({ content: { type: 'forward', messageId: 'm-1' } }))
+
+      expect(result.outcome).toMatchObject({ ok: false, error: { code: 'UNKNOWN_OUTCOME' } })
+      expect(result.hardFailure).toBe(true)
+      expect(order).toEqual(['mark', 'forward'])
+      expect(hooks.clearDispatched).not.toHaveBeenCalled()
+    })
+
+    it('reports a forward WhatsApp refused with its own code, as a hard failure', async () => {
+      client.failNext('forwardMessage', new WaOperationError('forwardMessage', 'not allowed'))
+      const result = await run(build(), job({ content: { type: 'forward', messageId: 'm-1' } }))
+
+      expect(result.outcome).toMatchObject({ ok: false, error: { code: 'WHATSAPP_ERROR' } })
+      expect(result.hardFailure).toBe(true)
+    })
+
     it('counts an ack of -1 as a hard failure of a message that did go out', async () => {
       client.script('sendMessage', () => ({ ...client.sent[0], ack: -1 }) as never)
       const result = await run(build())
@@ -331,6 +366,28 @@ describe('SendJobProcessor', () => {
       await jest.advanceTimersByTimeAsync(1)
       await pending
       expect(client.callsOf('sendMessage')).toHaveLength(1)
+    })
+
+    it('replaces HUMANIZE_MIN_REPLY_DELAY_MS with the minimum pause of the job, shorter or longer', async () => {
+      const shorter = run(
+        build({ HUMANIZE_MIN_REPLY_DELAY_MS: 1500 }),
+        job({ humanize: { typing: 100, minReplyDelayMs: 300 } })
+      )
+      await jest.advanceTimersByTimeAsync(299)
+      expect(client.callsOf('sendMessage')).toHaveLength(0)
+      await jest.advanceTimersByTimeAsync(1)
+      await shorter
+      expect(client.callsOf('sendMessage')).toHaveLength(1)
+
+      const longer = run(
+        build({ HUMANIZE_MIN_REPLY_DELAY_MS: 1500 }),
+        job({ humanize: { typing: 100, minReplyDelayMs: 3000 } })
+      )
+      await jest.advanceTimersByTimeAsync(2999)
+      expect(client.callsOf('sendMessage')).toHaveLength(1)
+      await jest.advanceTimersByTimeAsync(1)
+      await longer
+      expect(client.callsOf('sendMessage')).toHaveLength(2)
     })
 
     it('still sends when marking the chat as seen fails', async () => {

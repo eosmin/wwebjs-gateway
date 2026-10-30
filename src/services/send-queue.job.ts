@@ -9,14 +9,20 @@ export interface HumanizeOptions {
   typing?: 'auto' | number
   recording?: boolean
   markSeenFirst?: boolean
+  // Shortest typing pause; the worker falls back to HUMANIZE_MIN_REPLY_DELAY_MS
+  minReplyDelayMs?: number
 }
+
+// What a job sends: what the port's `sendMessage` takes, or the forward of a message the session
+// already has (the port forwards through its own method, which answers nothing)
+export type SendJobContent = OutboundContent | { type: 'forward'; messageId: string }
 
 // The job as it lives in Redis. It carries everything the send needs, so a restart loses nothing.
 export interface SendJobData {
   sessionId: string
   // Already resolved to a WhatsApp id: the phone lookup belongs to the caller
   chatId: string
-  content: OutboundContent
+  content: SendJobContent
   options?: SendOptions
   humanize?: HumanizeOptions
   idempotencyKey?: string
@@ -38,11 +44,14 @@ export interface SendErrorBody {
 }
 
 // How a job ended. A failed send is a finished job, not a failed BullMQ job: BullMQ would retry it.
-export type SendJobOutcome = { ok: true; message: MessageDto } | { ok: false; error: SendErrorBody }
+// A forward ends without a message: WhatsApp answers nothing, and the gateway does not guess which
+// message in the chat is the forwarded one
+export type SendJobOutcome =
+  { ok: true; message?: MessageDto } | { ok: false; error: SendErrorBody }
 
 export type SendJobStatus =
   | { jobId: string; status: 'queued' | 'active' }
-  | { jobId: string; status: 'sent'; message: MessageDto }
+  | { jobId: string; status: 'sent'; message?: MessageDto }
   | { jobId: string; status: 'failed'; error: SendErrorBody }
 
 // What the processor reports besides the outcome, for the bookkeeping around it
@@ -53,7 +62,7 @@ export interface SendJobResult {
 }
 
 // `Date` does not survive the trip through Redis: it comes back as an ISO string
-export function reviveContent(content: OutboundContent): OutboundContent {
+export function reviveContent(content: SendJobContent): SendJobContent {
   if (content.type !== 'event') return content
   return {
     ...content,

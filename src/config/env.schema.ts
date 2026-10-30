@@ -232,6 +232,12 @@ export const envSchema = z
       'Milliseconds an open circuit breaker stays open'
     ),
     MAX_MEDIA_BYTES: count(33554432, { min: 1 }).describe('Largest media file in bytes'),
+    MEDIA_FETCH_CONCURRENCY: count(4, { min: 1 }).describe(
+      'Media URLs downloaded at the same time; each one can hold up to MAX_MEDIA_BYTES, about three times over while it is converted'
+    ),
+    MEDIA_FETCH_TIMEOUT_MS: count(30000, { min: 1 }).describe(
+      'Milliseconds the download of a media URL of a send may take'
+    ),
 
     // Send policy (every value can be overridden per session)
     CONVERSATION_WINDOW_HOURS: count(24, { min: 1 }).describe(

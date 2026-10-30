@@ -13,6 +13,26 @@ export const SessionId = z
 export const SessionIdParams = z.strictObject({ sessionId: SessionId })
 export class SessionIdParamsDto extends createZodDto(SessionIdParams) {}
 
+// The humanize defaults of a session (TDD §6.8): what a text message gets when the request has no
+// `humanize` of its own. A request that has one replaces these as a whole.
+export const HumanizeSettings = z.strictObject({
+  enabled: z.boolean().optional().describe('Show typing before text messages; defaults to true'),
+  typing: z
+    .union([z.literal('auto'), z.number().int().min(0).max(60_000)])
+    .optional()
+    .describe('`auto` sizes the pause from the text; a number is milliseconds'),
+  recording: z.boolean().optional(),
+  markSeenFirst: z.boolean().optional(),
+  minReplyDelayMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(60_000)
+    .optional()
+    .describe('Shortest typing pause; defaults to HUMANIZE_MIN_REPLY_DELAY_MS')
+})
+export type HumanizeSettings = z.infer<typeof HumanizeSettings>
+
 // The part of `Session.settings` that the session endpoints own. The send policy and the other
 // services keep their own keys in the same column, which these endpoints never touch.
 export const SessionSettingsInput = z.strictObject({
@@ -21,6 +41,7 @@ export const SessionSettingsInput = z.strictObject({
       enabled: z.boolean().optional().describe('Hold and sort inbound messages for this session')
     })
     .optional(),
+  humanize: HumanizeSettings.optional(),
   autoDownloadAudio: z.boolean().optional(),
   autoDownloadDocuments: z.boolean().optional(),
   autoDownloadPhotos: z.boolean().optional(),

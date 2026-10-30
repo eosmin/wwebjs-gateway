@@ -417,7 +417,7 @@ A message queued by an asynchronous send was handed to WhatsApp.
 | --- | --- | --- | --- |
 | `jobId` | string | yes |  |
 | `idempotencyKey` | string | no |  |
-| `message` | [MessageDto](#messagedto) | yes |  |
+| `message` | [MessageDto](#messagedto) | no | Missing for a forward: WhatsApp answers nothing, and the forwarded copy arrives as its own `message_create` |
 
 ### `message_failed`
 

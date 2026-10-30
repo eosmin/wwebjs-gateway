@@ -249,7 +249,7 @@ describe('send queue (integration)', () => {
     await service.submit(text('dos', { idempotencyKey: 'k-bad' }), { waitMs: 5000 })
 
     expect(idempotency.complete).toHaveBeenCalledWith(sessionId, 'k-ok', {
-      messageId: sent.outcome?.ok ? sent.outcome.message.id : 'missing',
+      messageId: sent.outcome?.ok ? (sent.outcome.message?.id ?? null) : 'missing',
       response: sent.outcome
     })
     expect(idempotency.fail).toHaveBeenCalledWith(sessionId, 'k-bad', {

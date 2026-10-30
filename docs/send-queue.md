@@ -17,7 +17,7 @@ A send that fails is a **finished** job (its result says `ok: false` and the err
 2. **Send policy.** `SendPolicyService.admit` answers `allow` (the budgets are spent), `delay` (the worker waits and asks again) or `reject` (the job ends with that code and `details.rule`). A delay beyond `SEND_POLICY_MAX_WAIT_MS` ends as `POLICY_DELAY_EXCEEDED`. See [safety.md](safety.md).
 3. **Pacing.** At least `SEND_MIN_INTERVAL_MS` plus a random part up to `SEND_JITTER_MS` between two sends of the session.
 4. **Humanize** (only when the request has it): `markSeenFirst`, then the typing or recording state for the requested time (at least `HUMANIZE_MIN_REPLY_DELAY_MS`), renewed every 20 s, and always cleared afterwards, even if the send is given up.
-5. **Dispatch.** The job is marked as dispatched in Redis **before** the call to WhatsApp, then `sendMessage` runs.
+5. **Dispatch.** The job is marked as dispatched in Redis **before** the call to WhatsApp, then `sendMessage` runs (for a forward, `forwardMessage`; it answers nothing, so the job ends without a message).
 
 ## When the outcome is unknown
 
