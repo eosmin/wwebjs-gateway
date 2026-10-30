@@ -106,6 +106,19 @@ describe('FakeWhatsAppClient', () => {
   })
 
   describe('script and failNext', () => {
+    it('goes back to the default answer after unscript', async () => {
+      const fake = new FakeWhatsAppClient()
+      await fake.initialize()
+      fake.script('getPollVotes', () => [
+        { voter: 'a', selectedOptions: [], interactedAtTs: 1, parentMessageId: 'm' }
+      ])
+      expect(await fake.getPollVotes('m')).toHaveLength(1)
+
+      fake.unscript('getPollVotes')
+
+      expect(await fake.getPollVotes('m')).toEqual([])
+    })
+
     it('uses the script instead of the default', async () => {
       const fake = new FakeWhatsAppClient()
       fake.script('getContactAbout', id => `about ${id}`)

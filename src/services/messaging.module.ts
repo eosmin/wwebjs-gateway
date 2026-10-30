@@ -8,6 +8,7 @@ import { MediaResolverService } from './media-resolver.service.js'
 import { MessageSendService } from './message-send.service.js'
 import { MessageStoreService } from './message-store.service.js'
 import { MessagesService } from './messages.service.js'
+import { PollsEventsService } from './polls-events.service.js'
 import { RecipientResolverService } from './recipient-resolver.service.js'
 import { SendPolicyService } from './send-policy.service.js'
 import { PolicyStateStore, RedisPolicyStateStore } from './send-policy.store.js'
@@ -26,6 +27,7 @@ import { SendQueueService } from './send-queue.service.js'
     HumanizeDefaultsService,
     MessageSendService,
     MessagesService,
+    PollsEventsService,
     { provide: PolicyStateStore, useClass: RedisPolicyStateStore }
   ],
   exports: [
@@ -34,7 +36,8 @@ import { SendQueueService } from './send-queue.service.js'
     IdempotentSendService,
     MessageStoreService,
     MessageSendService,
-    MessagesService
+    MessagesService,
+    PollsEventsService
   ]
 })
 export class MessagingModule {}

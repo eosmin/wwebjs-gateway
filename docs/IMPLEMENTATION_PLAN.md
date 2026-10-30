@@ -90,7 +90,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
 - [x] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
 - [x] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
-- [ ] **5.6** Polls and events controller.
+- [x] **5.6** Polls and events controller.
 - [ ] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
 - [ ] **5.8** Presence, profile and settings controller.
 - [ ] **5.9** Lookup controller.
@@ -240,7 +240,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 5.3 | done | `feat/5-3-message-store` | 2026-10-29 |
 | 5.4 | done | `feat/5-4-idempotency` | 2026-10-30 |
 | 5.5 | done | `feat/5-5-messages-controller` | 2026-10-30 |
-| 5.6 | todo | - | - |
+| 5.6 | done | `feat/5-6-polls-events` | 2026-10-30 |
 | 5.7 | todo | - | - |
 | 5.8 | todo | - | - |
 | 5.9 | todo | - | - |
