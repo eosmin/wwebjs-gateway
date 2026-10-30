@@ -796,7 +796,6 @@ describe('messages API (integration)', () => {
       endTime: '2026-02-01T19:00:00.000Z',
       description: 'Pedidos del mes',
       location: 'Bodega',
-      callType: 'video',
       isEventCanceled: false
     }
     const calls = (method: Parameters<FakeWhatsAppClient['callsOf']>[0]) =>
@@ -946,6 +945,20 @@ describe('messages API (integration)', () => {
         expect(calls('sendResponseToScheduledEvent')).toBe(before)
       })
 
+      it('refuses a call link on an edit, without calling WhatsApp', async () => {
+        client().script('getMessageById', () => event)
+        const before = calls('editScheduledEvent')
+
+        const refused = await call('PATCH', path(`events/${encoded}`), {
+          ...eventBody,
+          callType: 'video'
+        })
+
+        expect(refused.statusCode).toBe(400)
+        expect(refused.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } })
+        expect(calls('editScheduledEvent')).toBe(before)
+      })
+
       it('edits an event and passes every field to the client as dates and options', async () => {
         client().script('getMessageById', () => event)
         client().script('editScheduledEvent', () => event)
@@ -964,7 +977,6 @@ describe('messages API (integration)', () => {
             endTime: new Date(eventBody.endTime),
             description: 'Pedidos del mes',
             location: 'Bodega',
-            callType: 'video',
             isEventCanceled: false
           }
         ])
