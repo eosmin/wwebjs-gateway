@@ -38,6 +38,14 @@ describe('toNewStoredMessage', () => {
     expect(row.dto).toEqual(JSON.parse(JSON.stringify(dto)))
   })
 
+  it('stores a message without an ack with a null ack and reads it back', () => {
+    const noAck = buildMessageDto({ ack: null })
+    const row = toNewStoredMessage('s1', noAck, true)
+
+    expect(row.ack).toBeNull()
+    expect(toMessageDto({ dto: row.dto } as unknown as StoredMessage)).toEqual(noAck)
+  })
+
   it('marks the messages of the session as outgoing and leaves the origin out when there is none', () => {
     const row = toNewStoredMessage('s1', buildMessageDto({ fromMe: true }), true)
 

@@ -422,7 +422,8 @@ export class SendPolicyService {
       'recent outgoing read'
     )
     if (recent.length < this.config.UNREACHABLE_STREAK) return false
-    if (recent.some(message => message.ack >= 2)) return false
+    // An unknown ack is no proof that the message was not delivered
+    if (recent.some(message => message.ack === null || message.ack >= 2)) return false
     const oldest = recent[recent.length - 1]
     return oldest !== undefined && now - oldest.sentAt.getTime() >= minAgeMs
   }

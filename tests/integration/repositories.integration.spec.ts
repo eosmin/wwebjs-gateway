@@ -730,6 +730,19 @@ describe('repositories (integration)', () => {
       expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(3)
     })
 
+    it('stores a message without an ack, and the first ack that follows applies', async () => {
+      const sessionId = await newSession('msg-ack-null')
+      await messages.upsert(message(sessionId, 'm1', { ack: null }))
+      await messages.upsert(message(sessionId, 'm2', { ack: null }))
+
+      expect((await messages.findById(sessionId, 'm1'))?.ack).toBeNull()
+      expect(await messages.updateAck(sessionId, 'm1', 1)).toBe(true)
+      expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(1)
+      // An error ack applies to an unknown one as well
+      expect(await messages.updateAck(sessionId, 'm2', -1)).toBe(true)
+      expect((await messages.findById(sessionId, 'm2'))?.ack).toBe(-1)
+    })
+
     it('applies an ack of -1 (error) whatever the stored one', async () => {
       const sessionId = await newSession('msg-ack-error')
       await messages.upsert(message(sessionId, 'm1', { ack: 2 }))

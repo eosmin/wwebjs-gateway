@@ -169,6 +169,14 @@ describe('serializeId', () => {
 })
 
 describe('mapMessage', () => {
+  // WhatsApp Web gives some incoming messages no ack at all; it is unknown, not pending (0)
+  it('gives a message that has no ack a null ack', () => {
+    const dto = mapMessage(message({ ack: undefined }), OPTIONS)
+
+    expect(dto.ack).toBeNull()
+    expect(MessageDto.parse(dto)).toEqual(dto)
+  })
+
   it('maps a message whose key has no _serialized, as WhatsApp Web sends it now', () => {
     const dto = mapMessage(
       message({ id: { fromMe: false, remote: '5215500000001@c.us', id: '3EB0AAAA' } }),

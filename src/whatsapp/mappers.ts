@@ -269,8 +269,10 @@ type MessageGatewayFields =
   | 'pollOptions'
   | 'dynamicReplyButtons'
 
-export interface MessageSource extends Omit<MessageDto, MessageGatewayFields> {
+export interface MessageSource extends Omit<MessageDto, MessageGatewayFields | 'ack'> {
   id: IdLike
+  // Some incoming messages come without one
+  ack?: number | null
   // The typings of wwebjs say string, but Message.js copies what WhatsApp Web holds, which can be wids
   mentionedIds: IdLike[]
   groupMentions: { groupSubject: string; groupJid: IdLike }[]
@@ -356,6 +358,7 @@ export function mapMessage(source: MessageSource, options: MessageMapOptions): M
   const message: MessageDto = {
     ...(pick(source, MESSAGE_FIELDS) as MessageDto), // required fields are filled by wwebjs
     id: serializeId(source.id),
+    ack: source.ack ?? null,
     // For a group chat `from` is the group, `author` the sender
     chatId: source.fromMe ? source.to : source.from,
     sentAt: unixToIso(source.timestamp),

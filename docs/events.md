@@ -694,7 +694,7 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | `origin` | [OriginDto](#origindto) | no |  |
 | `media` | [MessageMediaDto](#messagemediadto) | no |  |
 | `raw` | object | no | Sanitized copy of rawData; its shape mirrors WhatsApp Web and may change |
-| `ack` | integer | yes |  |
+| `ack` | integer or null | yes | -1 error, 0 pending, 1 server, 2 device, 3 read, 4 played; null when WhatsApp gave none |
 | `author` | string | no |  |
 | `deviceType` | string | yes |  |
 | `body` | string | yes |  |
