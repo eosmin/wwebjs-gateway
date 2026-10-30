@@ -97,9 +97,87 @@ describe('serializeId', () => {
     expect(serializeId(id('a@c.us'))).toBe('a@c.us')
     expect(serializeId('a@c.us')).toBe('a@c.us')
   })
+
+  // WhatsApp Web no longer gives message keys a `_serialized`; the key is its own parts
+  describe('a message key without _serialized', () => {
+    it('joins fromMe, remote and id', () => {
+      expect(serializeId({ fromMe: false, remote: '111@lid', id: 'ABC' })).toBe('false_111@lid_ABC')
+      expect(serializeId({ fromMe: true, remote: id('111@lid'), id: 'ABC' })).toBe(
+        'true_111@lid_ABC'
+      )
+    })
+
+    it('adds the participant of a group message and the self marker', () => {
+      expect(
+        serializeId({ fromMe: false, remote: '1@g.us', id: 'ABC', participant: id('222@lid') })
+      ).toBe('false_1@g.us_ABC_222@lid')
+      expect(serializeId({ fromMe: true, remote: '111@lid', id: 'ABC', self: 'out' })).toBe(
+        'true_111@lid_ABC_out'
+      )
+    })
+
+    it('leaves out a participant and a self marker that are empty', () => {
+      expect(
+        serializeId({ fromMe: false, remote: '111@lid', id: 'ABC', participant: null, self: null })
+      ).toBe('false_111@lid_ABC')
+      expect(
+        serializeId({ fromMe: false, remote: '111@lid', id: 'ABC', participant: '', self: '' })
+      ).toBe('false_111@lid_ABC')
+    })
+
+    it('puts the participant before the self marker', () => {
+      expect(
+        serializeId({
+          fromMe: true,
+          remote: '1@g.us',
+          id: 'ABC',
+          participant: '222@lid',
+          self: 'out'
+        })
+      ).toBe('true_1@g.us_ABC_222@lid_out')
+    })
+
+    it('rebuilds the key when _serialized is present but undefined', () => {
+      expect(
+        serializeId({ _serialized: undefined, fromMe: false, remote: '111@lid', id: 'ABC' })
+      ).toBe('false_111@lid_ABC')
+    })
+
+    it('prefers _serialized when it is there', () => {
+      expect(serializeId({ _serialized: 'x', fromMe: false, remote: '111@lid', id: 'ABC' })).toBe(
+        'x'
+      )
+    })
+  })
+
+  it('refuses an object that is not an id instead of returning undefined', () => {
+    expect(() => serializeId({} as never)).toThrow('Cannot serialize a WhatsApp id')
+  })
+
+  it('refuses a key whose parts are not usable instead of building a wrong id', () => {
+    const broken = [
+      { fromMe: false, id: 'ABC' },
+      { fromMe: false, remote: {}, id: 'ABC' },
+      { fromMe: false, remote: '111@lid' },
+      { fromMe: false, remote: '111@lid', id: 'ABC', participant: {} },
+      { fromMe: 'no', remote: '111@lid', id: 'ABC' }
+    ]
+    for (const key of broken) {
+      expect(() => serializeId(key as never)).toThrow('Cannot serialize a WhatsApp id')
+    }
+  })
 })
 
 describe('mapMessage', () => {
+  it('maps a message whose key has no _serialized, as WhatsApp Web sends it now', () => {
+    const dto = mapMessage(
+      message({ id: { fromMe: false, remote: '5215500000001@c.us', id: '3EB0AAAA' } }),
+      OPTIONS
+    )
+
+    expect(dto.id).toBe('false_5215500000001@c.us_3EB0AAAA')
+  })
+
   it('maps a text message to a valid MessageDto with the gateway fields', () => {
     const dto = mapMessage(message(), OPTIONS)
 

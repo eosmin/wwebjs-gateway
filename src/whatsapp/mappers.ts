@@ -36,10 +36,45 @@ import type {
 export interface WaSerializedId {
   _serialized: string
 }
-export type IdLike = string | WaSerializedId
+
+// WhatsApp Web dropped `_serialized` from message keys (the string is only in the key's toString,
+// which does not survive the trip out of the page), so a key is rebuilt from its parts. Checked
+// against every loaded message of a real account: the parts joined with `_` give the old string,
+// with the participant of a group message and the `self` marker of a message to oneself at the end.
+export interface WaMessageKey {
+  _serialized?: string
+  fromMe: boolean
+  remote: string | WaSerializedId
+  id: string
+  participant?: string | WaSerializedId | null
+  self?: string | null
+}
+export type IdLike = string | WaSerializedId | WaMessageKey
+
+const NOT_AN_ID = 'Cannot serialize a WhatsApp id: it has no _serialized and is not a message key'
+
+// A key part must resolve to a non-empty string, or the joined id would silently carry an empty part
+const plainId = (id: unknown): string => {
+  const value = typeof id === 'object' && id !== null && '_serialized' in id ? id._serialized : id
+  if (typeof value !== 'string' || value === '') throw new TypeError(NOT_AN_ID)
+  return value
+}
+
+const isMessageKey = (id: IdLike): id is WaMessageKey =>
+  typeof id === 'object' &&
+  'fromMe' in id &&
+  typeof id.fromMe === 'boolean' &&
+  'remote' in id &&
+  'id' in id
 
 export function serializeId(id: IdLike): string {
-  return typeof id === 'string' ? id : id._serialized
+  if (typeof id === 'string') return id
+  if ('_serialized' in id && typeof id._serialized === 'string') return id._serialized
+  if (!isMessageKey(id)) throw new TypeError(NOT_AN_ID)
+  const parts = [String(id.fromMe), plainId(id.remote), plainId(id.id)]
+  if (id.participant) parts.push(plainId(id.participant))
+  if (id.self) parts.push(id.self)
+  return parts.join('_')
 }
 
 const optionalId = (id: IdLike | null | undefined): string | undefined =>
