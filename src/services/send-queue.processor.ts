@@ -205,7 +205,7 @@ export class SendJobProcessor {
     }
     const typingMs = Math.max(
       resolveTypingMs(humanize.typing ?? 'auto', bodyOf(data)?.length ?? 0, this.deps.random),
-      this.deps.config.HUMANIZE_MIN_REPLY_DELAY_MS
+      humanize.minReplyDelayMs ?? this.deps.config.HUMANIZE_MIN_REPLY_DELAY_MS
     )
     const state = humanize.recording === true ? 'recording' : 'typing'
     try {
@@ -220,7 +220,12 @@ export class SendJobProcessor {
   }
 
   private async dispatch(client: WhatsAppClientPort, data: SendJobData): Promise<SendJobResult> {
-    const message = await client.sendMessage(data.chatId, reviveContent(data.content), data.options)
+    const content = reviveContent(data.content)
+    if (content.type === 'forward') {
+      await client.forwardMessage(content.messageId, data.chatId)
+      return { outcome: { ok: true }, hardFailure: false }
+    }
+    const message = await client.sendMessage(data.chatId, content, data.options)
     return { outcome: { ok: true, message }, hardFailure: isAckError(message) }
   }
 

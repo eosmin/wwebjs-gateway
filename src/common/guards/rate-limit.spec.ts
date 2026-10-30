@@ -1,4 +1,4 @@
-import { Controller, Get, Global, Module } from '@nestjs/common'
+import { type ExecutionContext, Controller, Get, Global, Module } from '@nestjs/common'
 import { APP_FILTER } from '@nestjs/core'
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify'
 import { Test } from '@nestjs/testing'
@@ -10,6 +10,8 @@ import { ApiKeysRepository } from '../../database/repositories/api-keys.reposito
 import { AuthModule } from '../../services/auth.module.js'
 import { Public, RequireScope } from '../decorators/auth.decorators.js'
 import { AllExceptionsFilter } from '../filters/all-exceptions.filter.js'
+
+import { buildRateLimitOptions } from './rate-limit.js'
 
 const ADMIN_KEY = 'a'.repeat(32)
 const LIMIT = 3
@@ -185,5 +187,25 @@ describe('the rate limit', () => {
         (await get('/probe/open', { 'x-forwarded-for': '203.0.113.6' }, proxy)).statusCode
       ).toBe(200)
     })
+  })
+})
+
+describe('the address bucket of a request the large-body hook already counted', () => {
+  const options = buildRateLimitOptions({ RATE_LIMIT_MAX: 5, TRUST_PROXY_HOPS: 0 })
+  const addressBucket = (): { skipIf?: (context: ExecutionContext) => boolean } => {
+    const throttlers = Array.isArray(options) ? options : options.throttlers
+    const found = throttlers.find(throttler => throttler.name === 'ip')
+    if (!found) throw new Error('no address bucket')
+    return found
+  }
+  const contextOf = (request: object): ExecutionContext =>
+    ({ switchToHttp: () => ({ getRequest: () => request }) }) as unknown as ExecutionContext
+
+  it('is skipped by the guard, so a large send costs one hit and not two', () => {
+    expect(addressBucket().skipIf?.(contextOf({ ipRateCounted: true }))).toBe(true)
+  })
+
+  it('is counted by the guard for every other request', () => {
+    expect(addressBucket().skipIf?.(contextOf({ headers: {} }))).toBe(false)
   })
 })

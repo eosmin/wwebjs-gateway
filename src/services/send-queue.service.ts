@@ -164,7 +164,11 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
       const outcome = (await lane.queue.getJob(jobId))?.returnvalue?.outcome
       if (!outcome) throw new NotFoundError('NOT_FOUND', `Send job ${jobId} does not exist`)
       return outcome.ok
-        ? { jobId, status: 'sent', message: outcome.message }
+        ? {
+            jobId,
+            status: 'sent',
+            ...(outcome.message !== undefined && { message: outcome.message })
+          }
         : { jobId, status: 'failed', error: outcome.error }
     }
     if (state === 'failed') {
@@ -488,7 +492,7 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     if (data.idempotencyKey === undefined) return
     if (outcome.ok) {
       await this.idempotency.complete(data.sessionId, data.idempotencyKey, {
-        messageId: outcome.message.id,
+        messageId: outcome.message?.id ?? null,
         response: outcomeToJson(outcome)
       })
     } else {
@@ -509,7 +513,7 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
       await this.pipeline.publish(lane.sessionId, 'message_sent', {
         jobId,
         ...key,
-        message: outcome.message
+        ...(outcome.message !== undefined && { message: outcome.message })
       })
     } else {
       await this.pipeline.publish(lane.sessionId, 'message_failed', {

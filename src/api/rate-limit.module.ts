@@ -5,16 +5,20 @@ import { ThrottlerModule } from '@nestjs/throttler'
 import { RateLimitGuard, buildRateLimitOptions } from '../common/guards/rate-limit.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
+import { AuthModule } from '../services/auth.module.js'
+
+import { LargeBodyAuthHook } from './large-body-auth.hook.js'
 
 // Imported before every module that has a guard of its own: guards run in the order they are
 // registered, and the limit has to apply before the API key is looked up
 @Module({
   imports: [
+    AuthModule,
     ThrottlerModule.forRootAsync({
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) => buildRateLimitOptions(config)
     })
   ],
-  providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }]
+  providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }, LargeBodyAuthHook]
 })
 export class RateLimitModule {}

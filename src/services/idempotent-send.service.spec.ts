@@ -46,6 +46,11 @@ class FakeKeys {
     return Promise.resolve({ claimed: true })
   })
 
+  find = jest.fn((sessionId: string, key: string): Promise<IdempotencyKey | null> => {
+    const existing = this.rows.get(`${sessionId}/${key}`)
+    return Promise.resolve(existing ? { ...existing } : null)
+  })
+
   complete = jest.fn((sessionId: string, key: string, outcome: IdempotencyOutcome) =>
     this.finish(sessionId, key, 'done', outcome)
   )
@@ -181,6 +186,95 @@ describe('IdempotentSendService', () => {
         outcome: { ok: true }
       })
       expect(keys.rows.get(`${SESSION}/k1`)).toMatchObject({ status: 'done', messageId: 'm1' })
+    })
+  })
+
+  describe('a send that ends without a message (a forward)', () => {
+    it('ends the key as done with no message id, and replays the stored result', async () => {
+      await service.send(job('hola', 'k1'))
+      status.mockResolvedValue({ jobId: 'x', status: 'sent' })
+
+      await expect(service.send(job('hola', 'k1'))).resolves.toEqual({
+        jobId: expect.stringMatching(/^idem-/) as unknown,
+        replayed: true,
+        outcome: { ok: true }
+      })
+      expect(keys.rows.get(`${SESSION}/k1`)).toMatchObject({ status: 'done', messageId: null })
+    })
+  })
+
+  describe('peek', () => {
+    it('knows nothing of a key that was never used, and claims nothing', async () => {
+      await expect(service.peek(SESSION, 'new', 'any-hash')).resolves.toBeUndefined()
+
+      expect(keys.claim).not.toHaveBeenCalled()
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('answers a finished key with its stored result, without queueing', async () => {
+      await service.send(job('hola', 'k1'), { requestHash: 'h1' })
+      keys.rows.set(`${SESSION}/k1`, {
+        ...(keys.rows.get(`${SESSION}/k1`) as IdempotencyKey),
+        status: 'done',
+        response: outcomeToJson(sent) as IdempotencyKey['response']
+      })
+      submit.mockClear()
+
+      await expect(service.peek(SESSION, 'k1', 'h1')).resolves.toMatchObject({
+        replayed: true,
+        outcome: { ok: true }
+      })
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('refuses the same key with another request hash', async () => {
+      await service.send(job('hola', 'k1'), { requestHash: 'h1' })
+
+      await expect(service.peek(SESSION, 'k1', 'h2')).rejects.toMatchObject({
+        code: 'IDEMPOTENCY_KEY_REUSED'
+      })
+    })
+  })
+
+  describe('a hash given by the caller', () => {
+    it('is the one the key is claimed with, instead of the hash of the job', async () => {
+      await service.send(job('hola', 'k1'), { requestHash: 'raw-request' })
+
+      expect(keys.claim).toHaveBeenCalledWith(SESSION, 'k1', 'raw-request')
+    })
+
+    it('does not reach the queue, which takes only the wait and the job id', async () => {
+      await service.send(job('hola', 'k1'), { waitMs: 5, requestHash: 'raw-request' })
+
+      expect(submit.mock.calls[0]?.[1]).toEqual({
+        waitMs: 5,
+        jobId: expect.stringMatching(/^idem-/) as unknown
+      })
+    })
+
+    it('makes two resolved jobs the same request when the raw request is the same', async () => {
+      await service.send(job('hola', 'k1'), { requestHash: 'same' })
+      status.mockResolvedValue({ jobId: 'x', status: 'queued' })
+
+      await expect(
+        service.send(job('texto resuelto distinto', 'k1'), { requestHash: 'same' })
+      ).resolves.toMatchObject({ replayed: true })
+    })
+  })
+
+  describe('a stored answer that does not fit the shape of one', () => {
+    it('is not trusted: a failure with a code that no longer exists is not replayed as one', async () => {
+      await service.send(job('hola', 'k1'))
+      keys.rows.set(`${SESSION}/k1`, {
+        ...(keys.rows.get(`${SESSION}/k1`) as IdempotencyKey),
+        status: 'failed',
+        response: { ok: false, error: { code: 'GONE_CODE', message: 'x' } }
+      })
+
+      await expect(service.send(job('hola', 'k1'))).resolves.toEqual({
+        jobId: expect.stringMatching(/^idem-/) as unknown,
+        replayed: true
+      })
     })
   })
 

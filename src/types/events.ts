@@ -241,7 +241,9 @@ export const WA_EVENTS = {
     payload: z.object({
       jobId: z.string(),
       idempotencyKey: z.string().optional(),
-      message: MessageDto
+      message: MessageDto.optional().describe(
+        'Missing for a forward: WhatsApp answers nothing, and the forwarded copy arrives as its own `message_create`'
+      )
     })
   },
   message_failed: {

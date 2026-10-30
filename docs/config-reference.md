@@ -63,6 +63,8 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `SEND_BREAKER_THRESHOLD` | integer, 1 or more | no | `5` | Consecutive send failures that open the circuit breaker of a session |
 | `SEND_BREAKER_COOLDOWN_MS` | integer, 1 or more | no | `60000` | Milliseconds an open circuit breaker stays open |
 | `MAX_MEDIA_BYTES` | integer, 1 or more | no | `33554432` | Largest media file in bytes |
+| `MEDIA_FETCH_CONCURRENCY` | integer, 1 or more | no | `4` | Media URLs downloaded at the same time; each one can hold up to MAX_MEDIA_BYTES, about three times over while it is converted |
+| `MEDIA_FETCH_TIMEOUT_MS` | integer, 1 or more | no | `30000` | Milliseconds the download of a media URL of a send may take |
 | `CONVERSATION_WINDOW_HOURS` | integer, 1 or more | no | `24` | Hours after the last inbound message during which a chat counts as a conversation |
 | `ALLOW_COLD_SENDS` | `true`, `false` | no | `false` | Allow sending to chats without a conversation |
 | `COLD_SENDS_PER_DAY` | integer, 0 to 1000 | no | `20` | Cold sends allowed per session per day |

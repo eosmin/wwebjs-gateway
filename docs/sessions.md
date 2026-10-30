@@ -46,6 +46,8 @@ Once the session is `ready` the reconciler looks for messages that arrived while
 
 `settings.ordering.enabled` is read when the client starts and decides whether the pipeline orders the inbound messages of that session.
 
+`settings.humanize` sets what a text message gets when its request has no `humanize` (TDD §6.8): `enabled` (default `true`; `false` switches the typing off for the session), `typing` (`auto` or milliseconds), `recording`, `markSeenFirst` and `minReplyDelayMs` (shortest typing pause; default `HUMANIZE_MIN_REPLY_DELAY_MS`). Only text is humanized by default; media, locations, contacts, polls, events and forwards are not. A request that has a `humanize` of its own replaces these as a whole. The value is read when the send is accepted and stored in the job, so changing the setting does not change messages already queued. Settings that do not fit the schema are ignored (a warning is logged) and the plain defaults apply.
+
 ## Reconnecting
 
 After a `disconnected` (not `LOGOUT`), a `session_error` or a browser that does not start, the manager:

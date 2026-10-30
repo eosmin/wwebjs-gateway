@@ -89,7 +89,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **5.2** `send-queue.service.ts` and the Bull Board mount (`/admin/queues`, admin-only, flag `BULL_BOARD_ENABLED`). *Done when:* ordering, idempotency, restart durability and `UNKNOWN_OUTCOME` tests pass.
 - [x] **5.3** `message-store.service.ts`. *Done when:* storage and retention are tested.
 - [x] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
-- [ ] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
+- [x] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
 - [ ] **5.6** Polls and events controller.
 - [ ] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
 - [ ] **5.8** Presence, profile and settings controller.
@@ -169,7 +169,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [x] **4.7** Rate limit (`@nestjs/throttler` 6.7.1, TDD §2 and §6.14, `RATE_LIMIT_MAX`) keyed by API key or IP, including the public routes `/ready`, `/metrics` and the failed-authentication path (each unknown key costs one database lookup, and `/ready` pings Postgres and Redis per call). No step owned it before; found in the security review of 4.5.
 - [x] **5.1** Cap the delay a `TokenBucket` may book (`POLICY_DELAY_EXCEEDED`); the bucket itself never refuses.
 - [x] **5.2** Import `RedisModule` into `AppModule` with its first consumer. Queues and workers must close before `RedisService.onApplicationShutdown` runs (it quits and disconnects every connection).
-- [ ] **5.5 and 7.4** Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
+- [ ] **5.5 and 7.4** (5.5 done: media fetch, `downloadPublicFile`; 7.4 pending: webhook delivery, which reuses it) Every outbound HTTP call to a user URL (media fetch, webhook delivery) runs `assertPublicHttpUrl` before each attempt, connects only to the returned `addresses` (Host and SNI from `url.hostname`) and uses `redirect: 'error'`. Add a test where the name resolves public at the check and private at the connection.
 - [ ] **7.4** Decide and implement the production guard for `ALLOW_PRIVATE_WEBHOOK_TARGETS` (see TDD §11 PENDING).
 - [ ] **3.x, the first step that logs message data** Decide which keys count as message content beyond `body`, `text` and `caption` (see TDD §11 PENDING), and never pass a secret as a `child()` logger binding: bindings bypass redaction.
 - [ ] **10.2** The Redis restart test also checks the log: ioredis reports one error per retry (about every 2 s) and each becomes a log line; throttle it if it floods.
@@ -239,7 +239,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 5.2 | done | `feat/5-2-send-queue` | 2026-10-29 |
 | 5.3 | done | `feat/5-3-message-store` | 2026-10-29 |
 | 5.4 | done | `feat/5-4-idempotency` | 2026-10-30 |
-| 5.5 | todo | - | - |
+| 5.5 | done | `feat/5-5-messages-controller` | 2026-10-30 |
 | 5.6 | todo | - | - |
 | 5.7 | todo | - | - |
 | 5.8 | todo | - | - |

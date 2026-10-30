@@ -12,6 +12,10 @@ export const RATE_LIMIT_WINDOW_MS = 60_000
 const KEY_THROTTLER = 'key'
 const IP_THROTTLER = 'ip'
 
+// Set by the hook that reads the large bodies of the send routes, which already counted the request
+// against the address bucket before the body was read: the guard must not count it a second time
+export type CountedRequest = FastifyRequest & { ipRateCounted?: boolean }
+
 const requestOf = (context: ExecutionContext): FastifyRequest =>
   context.switchToHttp().getRequest<FastifyRequest>()
 
@@ -32,6 +36,7 @@ export function buildRateLimitOptions(
         name: IP_THROTTLER,
         ttl: RATE_LIMIT_WINDOW_MS,
         limit,
+        skipIf: context => (requestOf(context) as CountedRequest).ipRateCounted === true,
         getTracker: req =>
           normalizeIp(requestClientIp(req as FastifyRequest, config.TRUST_PROXY_HOPS)) // reason: the guard hands over the Fastify request
       },
