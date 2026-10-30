@@ -36,3 +36,24 @@ export class WaOperationError extends WhatsAppError {
     super('WHATSAPP_ERROR', message, { operation })
   }
 }
+
+// The call ran, but our own code could not read what WhatsApp answered (a field the mappers did not
+// expect). It answers like WaOperationError, yet it is a bug of ours, so it is told apart to be
+// logged loudly instead of read as WhatsApp Web failing.
+export class WaMappingError extends WhatsAppError {
+  constructor(
+    readonly operation: string,
+    message?: string
+  ) {
+    super('WHATSAPP_ERROR', message, { operation, kind: 'mapping' })
+  }
+}
+
+// What the adapter's own mappers raise when WhatsApp gave data they did not expect. `runWaCall`
+// turns it into a WaMappingError that names the operation; the original error stays as `cause`.
+export class MapperFailure extends Error {
+  constructor(cause: unknown) {
+    super('A mapper failed', { cause })
+    this.name = 'MapperFailure'
+  }
+}

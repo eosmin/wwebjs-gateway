@@ -1,7 +1,13 @@
 import { WhatsAppError } from '../common/errors.js'
 import { withTimeout } from '../common/lib/timeout.js'
 
-import { WaDisconnectedError, WaOperationError, WaTimeoutError } from './wa-errors.js'
+import {
+  MapperFailure,
+  WaDisconnectedError,
+  WaMappingError,
+  WaOperationError,
+  WaTimeoutError
+} from './wa-errors.js'
 
 // What the adapter wraps around every call to whatsapp-web.js. It knows nothing of the library, so it
 // runs in unit tests without a browser.
@@ -47,15 +53,28 @@ function translate(operation: string, error: unknown): Error {
   if (
     error instanceof WaDisconnectedError ||
     error instanceof WaTimeoutError ||
-    error instanceof WaOperationError
+    error instanceof WaOperationError ||
+    error instanceof WaMappingError
   ) {
     return error
+  }
+  if (error instanceof MapperFailure) {
+    return new WaMappingError(operation, `${operation}: the result could not be read`)
   }
   if (isTimeout(error)) return new WaTimeoutError(operation, true, `${operation} timed out`)
   if (isPuppeteerFailure(error)) {
     return new WaDisconnectedError(operation, true, `${operation}: the browser went away`)
   }
   return new WaOperationError(operation, `${operation} failed`)
+}
+
+// Runs a mapper of ours: whatever it throws becomes a MapperFailure, which is not WhatsApp Web failing
+export function mapping<T>(map: () => T): T {
+  try {
+    return map()
+  } catch (error: unknown) {
+    throw new MapperFailure(error)
+  }
 }
 
 // Runs `call` with a deadline and turns whatever it throws into one of the three errors of the port.

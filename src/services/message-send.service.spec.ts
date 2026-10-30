@@ -195,12 +195,12 @@ describe('MessageSendService', () => {
     ],
     [
       'an event',
-      { type: 'event', name: 'Demo', startTime: '2026-02-01T10:00:00.000Z', callType: 'video' },
+      { type: 'event', name: 'Demo', startTime: '2026-02-01T10:00:00.000Z', location: 'HQ' },
       {
         type: 'event',
         name: 'Demo',
         startTime: new Date('2026-02-01T10:00:00.000Z'),
-        callType: 'video'
+        location: 'HQ'
       }
     ]
   ])('sends %s', async (_label, body, content) => {

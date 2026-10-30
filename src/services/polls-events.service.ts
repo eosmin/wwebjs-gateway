@@ -59,7 +59,6 @@ export class PollsEventsService {
       ...(body.endTime !== undefined && { endTime: new Date(body.endTime) }),
       ...(body.description !== undefined && { description: body.description }),
       ...(body.location !== undefined && { location: body.location }),
-      ...(body.callType !== undefined && { callType: body.callType }),
       ...(body.isEventCanceled !== undefined && { isEventCanceled: body.isEventCanceled })
     })
     if (edited === null) {

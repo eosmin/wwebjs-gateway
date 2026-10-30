@@ -254,8 +254,7 @@ export class MessageSendService {
             startTime: new Date(body.startTime),
             ...(body.endTime !== undefined && { endTime: new Date(body.endTime) }),
             ...(body.description !== undefined && { description: body.description }),
-            ...(body.location !== undefined && { location: body.location }),
-            ...(body.callType !== undefined && { callType: body.callType })
+            ...(body.location !== undefined && { location: body.location })
           },
           options
         }

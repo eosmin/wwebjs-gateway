@@ -26,6 +26,10 @@ const FETCH_TIMEOUT_MS = 15_000
 
 const errorKind = (error: unknown): string => (error instanceof Error ? error.name : typeof error)
 
+// An unread chat WhatsApp gave no timestamp for sorts as the newest: the cap must not cut the one
+// chat whose messages cannot be dated
+const UNDATED_FIRST = Number.MAX_SAFE_INTEGER
+
 // A channel (newsletter) is not a conversation: nobody writes to the account there
 const isConversation = (chat: AnyChatDto): boolean => !('isChannel' in chat)
 
@@ -94,7 +98,7 @@ export class ReconcilerService implements OnApplicationBootstrap, BeforeApplicat
     const chats = await withTimeout(run.client.getChats(), CHATS_TIMEOUT_MS, 'getChats')
     const visit = chats
       .filter(chat => isConversation(chat) && this.isCandidate(chat, since, lastEventAt))
-      .sort((a, b) => b.timestamp - a.timestamp)
+      .sort((a, b) => (b.timestamp ?? UNDATED_FIRST) - (a.timestamp ?? UNDATED_FIRST))
       .slice(0, this.config.RECONCILE_MAX_CHATS)
 
     let recovered = 0
@@ -110,12 +114,14 @@ export class ReconcilerService implements OnApplicationBootstrap, BeforeApplicat
   }
 
   // Active inside the lookback, and either unread or newer than the last event the gateway saw
-  // (no event on record: every active chat is a candidate)
+  // (no event on record: every active chat is a candidate). A chat WhatsApp gave no timestamp for has
+  // no known activity, so only unread messages make it one.
   private isCandidate(
     chat: AnyChatDto,
     since: number,
     lastEventAt: Date | null | undefined
   ): boolean {
+    if (chat.timestamp === null) return chat.unreadCount > 0
     const activeAt = chat.timestamp * 1000
     if (activeAt < since) return false
     return chat.unreadCount > 0 || lastEventAt == null || activeAt > lastEventAt.getTime()

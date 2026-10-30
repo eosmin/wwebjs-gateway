@@ -255,6 +255,39 @@ describe('ReconcilerService chat selection', () => {
     ])
   })
 
+  // WhatsApp gives some chats no timestamp: their activity is unknown, so only unread ones are read
+  it('reads a chat without a timestamp only when it has unread messages', async () => {
+    const { reconciler, client } = build({
+      chats: [
+        chatOf('unread@c.us', { timestamp: null, unreadCount: 2 }),
+        chatOf('read@c.us', { timestamp: null })
+      ]
+    })
+
+    await reconciler.reconcile(ID)
+
+    expect(client.callsOf('fetchMessages').map(call => call.args[0])).toEqual(['unread@c.us'])
+  })
+
+  it('keeps an unread chat without a timestamp when the cap cuts', async () => {
+    const { reconciler, client } = build({
+      chats: [
+        chatOf('undated@c.us', { timestamp: null, unreadCount: 1 }),
+        chatOf('old@c.us', { timestamp: agoHours(5) }),
+        chatOf('new@c.us', { timestamp: agoHours(1) })
+      ],
+      env: { RECONCILE_MAX_CHATS: '2' },
+      lastEventAt: null
+    })
+
+    await reconciler.reconcile(ID)
+
+    expect(client.callsOf('fetchMessages').map(call => call.args[0])).toEqual([
+      'undated@c.us',
+      'new@c.us'
+    ])
+  })
+
   it('asks for RECONCILE_FETCH_LIMIT messages per chat', async () => {
     const { reconciler, client } = build({
       chats: [chatOf('a@c.us')],

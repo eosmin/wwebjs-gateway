@@ -5,9 +5,15 @@ import wwebjs, { type Message } from 'whatsapp-web.js'
 
 import { TEST_ENV } from '../../tests/helpers/env.js'
 import { parseEnv } from '../config/env.schema.js'
+import { MessageDto } from '../types/dto.js'
 import { WA_EVENTS, type WaEventName } from '../types/events.js'
 
-import { WaDisconnectedError, WaOperationError, WaTimeoutError } from './wa-errors.js'
+import {
+  WaDisconnectedError,
+  WaMappingError,
+  WaOperationError,
+  WaTimeoutError
+} from './wa-errors.js'
 import type { ClientEvent } from './whatsapp-client.port.js'
 import {
   buildClientOptions,
@@ -404,6 +410,35 @@ describe('events', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('secret text')
   })
 
+  it('tells the skipped listener which event it could not map', () => {
+    const { client, adapter } = harness()
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const skipped: string[] = []
+    const stop = adapter.onSkipped(event => skipped.push(event))
+
+    client.emit('message', { body: 'a message without an id' })
+    stop()
+    client.emit('message', { body: 'another one' })
+
+    expect(skipped).toEqual(['message'])
+  })
+
+  it('isolates a skipped listener that throws from the others', () => {
+    const { client, adapter } = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const seen: string[] = []
+    adapter.onSkipped(() => {
+      throw new Error('boom')
+    })
+    adapter.onSkipped(event => seen.push(event))
+
+    expect(() => client.emit('message', { body: 'no id' })).not.toThrow()
+    expect(() => client.emit('qr', undefined)).not.toThrow()
+
+    expect(seen).toEqual(['message'])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped-event listener failed'))
+  })
+
   it('isolates a listener that throws from the others', () => {
     const { client, adapter, events } = harness()
     jest.spyOn(Logger.prototype, 'warn').mockImplementation()
@@ -483,6 +518,67 @@ describe('calls', () => {
 
     await expect(h.adapter.getChatById('c@c.us')).rejects.toBeInstanceOf(WaTimeoutError)
   })
+
+  it('tells a mapper that fails from a library that fails, in the error and in the log', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
+    const getChats = stub(h.client, 'getChats')
+    ready(h)
+
+    // A chat whose data the mapper cannot read
+    getChats.mockResolvedValueOnce([{ id: undefined }])
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaMappingError)
+    expect(warn).toHaveBeenCalledWith('getChats failed (TypeError)')
+
+    // A TypeError that comes out of the library itself is not a mapper of ours
+    warn.mockClear()
+    getChats.mockRejectedValueOnce(new TypeError('x is undefined'))
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
+    expect(warn).not.toHaveBeenCalled()
+    expect(debug).toHaveBeenCalledWith('getChats failed (TypeError)')
+  })
+
+  // WhatsApp took the message by the time the answer is mapped: it must read as an unknown outcome,
+  // never as "not sent"
+  it('reports a send whose result cannot be mapped as dispatched and unknown', async () => {
+    const h = harness()
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    stub(h.client, 'sendMessage').mockResolvedValue(waMessage({ id: undefined }))
+    ready(h)
+
+    const error: unknown = await h.adapter
+      .sendMessage('c@c.us', { type: 'text', body: 'hola' })
+      .catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(WaTimeoutError)
+    expect(error).toMatchObject({ operation: 'sendMessage', dispatched: true })
+  })
+
+  it.each([
+    [
+      'getPollVotes',
+      'getPollVotes',
+      [{ voter: undefined }],
+      (a: WwebjsAdapter) => a.getPollVotes('m')
+    ],
+    [
+      'getGroupMembershipRequests',
+      'getGroupMembershipRequests',
+      [{ id: undefined }],
+      (a: WwebjsAdapter) => a.getGroupMembershipRequests('g@g.us')
+    ]
+  ] as const)(
+    'maps the answer of %s inside the mapping wrapper',
+    async (_name, method, data, call) => {
+      const h = harness()
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      stub(h.client, method).mockResolvedValue(data)
+      ready(h)
+
+      await expect(call(h.adapter)).rejects.toBeInstanceOf(WaMappingError)
+    }
+  )
 
   it('answers null for a message that is not in the page', async () => {
     const h = harness()
@@ -965,6 +1061,48 @@ describe('sending', () => {
     expect(getContact).toHaveBeenCalledTimes(2)
     expect(send.mock.calls[1]?.[1]).toEqual([contact, contact])
     expect(send.mock.calls[2]?.[1]).toMatchObject({ name: 'Party' })
+  })
+
+  // A real poll and a real event came back from WhatsApp without these flags, and the response
+  // schema of the send routes turned the successful send into a 500
+  it('answers a send whose message lacks the flags WhatsApp omits with a valid DTO', async () => {
+    const h = harness()
+    stub(h.client, 'sendMessage').mockResolvedValue(
+      waMessage({ broadcast: undefined, isEphemeral: undefined, isForwarded: undefined })
+    )
+    ready(h)
+
+    const sent = await h.adapter.sendMessage('c@c.us', {
+      type: 'poll',
+      name: 'q',
+      options: ['a', 'b']
+    })
+
+    expect(MessageDto.parse(sent)).toEqual(sent)
+    expect(sent).toMatchObject({ broadcast: false, isEphemeral: false, isForwarded: false })
+  })
+
+  // The library builds a call link whenever `callType` is not 'none' and WhatsApp Web no longer has
+  // the module for it, so an event without a call must say 'none' explicitly
+  it('asks for no call link when the event has no call type', async () => {
+    const h = harness()
+    const send = stub(h.client, 'sendMessage').mockResolvedValue(waMessage())
+    ready(h)
+    const base = {
+      type: 'event',
+      name: 'Party',
+      startTime: new Date('2026-12-01T10:00:00Z')
+    } as const
+
+    await h.adapter.sendMessage('c@c.us', base)
+    await h.adapter.sendMessage('c@c.us', { ...base, callType: 'video' })
+
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      eventSendOptions: { callType: 'none' }
+    })
+    expect(send.mock.calls[1]?.[1]).toMatchObject({
+      eventSendOptions: { callType: 'video' }
+    })
   })
 
   it('sends to a channel, as text or media, and refuses a chat that is not a channel', async () => {

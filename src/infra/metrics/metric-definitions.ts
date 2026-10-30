@@ -37,6 +37,12 @@ export const METRIC_DEFINITIONS = {
     help: 'Events received from WhatsApp, by event name.',
     labels: ['event']
   },
+  eventsSkipped: {
+    name: 'gw_events_skipped_total',
+    type: 'counter',
+    help: 'Events the adapter could not map and dropped, by event name.',
+    labels: ['event']
+  },
   orderingHeld: {
     name: 'gw_ordering_held_total',
     type: 'counter',

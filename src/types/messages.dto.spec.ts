@@ -54,3 +54,25 @@ describe('the extra option', () => {
     expect(() => SendMessageBody.parse({ ...text, [key]: 'x' })).toThrow()
   })
 })
+
+// WhatsApp Web no longer has the module that builds a call link, so an event with a call never
+// leaves: the body says so instead of letting the send fail on the way to WhatsApp
+describe('the event call type', () => {
+  const event = { to: text.to, type: 'event', name: 'e', startTime: '2030-01-01T00:00:00.000Z' }
+
+  it.each(['voice', 'video'])('refuses `%s` and says why', callType => {
+    const result = SendMessageBody.safeParse({ ...event, callType })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0]).toMatchObject({ path: ['callType'] })
+    expect(result.error?.issues[0]?.message).toMatch(/call links are not supported/i)
+  })
+
+  it('refuses `none` too: the option does not exist in the API', () => {
+    expect(SendMessageBody.safeParse({ ...event, callType: 'none' }).success).toBe(false)
+  })
+
+  it('accepts an event without it', () => {
+    expect(() => SendMessageBody.parse(event)).not.toThrow()
+  })
+})

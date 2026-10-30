@@ -269,8 +269,16 @@ type MessageGatewayFields =
   | 'pollOptions'
   | 'dynamicReplyButtons'
 
-export interface MessageSource extends Omit<MessageDto, MessageGatewayFields | 'ack'> {
+export interface MessageSource extends Omit<
+  MessageDto,
+  MessageGatewayFields | 'ack' | 'broadcast' | 'isEphemeral' | 'isForwarded' | 'timestamp'
+> {
   id: IdLike
+  // WhatsApp leaves these out of some messages
+  broadcast?: boolean | null
+  isEphemeral?: boolean | null
+  isForwarded?: boolean | null
+  timestamp?: number | null
   // Some incoming messages come without one
   ack?: number | null
   // The typings of wwebjs say string, but Message.js copies what WhatsApp Web holds, which can be wids
@@ -300,22 +308,18 @@ const MESSAGE_FIELDS = [
   'author',
   'deviceType',
   'body',
-  'broadcast',
   'isStatus',
   'isGif',
-  'isEphemeral',
   'from',
   'fromMe',
   'hasMedia',
   'hasQuotedMsg',
   'hasReaction',
   'duration',
-  'isForwarded',
   'forwardingScore',
   'isStarred',
   'vCards',
   'mediaKey',
-  'timestamp',
   'to',
   'type',
   'links',
@@ -359,9 +363,17 @@ export function mapMessage(source: MessageSource, options: MessageMapOptions): M
     ...(pick(source, MESSAGE_FIELDS) as MessageDto), // required fields are filled by wwebjs
     id: serializeId(source.id),
     ack: source.ack ?? null,
+    broadcast: source.broadcast ?? false,
+    isEphemeral: source.isEphemeral ?? false,
+    isForwarded: source.isForwarded ?? false,
+    timestamp: source.timestamp ?? null,
     // For a group chat `from` is the group, `author` the sender
     chatId: source.fromMe ? source.to : source.from,
-    sentAt: unixToIso(source.timestamp),
+    // A message without a timestamp is dated by its arrival so that it still has a place in the order
+    sentAt:
+      source.timestamp === undefined || source.timestamp === null
+        ? toIso(options.receivedAt)
+        : unixToIso(source.timestamp),
     receivedAt: toIso(options.receivedAt),
     mentionedIds: source.mentionedIds.map(serializeId),
     groupMentions: source.groupMentions.map(({ groupSubject, groupJid }) => ({
@@ -547,43 +559,54 @@ export function mapBusinessContact(source: BusinessContactSource): BusinessConta
 
 // ---- Chats, groups, channels -------------------------------------------------------------------
 
-export interface ChatSource extends Omit<ChatDto, 'id' | 'lastMessage'> {
+export interface ChatSource extends Omit<
+  ChatDto,
+  'id' | 'lastMessage' | 'archived' | 'isReadOnly' | 'isLocked' | 'timestamp'
+> {
   id: IdLike
+  // WhatsApp leaves these out of some chats
+  archived?: boolean | null
+  isReadOnly?: boolean | null
+  isLocked?: boolean | null
+  timestamp?: number | null
   lastMessage?: MessageSource | null
 }
 
 const CHAT_FIELDS = [
-  'archived',
   'isGroup',
-  'isReadOnly',
   'isMuted',
   'muteExpiration',
   'name',
-  'timestamp',
   'unreadCount',
-  'pinned',
-  'isLocked'
+  'pinned'
 ] as const satisfies readonly (keyof ChatSource)[]
 
 export function mapChat(source: ChatSource, options: MessageMapOptions): ChatDto {
-  const chat: ChatDto = { ...(pick(source, CHAT_FIELDS) as ChatDto), id: serializeId(source.id) }
+  const chat: ChatDto = {
+    ...(pick(source, CHAT_FIELDS) as ChatDto),
+    id: serializeId(source.id),
+    archived: source.archived ?? false,
+    isReadOnly: source.isReadOnly ?? false,
+    isLocked: source.isLocked ?? false,
+    timestamp: source.timestamp ?? null
+  }
   if (source.lastMessage) chat.lastMessage = mapMessage(source.lastMessage, options)
   return chat
 }
 
 export interface GroupChatSource extends Omit<ChatSource, never> {
-  owner: IdLike
+  owner?: IdLike | null
   createdAt: Date | number
-  description: string
+  description?: string | null
   participants: WithIds<GroupChatDto['participants'][number], 'id'>[]
 }
 
 export function mapGroupChat(source: GroupChatSource, options: MessageMapOptions): GroupChatDto {
   return {
     ...mapChat(source, options),
-    owner: serializeId(source.owner),
+    owner: source.owner === undefined || source.owner === null ? null : serializeId(source.owner),
     createdAt: toIso(source.createdAt),
-    description: source.description,
+    description: source.description ?? null,
     participants: source.participants.map(participant => ({
       id: serializeId(participant.id),
       isAdmin: participant.isAdmin,
