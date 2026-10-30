@@ -4,6 +4,7 @@ import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod'
 
 import { ApiKeysModule } from './api/api-keys.module.js'
 import { ApiModule } from './api/api.module.js'
+import { MessagesModule } from './api/messages.module.js'
 import { RateLimitModule } from './api/rate-limit.module.js'
 import { SessionsModule } from './api/sessions.module.js'
 import { SystemModule } from './api/system.module.js'
@@ -31,7 +32,8 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
     MessagingModule,
     SystemModule,
     ApiKeysModule,
-    SessionsModule
+    SessionsModule,
+    MessagesModule
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },
