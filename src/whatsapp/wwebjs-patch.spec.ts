@@ -78,6 +78,70 @@ describe('the patched whatsapp-web.js', () => {
       expect(error).toHaveProperty('cause', expect.any(TypeError))
     })
 
+    // Puppeteer 24 rejects with the message the page threw, with no prefix (checked against a real
+    // Chrome), so the patch tags the start of the message text
+    it.each([
+      ['plain', '[after-dispatch] message.serialize is not a function'],
+      [
+        'followed by more lines',
+        '[after-dispatch] message.serialize is not a function\n    at eval'
+      ]
+    ])(
+      'marks a failure inside the page once the message was added to the chat, %s',
+      async (_name, message) => {
+        const rejection = new Error(message)
+
+        const error: unknown = await send(() => Promise.reject(rejection)).catch((e: unknown) => e)
+
+        expect(error).toBeInstanceOf(Error)
+        expect(error).toHaveProperty('afterDispatch', true)
+        expect(error).toHaveProperty('cause', rejection)
+      }
+    )
+
+    // A page error before the dispatch can echo what the caller sent (a file name, a quoted id)
+    it.each([
+      ['the tag in the middle of the text', 'bad file name [after-dispatch] x.png'],
+      ['the tag after a line break', 'bad input\n[after-dispatch] a.png'],
+      ['the tag behind an error class name', 'Error: [after-dispatch] x'],
+      ['an error without a message', '']
+    ])('leaves %s unmarked', async (_name, message) => {
+      const rejection = new Error(message)
+
+      const error: unknown = await send(() => Promise.reject(rejection)).catch((e: unknown) => e)
+
+      expect(error).toBe(rejection)
+    })
+
+    it('answers null, not undefined, when the page found no chat and sent nothing', async () => {
+      await expect(send(() => Promise.resolve(null))).resolves.toBeNull()
+    })
+
+    it('answers undefined when the page sent but returned no message', async () => {
+      await expect(send(() => Promise.resolve(undefined))).resolves.toBeUndefined()
+    })
+
+    // The page code cannot run here, so the tags are pinned in the source: one for getMessageModel
+    // and one for each branch of WWebJS.sendMessage (chat, channel, status). The in-page code cannot run
+    // in Jest: the manual smoke test covers it
+    it('tags the page code that runs once the message may have left', () => {
+      const count = (file: string): number =>
+        (source(file).match(/new Error\('\[after-dispatch\] '/g) ?? []).length
+
+      expect(count('Client.js')).toBe(1)
+      expect(count('util/Injected/Utils.js')).toBe(3)
+      const utils = source('util/Injected/Utils.js')
+      const tagged = /\} catch \(error\) \{\s*throw new Error\('\[after-dispatch\] '/.source
+      expect(utils).toMatch(new RegExp(String.raw`updateNewsletterMsgRecord\(msg\);\s*` + tagged))
+      expect(utils).toMatch(
+        new RegExp(String.raw`\[msg, mediaUpdate\] : \[statusOptions\]\)\);\s*` + tagged)
+      )
+      expect(utils).toMatch(new RegExp(String.raw`await sendMsgResultPromise;\s*` + tagged))
+      expect(source('Client.js')).toMatch(
+        /try \{\s*return window\.WWebJS\.getMessageModel\(msg\);\s*\} catch \(error\) \{\s*throw new Error\('\[after-dispatch\] '/
+      )
+    })
+
     it('leaves a failure of the page unmarked: the message did not leave', async () => {
       const error: unknown = await send(() =>
         Promise.reject(new Error('Evaluation failed: not a chat'))

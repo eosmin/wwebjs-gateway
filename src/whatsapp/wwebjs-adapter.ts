@@ -307,9 +307,15 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   // WhatsApp accepted the message by the time it is mapped: a failure here is an unknown outcome and
-  // must never read as "not sent", or a worker could send it twice
-  private sent(operation: string, source: Message): MessageDto {
+  // must never read as "not sent", or a worker could send it twice. The exception is null: the
+  // patched library answers it when the page found no chat, or the content is not supported in a
+  // channel or status, so nothing was sent. undefined stays an unknown outcome
+  private sent(operation: string, source: Message | null | undefined): MessageDto {
+    if (source === null) {
+      throw new WaOperationError(operation, 'Chat not found or content not supported')
+    }
     try {
+      if (source === undefined) throw new TypeError('The library answered no message')
       return this.message(source)
     } catch (error: unknown) {
       this.logger.warn(`Mapping the result of ${operation} failed (${errorKind(error)})`)

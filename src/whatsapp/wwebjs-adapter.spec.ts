@@ -1051,6 +1051,51 @@ describe('sending', () => {
     expect(error).toBeInstanceOf(WaMappingError)
   })
 
+  // The patched Client.sendMessage answers null when nothing was sent; Channel.sendMessage and
+  // Message.reply return it unchanged, so all three paths must read it as a definite failure
+  it.each([
+    [
+      'sendMessage',
+      (h: Harness): Promise<unknown> => {
+        stub(h.client, 'sendMessage').mockResolvedValue(null)
+        return h.adapter.sendMessage('c@c.us', { type: 'text', body: 'x' })
+      }
+    ],
+    [
+      'sendChannelMessage',
+      (h: Harness): Promise<unknown> => {
+        const channel = {
+          ...waChat(),
+          isChannel: true,
+          sendMessage: jest.fn().mockResolvedValue(null)
+        }
+        stub(h.client, 'getChatById').mockResolvedValue(channel)
+        return h.adapter.sendChannelMessage('n@newsletter', { type: 'text', body: 'x' })
+      }
+    ],
+    [
+      'replyToMessage',
+      (h: Harness): Promise<unknown> => {
+        stub(h.client, 'getMessageById').mockResolvedValue({
+          reply: jest.fn().mockResolvedValue(null)
+        })
+        return h.adapter.replyToMessage('m1', { type: 'text', body: 'x' })
+      }
+    ]
+  ])(
+    'reports nothing sent by %s as a definite failure, not an unknown outcome',
+    async (operation, run) => {
+      const h = harness()
+      ready(h)
+
+      const error: unknown = await run(h).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(WaOperationError)
+      expect(error).not.toBeInstanceOf(WaMappingError)
+      expect(error).toMatchObject({ code: 'WHATSAPP_ERROR', operation })
+    }
+  )
+
   it('reports a send whose result cannot be read as an unknown outcome, never as not sent', async () => {
     const h = harness()
     jest.spyOn(Logger.prototype, 'warn').mockImplementation()
