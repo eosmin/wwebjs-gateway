@@ -1,8 +1,85 @@
 diff --git a/src/Client.js b/src/Client.js
-index 800109ebf7720d5f0f29091518a8a25f7fd8e381..36a3a2af651ec2baa60d24eb5260dc426ff1567e 100644
+index 800109ebf7720d5f0f29091518a8a25f7fd8e381..65633a9ece78efcb41f5bf0cb673c6371dc222aa 100644
 --- a/src/Client.js
 +++ b/src/Client.js
-@@ -1208,11 +1208,11 @@ class Client extends EventEmitter {
+@@ -1070,30 +1070,56 @@ class Client extends EventEmitter {
+                     window.onBatteryStateChangedEvent(state);
+                 });
+             const WAWebCallCollection = window.require('WAWebCallCollection');
++            // WhatsApp Web 2.3000.x no longer writes the call to an internal Map: an incoming call
++            // reaches setActiveCall(call) and the end of the call is setActiveCall(null)
+             if (
+                 WAWebCallCollection &&
+-                typeof WAWebCallCollection.on === 'function'
++                typeof WAWebCallCollection.setActiveCall === 'function' &&
++                !WAWebCallCollection.setActiveCall.reportsCalls
+             ) {
+-                const mapKey = Object.keys(WAWebCallCollection).find(
+-                    (k) => WAWebCallCollection[k] instanceof Map,
+-                );
+-                const internalCallMap = WAWebCallCollection[mapKey];
+-                const originalMapSet =
+-                    internalCallMap.set.bind(internalCallMap);
+-
+-                internalCallMap.set = function (key, value) {
+-                    window.onIncomingCall({
+-                        id: value.id,
+-                        peerJid: value.peerJid,
+-                        isVideo: value.isVideo,
+-                        isGroup: value.isGroup,
+-                        canHandleLocally: value.canHandleLocally,
+-                        outgoing: value.outgoing,
+-                        webClientShouldHandle: value.webClientShouldHandle,
+-                        participants: value.participants,
+-                    });
+-                    return originalMapSet(key, value);
++                const originalSetActiveCall =
++                    WAWebCallCollection.setActiveCall.bind(WAWebCallCollection);
++                // setActiveCall runs again for the same call as its state changes, and calls overlap
++                const reported = new Set();
++
++                const reportingSetActiveCall = function (call, ...rest) {
++                    if (call && !reported.has(call.id)) {
++                        const callId = call.id;
++                        reported.add(callId);
++                        if (reported.size > 50) {
++                            reported.delete(reported.values().next().value);
++                        }
++                        // A report that failed is tried again on the next setActiveCall of that call
++                        const forget = () => {
++                            reported.delete(callId);
++                        };
++                        try {
++                            const peer = call.peerJid;
++                            Promise.resolve(
++                                window.onIncomingCall({
++                                    id: call.id,
++                                    peerJid: peer == null ? undefined : (peer._serialized ?? String(peer)),
++                                    // offerTime is 0 while the call rings: use the time it arrived
++                                    offerTime:
++                                        call.offerTime ||
++                                        Math.floor(Date.now() / 1000),
++                                    isVideo: call.isVideo,
++                                    isGroup: call.isGroup,
++                                    canHandleLocally: call.canHandleLocally,
++                                    outgoing: call.outgoing,
++                                    webClientShouldHandle:
++                                        call.webClientShouldHandle,
++                                }),
++                            ).catch(forget);
++                        } catch (error) {
++                            // Reporting a call must never stop WhatsApp Web from setting it
++                            forget();
++                        }
++                    }
++                    return originalSetActiveCall(call, ...rest);
+                 };
++                reportingSetActiveCall.reportsCalls = true;
++                WAWebCallCollection.setActiveCall = reportingSetActiveCall;
+             }
+             Chat.on('remove', async (chat) => {
+                 window.onRemoveChatEvent(
+@@ -1208,11 +1234,11 @@ class Client extends EventEmitter {
                              const senderUserJid = sender._serialized;
  
                              let parentMessage = Msg.get(
@@ -16,7 +93,7 @@ index 800109ebf7720d5f0f29091518a8a25f7fd8e381..36a3a2af651ec2baa60d24eb5260dc42
                                  ]);
                                  parentMessage = fetched?.messages?.[0] || null;
                              }
-@@ -1547,15 +1547,42 @@ class Client extends EventEmitter {
+@@ -1547,15 +1573,42 @@ class Client extends EventEmitter {
                      content,
                      options,
                  );
@@ -43,11 +120,11 @@ index 800109ebf7720d5f0f29091518a8a25f7fd8e381..36a3a2af651ec2baa60d24eb5260dc42
 +                { afterDispatch: true },
 +            );
 +        });
-+
-+        // null: the page found no chat and sent nothing. undefined: it sent, nothing came back
-+        if (sentMsg === null) return null;
  
 -        return sentMsg ? new Message(this, sentMsg) : undefined;
++        // null: the page found no chat and sent nothing. undefined: it sent, nothing came back
++        if (sentMsg === null) return null;
++
 +        // The page has sent the message by now: a failure of this Node code must not read as "not sent"
 +        try {
 +            return sentMsg ? new Message(this, sentMsg) : undefined;
