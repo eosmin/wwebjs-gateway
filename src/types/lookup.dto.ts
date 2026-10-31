@@ -69,8 +69,14 @@ export class NumberLookupDto extends createZodDto(NumberLookup) {}
 export const LidPhoneList = z.object({
   items: z.array(
     z.object({
-      lid: z.string().describe('The id of the user in the @lid form'),
-      pn: z.string().describe('The id of the user in the phone (@c.us) form')
+      lid: z
+        .string()
+        .nullable()
+        .describe('The id of the user in the @lid form, null when WhatsApp has none for the phone'),
+      pn: z
+        .string()
+        .nullable()
+        .describe('The id of the user in the phone (@c.us) form, null when the @lid hides it')
     })
   )
 })

@@ -4,9 +4,13 @@ import { ValidationError } from '../common/errors.js'
 import { phoneDigits } from '../common/lib/wa-id.js'
 import type { NumberLookup } from '../types/lookup.dto.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
-import type { LidAndPhone } from '../whatsapp/whatsapp-client.port.js'
 
 import { RecipientResolverService } from './recipient-resolver.service.js'
+
+export interface KnownLidAndPhone {
+  lid: string | null
+  pn: string | null
+}
 
 // Finding out who a number or an id is, without sending anything
 @Injectable()
@@ -39,7 +43,13 @@ export class LookupService {
     return { number: digits, registered: true, id, countryCode, formatted }
   }
 
-  lidAndPhone(sessionId: string, ids: string[]): Promise<LidAndPhone[]> {
-    return this.sessions.requireReady(sessionId).getContactLidAndPhone(ids)
+  async lidAndPhone(sessionId: string, ids: string[]): Promise<KnownLidAndPhone[]> {
+    const pairs = await this.sessions.requireReady(sessionId).getContactLidAndPhone(ids)
+    const known: KnownLidAndPhone[] = []
+    for (const { lid, pn } of pairs) {
+      // A pair with neither side says nothing about the id asked, so it is left out.
+      if (lid != null || pn != null) known.push({ lid: lid ?? null, pn: pn ?? null })
+    }
+    return known
   }
 }

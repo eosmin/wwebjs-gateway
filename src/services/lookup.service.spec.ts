@@ -80,4 +80,23 @@ describe('LookupService', () => {
     ])
     expect(getContactLidAndPhone).toHaveBeenCalledWith(['1@lid'])
   })
+
+  it('keeps the side WhatsApp does not know as null and drops a pair with neither side', async () => {
+    const getContactLidAndPhone = jest.fn(() =>
+      Promise.resolve([
+        { lid: '1@lid', pn: undefined },
+        { lid: undefined, pn: '5215500000002@c.us' },
+        { lid: undefined, pn: undefined },
+        { lid: null, pn: null }
+      ])
+    )
+    const { service } = build(null, { getContactLidAndPhone })
+
+    await expect(
+      service.lidAndPhone('s', ['1@lid', '5215500000002@c.us', '2@lid'])
+    ).resolves.toEqual([
+      { lid: '1@lid', pn: null },
+      { lid: null, pn: '5215500000002@c.us' }
+    ])
+  })
 })
