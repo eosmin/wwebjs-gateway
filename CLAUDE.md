@@ -87,17 +87,25 @@ Run `pnpm lint`, `pnpm type-check` and `pnpm test` after every change (`pnpm val
 - [ ] Documentation written/updated (guide, ADR if it is a decision) and `pnpm validate:docs` green
 - [ ] Parity expected-failures list updated (it only shrinks)
 - [ ] The step's own "Done when" verified, not assumed
+- [ ] `/code-review` run on the working tree before the PR is opened, for every PR with no exception for size or kind (a test-only or docs-touching change included); the mechanical gates do not replace it
 - [ ] `pnpm validate:all` green; in the PR, all CI jobs that exist at that point are green
 - [ ] Checkbox and progress row updated
 
 ## Code review of a step
+
+**No PR is opened, and `gh pr merge --auto` is not run, before `/code-review` has run on the change.** Auto-merge
+ends the review window: once armed, GitHub merges as soon as the checks are green. Judging a change "too small
+to review" is a shortcut; say in the PR which review pass ran and what it found.
 
 This part applies to the `/code-review` skill, which reports at most 10 findings per run, even when asked for more (the `code-reviewer` subagent below has no such cap). A run that returns 10 has **not** run out of findings.
 
 - Review in small batches (one library, or at most 8 to 10 files), never the whole step at once.
 - Give each pass one lens: correctness, security (secrets, permissions, WhatsApp credentials, personal data), tests, or configuration/CI/Docker.
 - **One pass per PR.** Run the review once per batch and lens, at `/code-review medium`. Fix what is real and verifiable, drop the rest, and do not run the same batch again. A run that returns 10 findings does not oblige another run.
-- **Repeat only on critical code:** security, personal data, money, credentials, the adapter boundary, the send queue and policy. CI, tests and docs get one pass.
+- **Lenses stay on for every PR:** correctness and tests always; add security when the change touches the critical code listed below, and configuration/CI/Docker when it touches CI, Docker, hooks, env or dependencies.
+- **Generated files:** in a diff of generated files (lockfile, `pnpm docs:gen` output), the review covers the file that causes the change (manifest, workspace config, generator or its input) and the effect checked by running it; the generated file itself is verified by `pnpm validate:all`, not read line by line. The review still runs.
+- **After fixing findings, do not run the review again** to check the fixes: the failing-first test and `pnpm validate:all` verify them. The only repeat is the one below.
+- **Repeat only on critical code:** security, personal data, money, credentials, the adapter boundary, the send queue and policy, and only when a BLOCKER or HIGH was fixed. CI, tests and docs get one pass.
 - **New findings that are not bugs** (hardening, style, extra tests for unlikely cases) go to a backlog issue, not into this PR.
 - **"Done" is decided by green CI** (`pnpm validate:all` and the required jobs), not by the number of findings.
 - Check every finding by running the code before changing anything. Some are false positives, and a fix without a test that fails first proves nothing.
