@@ -1,6 +1,6 @@
 import { ValidationError } from '../errors.js'
 
-import { isWaId, parseRecipient, userIdFromDigits } from './wa-id.js'
+import { isWaId, parseRecipient, phoneDigits, userIdFromDigits } from './wa-id.js'
 
 describe('parseRecipient', () => {
   it.each([
@@ -59,4 +59,17 @@ describe('userIdFromDigits', () => {
   it('builds the contact id', () => {
     expect(userIdFromDigits('5215500000001')).toBe('5215500000001@c.us')
   })
+})
+
+describe('phoneDigits', () => {
+  it('strips the plus and the separators', () => {
+    expect(phoneDigits(' +52 (55) 0000-0001 ')).toBe('525500000001')
+  })
+
+  it.each(['123456', '1234567890123456', 'abc', '52550000000a', '', '1@c.us'])(
+    'answers null for %j',
+    value => {
+      expect(phoneDigits(value)).toBeNull()
+    }
+  )
 })
