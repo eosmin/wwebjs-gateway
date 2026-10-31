@@ -236,9 +236,11 @@ export interface ChannelSubscriber {
   role: string
 }
 
+// WhatsApp leaves out the side it does not know: `pn` of a @lid that hides its phone, `lid` of a phone
+// it has no @lid for.
 export interface LidAndPhone {
-  lid: string
-  pn: string
+  lid?: string | null | undefined
+  pn?: string | null | undefined
 }
 
 export type ChatStateKind = 'typing' | 'recording' | 'clear'

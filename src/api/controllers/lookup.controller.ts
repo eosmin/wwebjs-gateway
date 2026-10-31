@@ -42,7 +42,7 @@ export class LookupController {
       response: {
         number: '5215500000001',
         registered: true,
-        id: '5215500000001@c.us',
+        id: '100000000000001@lid',
         countryCode: '52',
         formatted: '+52 1 55 0000 0001'
       }
@@ -65,7 +65,7 @@ export class LookupController {
     scope: 'read',
     summary: 'Match @lid ids with phone ids',
     description:
-      'For each id given in `ids` (comma-separated, `@c.us` or `@lid`, up to 50) WhatsApp answers the pair `{ lid, pn }`. An id it does not know is left out of `items`.',
+      'For each id given in `ids` (comma-separated, `@c.us` or `@lid`, up to 50) WhatsApp answers the pair `{ lid, pn }`; the side it does not know is `null` (the `pn` of a `@lid` that hides its phone), and an id it knows nothing about is left out of `items`.',
     errors: ON_SESSION,
     examples: {
       request: null,

@@ -239,6 +239,22 @@ describe('lookup API (integration)', () => {
       ])
     })
 
+    it('answers null for the side WhatsApp does not know and leaves out an id it knows nothing about', async () => {
+      client().script('getContactLidAndPhone', () => [
+        { lid: '100000000000001@lid', pn: undefined },
+        { lid: undefined, pn: undefined }
+      ])
+
+      const response = await call(
+        'GET',
+        '/contacts/lid-phone?ids=100000000000001@lid,5215500000009@c.us'
+      )
+      client().unscript('getContactLidAndPhone')
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({ items: [{ lid: '100000000000001@lid', pn: null }] })
+    })
+
     it.each(['', '?ids=', '?ids=nonsense', '?ids=1@g.us', '?ids=1@lid&other=1'])(
       'refuses the query %j with 400 and does not call the client',
       async query => {
