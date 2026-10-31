@@ -93,7 +93,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **5.6** Polls and events controller.
 - [x] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
 - [x] **5.8** Presence, profile and settings controller.
-- [ ] **5.9** Lookup controller.
+- [x] **5.9** Lookup controller.
 - [ ] **5.10** Send-policy and suppressions controllers. *Done when:* usage and suppression endpoints are integration-tested.
 
 ## Milestone 6 — Contacts, groups, channels (`feat/contacts-groups-channels`) — TDD §6.11, §6.12
@@ -195,6 +195,8 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **6.3, channel chats (from 5.7)** `chats.list` and `chats.get` already answer channels, but `chats.setState`, `chats.clearMessages` and `chats.delete` refuse them with `WHATSAPP_ERROR` (`WaOperationError`); step 6.3 must make the channel routes the way to delete a channel and say so in `docs/chats.md`.
 - [ ] **8.x, `chat.state` countdown (from 5.7, accepted trade-off)** The `durationMs` of `chats.setState` is a timer in `ChatsService`: a restart of the gateway leaves the indicator to lapse by itself (about 25 s, the cap of `durationMs`). The countdown also does not know the typing of a send with `humanize` on the same chat, and may cut it short. Moving it to a BullMQ delayed job (or sharing the indicator with the send worker) is only worth it if a longer indicator is ever needed; do it then.
 - [ ] **12.3, presence and profile (from 5.8)** With a real account, check what the fake client cannot: that `sendPresenceAvailable` stops the push notifications of the linked phone and `sendPresenceUnavailable` brings them back, that `setDisplayName` and `setProfilePicture` answer `false` (and not a throw) when WhatsApp refuses, which image formats and sizes `setProfilePicture` takes, and that `setAutoDownload*` and `setBackgroundSync` still exist on the current WA Web. Also whether WhatsApp counts the 139 and 25 character limits in code points or in UTF-16 units (the schema counts units, so an emoji-heavy text may be refused early), and whether `image/svg+xml` or `image/gif` are taken as a picture. Fix the wording of `docs/presence-profile.md` to what is seen.
+- [ ] **12.3, lookup (from 5.9)** With a real account, check what the fake client cannot: the real output of `getCountryCode` (the fake returns two digits; confirm it is the calling code, `52` or `1`, and not an ISO region), of `getFormattedNumber` (international format with the `+`), that `getNumberId` answers `null` for a number without an account and does not throw, and the `{ lid, pn }` pairs of `getContactLidAndPhone` for `@c.us` and `@lid` ids, including an id it does not know. Adjust the `formatted`/`countryCode` descriptions and the example of `numbers.lookup` to what is seen.
+- [ ] **5.10, lid-phone budget (from 5.9 review)** `contacts.lidPhone` asks WhatsApp for up to 50 ids per call and spends no policy budget, so a `read` key could resolve many contacts through the account (only the rate limit bounds it). Decide in 5.10, with the send-policy usage report, whether it needs its own daily budget next to `LOOKUPS_PER_DAY`. Also from 5.9: concurrent identical uncached `numbers.lookup` calls each spend a look-up slot; coalesce them in `RecipientResolverService.lookup` if the usage report shows it.
 - [ ] **12.3** Promote `getInviteInfo` to a named DTO once its shape is seen on a real invite (the adapter answers a sanitized `Record<string, unknown>`).
 - [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
@@ -247,7 +249,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 5.6 | done | `feat/5-6-polls-events` | 2026-10-30 |
 | 5.7 | done | `feat/5-7-chats-controller` | 2026-10-31 |
 | 5.8 | done | `feat/5-8-presence-profile` | 2026-10-31 |
-| 5.9 | todo | - | - |
+| 5.9 | done | `feat/5-9-lookup-controller` | 2026-10-31 |
 | 5.10 | todo | - | - |
 | 6.1 | todo | - | - |
 | 6.2 | todo | - | - |

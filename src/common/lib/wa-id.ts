@@ -17,6 +17,16 @@ export function isWaId(value: string): boolean {
   return id === BROADCAST_ID || WA_ID_PATTERN.test(id)
 }
 
+// The digits of a phone number written with spaces, dashes, dots, parentheses and an optional
+// leading `+`; null when they are not 7 to 15
+export function phoneDigits(value: string): string | null {
+  const digits = value
+    .trim()
+    .replace(/^\+/, '')
+    .replace(/[\s\-().]/g, '')
+  return PHONE_PATTERN.test(digits) ? digits : null
+}
+
 // `to` is either a full WhatsApp id or a phone number written with spaces, dashes, dots, parentheses
 // and an optional leading `+`
 export function parseRecipient(to: string): Recipient {
@@ -31,8 +41,8 @@ export function parseRecipient(to: string): Recipient {
     }
     return { kind: 'id', id: value, server }
   }
-  const digits = value.replace(/^\+/, '').replace(/[\s\-().]/g, '')
-  if (!PHONE_PATTERN.test(digits)) {
+  const digits = phoneDigits(value)
+  if (digits === null) {
     throw new ValidationError(
       'VALIDATION_ERROR',
       'The recipient must be a phone number of 7 to 15 digits or a WhatsApp id',

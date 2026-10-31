@@ -28,11 +28,18 @@ export class RecipientResolverService {
   async resolve(sessionId: string, to: string): Promise<string> {
     const recipient = parseRecipient(to)
     if (recipient.kind === 'id') return recipient.id
+    const id = await this.lookup(sessionId, recipient.digits)
+    if (id === null) throw this.notRegistered()
+    return id
+  }
 
-    const key = `numid:${recipient.digits}`
+  // The WhatsApp id of a phone number, or null when it is not registered. A cached answer costs
+  // nothing; a look-up counts against LOOKUPS_PER_DAY.
+  async lookup(sessionId: string, digits: string): Promise<string | null> {
+    const key = `numid:${digits}`
     const cached = await this.redis.client.get(key)
     // A value that is neither "no" nor an id is not ours: it is looked up again
-    if (cached === NOT_REGISTERED) throw this.notRegistered()
+    if (cached === NOT_REGISTERED) return null
     if (cached !== null && isWaId(cached)) return cached
 
     const client = this.sessions.requireReady(sessionId)
@@ -46,14 +53,13 @@ export class RecipientResolverService {
         rule: admitted.rule
       })
     }
-    const id = await client.getNumberId(recipient.digits)
+    const id = await client.getNumberId(digits)
     await this.redis.client.set(
       key,
       id ?? NOT_REGISTERED,
       'EX',
       id === null ? NOT_REGISTERED_TTL_SECONDS : REGISTERED_TTL_SECONDS
     )
-    if (id === null) throw this.notRegistered()
     return id
   }
 

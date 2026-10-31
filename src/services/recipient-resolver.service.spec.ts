@@ -120,6 +120,14 @@ describe('RecipientResolverService', () => {
     await expect(service.resolve('s', '525500000001')).rejects.toBeInstanceOf(AppError)
   })
 
+  it('lookup answers null for a number that is not registered, and the id for one that is', async () => {
+    const none = build({ registered: null })
+    const some = build({ registered: '5215500000001@c.us' })
+
+    await expect(none.service.lookup('s', '525500000009')).resolves.toBeNull()
+    await expect(some.service.lookup('s', '5215500000001')).resolves.toBe('5215500000001@c.us')
+  })
+
   it('rejects a recipient that is neither', async () => {
     const { service } = build()
 
