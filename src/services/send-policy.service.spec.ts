@@ -11,7 +11,12 @@ import type { SessionsRepository } from '../database/repositories/sessions.repos
 import type { SuppressionsRepository } from '../database/repositories/suppressions.repository.js'
 import { type PolicyDecision, SendPolicySettings } from '../types/send-policy.dto.js'
 
-import { SendPolicyService, type SendIntent } from './send-policy.service.js'
+import {
+  PolicyUnavailable,
+  SendPolicyService,
+  type DecisionEvent,
+  type SendIntent
+} from './send-policy.service.js'
 
 // 23:00 UTC, inside a 22:00-07:00 quiet window
 const NOW = new Date('2026-10-29T23:00:00.000Z')
@@ -1474,6 +1479,165 @@ describe('SendPolicyService', () => {
         reject('RECIPIENT_UNREACHABLE', 'unreachable')
       )
       expect(seen).toEqual([])
+    })
+  })
+
+  describe('usage report', () => {
+    it('shows full budgets and nothing spent for a session that never sent', async () => {
+      const { policy } = setup()
+
+      const usage = await policy.usage('s1')
+
+      expect(usage).toMatchObject({
+        at: NOW.getTime(),
+        factor: 1,
+        warmup: { factor: 1, days: 14 },
+        throttle: { active: false, until: null },
+        health: { samples: 0, hardFailures: 0 },
+        coldSends: { used: 0, limit: 20 },
+        lookups: { used: 0, limit: 100 },
+        buckets: {
+          perMinute: { available: 20, limit: 20 },
+          perHour: { available: 300, limit: 300 },
+          perDay: { available: 1500, limit: 1500 }
+        }
+      })
+    })
+
+    it('counts what was spent and does not spend anything itself', async () => {
+      const { policy, world } = setup({ ALLOW_COLD_SENDS: 'true', ...WIDE_CHAT })
+      world.incomingDefault = null
+      await policy.admit(intent({ chatId: 'a@c.us' }))
+      await policy.admitLookup('s1')
+      await policy.recordOutcome('s1', 'hard_failure')
+
+      const first = await policy.usage('s1')
+      const second = await policy.usage('s1')
+
+      expect(first).toEqual(second)
+      expect(first.coldSends.used).toBe(1)
+      expect(first.lookups.used).toBe(1)
+      expect(first.health).toMatchObject({ samples: 1, hardFailures: 1 })
+      expect(first.buckets.perMinute.available).toBe(19)
+    })
+
+    it('scales the limits by the warm-up and shows the ramp', async () => {
+      const { policy, world } = setup()
+      world.linkedAt = new Date(NOW.getTime() - HOUR)
+
+      const usage = await policy.usage('s1')
+
+      expect(usage.warmup.factor).toBeLessThan(1)
+      expect(usage.factor).toBe(usage.warmup.factor)
+      expect(usage.coldSends.limit).toBeLessThan(20)
+      expect(usage.warmup.linkedAt).toEqual(world.linkedAt)
+    })
+
+    it('shows the throttle and halves the limits while it lasts', async () => {
+      const { policy } = setup({ HEALTH_MIN_SAMPLES: '2', HEALTH_MAX_BAD_RATIO: '0.5' })
+      await policy.recordOutcome('s1', 'hard_failure')
+      expect(await policy.recordOutcome('s1', 'hard_failure')).toBe(true)
+
+      const usage = await policy.usage('s1')
+
+      expect(usage.throttle.active).toBe(true)
+      expect(usage.throttle.until).toBeGreaterThan(NOW.getTime())
+      expect(usage.factor).toBe(0.5)
+      expect(usage.buckets.perMinute.limit).toBe(10)
+    })
+
+    it('throws PolicyUnavailable when the state cannot be read', async () => {
+      const { policy, store } = setup()
+      store.failing = true
+
+      await expect(policy.usage('s1')).rejects.toBeInstanceOf(PolicyUnavailable)
+    })
+
+    it('throws PolicyUnavailable when the session has no usable settings', async () => {
+      const { policy, world } = setup()
+      world.missing = true
+
+      await expect(policy.usage('s1')).rejects.toBeInstanceOf(PolicyUnavailable)
+      await expect(policy.effective('s1')).rejects.toBeInstanceOf(PolicyUnavailable)
+    })
+  })
+
+  describe('effective limits', () => {
+    it('puts the overrides of the session on top of the environment', async () => {
+      const { policy, world } = setup()
+      world.settings = {
+        sendPolicy: {
+          allowColdSends: true,
+          optOutKeywords: [' STOP '],
+          quietHours: { from: '22:00', to: '07:00', timezone: 'UTC' }
+        }
+      }
+
+      const limits = await policy.effective('s1')
+
+      expect(limits).toMatchObject({
+        allowColdSends: true,
+        coldSendsPerDay: 20,
+        optOutKeywords: ['stop'],
+        quietHours: { from: '22:00', to: '07:00', timezone: 'UTC' }
+      })
+    })
+  })
+
+  describe('decision listeners', () => {
+    const collect = (policy: SendPolicyService): DecisionEvent[] => {
+      const seen: DecisionEvent[] = []
+      policy.onDecision(event => seen.push(event))
+      return seen
+    }
+
+    it('reports a dispatch decision, allow or delay', async () => {
+      const { policy } = setup({ SESSION_MAX_PER_MINUTE: '1', ...WIDE_CHAT })
+      const seen = collect(policy)
+
+      await policy.admit(intent({ chatId: 'a@c.us' }))
+      await policy.admit(intent({ chatId: 'b@c.us' }))
+
+      expect(seen.map(e => [e.stage, e.decision.decision])).toEqual([
+        ['dispatch', 'allow'],
+        ['dispatch', 'delay']
+      ])
+    })
+
+    it('reports a rejection at enqueue and stays quiet about an allow', async () => {
+      const { policy, world } = setup()
+      const seen = collect(policy)
+      await policy.check(intent())
+      world.suppressed.add('a@c.us')
+      await policy.check(intent())
+
+      expect(seen).toEqual([
+        { stage: 'enqueue', decision: reject('RECIPIENT_SUPPRESSED', 'suppressed') }
+      ])
+    })
+
+    it('reports the admission of a look-up', async () => {
+      const { policy } = setup()
+      const seen = collect(policy)
+
+      await policy.admitLookup('s1')
+
+      expect(seen).toEqual([{ stage: 'lookup', decision: ALLOW }])
+    })
+
+    it('survives a listener that throws and can be removed', async () => {
+      const { policy } = setup()
+      policy.onDecision(() => {
+        throw new Error('listener bug')
+      })
+      const seen: DecisionEvent[] = []
+      const off = policy.onDecision(event => seen.push(event))
+
+      await expect(policy.admitLookup('s1')).resolves.toEqual(ALLOW)
+      off()
+      await policy.admitLookup('s1')
+
+      expect(seen).toHaveLength(1)
     })
   })
 

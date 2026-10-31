@@ -29,6 +29,8 @@ export abstract class PolicyStateStore {
   abstract flagUnreachable(sessionId: string, chatId: string): Promise<boolean>
   // True when the chat was flagged
   abstract clearUnreachable(sessionId: string, chatId: string): Promise<boolean>
+  // The chats flagged now, at most `limit`; the order is not defined
+  abstract listUnreachable(sessionId: string, limit: number): Promise<string[]>
   // The session was deleted
   abstract delete(sessionId: string): Promise<void>
 }
@@ -79,6 +81,20 @@ export class RedisPolicyStateStore extends PolicyStateStore {
 
   async clearUnreachable(sessionId: string, chatId: string): Promise<boolean> {
     return (await this.redis.client.del(flagKey(sessionId, chatId))) > 0
+  }
+
+  async listUnreachable(sessionId: string, limit: number): Promise<string[]> {
+    const prefix = flagKey(sessionId, '')
+    const chats = new Set<string>()
+    const stream = this.redis.client.scanStream({ match: `${prefix}*`, count: SCAN_COUNT })
+    for await (const keys of stream as AsyncIterable<string[]>) {
+      for (const key of keys) chats.add(key.slice(prefix.length))
+      if (chats.size >= limit) {
+        stream.destroy()
+        break
+      }
+    }
+    return [...chats].slice(0, limit)
   }
 
   async delete(sessionId: string): Promise<void> {

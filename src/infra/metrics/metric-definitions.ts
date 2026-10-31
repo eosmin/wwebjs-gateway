@@ -119,6 +119,25 @@ export const METRIC_DEFINITIONS = {
     help: 'Sessions the watchdog restarted.',
     labels: []
   },
+  policyDecisions: {
+    name: 'gw_policy_decisions_total',
+    type: 'counter',
+    help: 'Decisions of the send policy that are not a plain allow at enqueue, by rule (`none` for an allow) and decision (allow, delay, reject).',
+    labels: ['rule', 'decision']
+  },
+  policyDelaySeconds: {
+    name: 'gw_policy_delay_seconds',
+    type: 'histogram',
+    help: 'Seconds the send policy asked a job to wait.',
+    labels: [],
+    buckets: [0.1, 0.5, 1, 5, 15, 60, 300, 1800, 3600, 21600]
+  },
+  suppressedChats: {
+    name: 'gw_suppressed_chats',
+    type: 'gauge',
+    help: 'Chats on the suppression lists of all sessions.',
+    labels: []
+  },
   reconcileRecovered: {
     name: 'gw_reconcile_recovered_total',
     type: 'counter',

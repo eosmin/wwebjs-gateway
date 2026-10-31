@@ -77,7 +77,7 @@ export interface ReachabilityChange {
 }
 
 // The limits of one session: the environment defaults with the session overrides on top
-interface Limits {
+export interface Limits {
   allowColdSends: boolean
   coldSendsPerDay: number
   coldSendMinGapMs: number
@@ -121,6 +121,38 @@ interface Delay {
 }
 
 type ReachabilityListener = (change: ReachabilityChange) => void
+
+// Which call produced a decision: the check at enqueue, the admission right before dispatch, or the
+// admission of a number look-up
+export type DecisionStage = 'enqueue' | 'dispatch' | 'lookup'
+
+export interface DecisionEvent {
+  stage: DecisionStage
+  decision: PolicyDecision
+}
+
+type DecisionListener = (event: DecisionEvent) => void
+
+// Where a session stands against its budgets at one moment (`GET …/send-policy/usage`)
+export interface PolicyUsage {
+  at: number
+  // Scale of every count budget: the warm-up ramp, halved while the session is throttled
+  factor: number
+  warmup: { factor: number; linkedAt: Date | null; days: number }
+  throttle: { active: boolean; until: number | null }
+  health: { samples: number; hardFailures: number; maxBadRatio: number; minSamples: number }
+  coldSends: { used: number; limit: number }
+  lookups: { used: number; limit: number }
+  buckets: Record<'perMinute' | 'perHour' | 'perDay', { available: number; limit: number }>
+}
+
+// The state or the settings of the session cannot be read right now
+export class PolicyUnavailable extends Error {
+  constructor(what: string) {
+    super(`The send policy ${what} cannot be read right now`)
+    this.name = 'PolicyUnavailable'
+  }
+}
 
 const INVALID_CHAT_ID: PolicyDecision = {
   decision: 'reject',
@@ -166,6 +198,7 @@ export class SendPolicyService {
   // one arrived is not kept
   private readonly settingsVersions = new Map<string, number>()
   private readonly listeners = new Set<ReachabilityListener>()
+  private readonly decisionListeners = new Set<DecisionListener>()
   private readonly digestSecret: string
 
   constructor(
@@ -182,11 +215,14 @@ export class SendPolicyService {
   // never changes any budget. Without the state, or the settings, only the rules that need none are
   // applied; the dispatch asks again. A database failure is thrown, never turned into an allow.
   async check(intent: SendIntent): Promise<PolicyDecision> {
-    if (intent.chatId.length > MAX_CHAT_ID_LENGTH) return INVALID_CHAT_ID
+    if (intent.chatId.length > MAX_CHAT_ID_LENGTH) return this.observe('enqueue', INVALID_CHAT_ID)
     const state = await this.tryState(intent.sessionId)
     const context = await this.contextOf(intent, state)
     if (!context) return { decision: 'allow' }
-    return this.rejection(context, intent, state) ?? { decision: 'allow' }
+    const decision = this.rejection(context, intent, state) ?? { decision: 'allow' }
+    // An allow at enqueue says nothing: the dispatch decides again and is the one counted
+    if (decision.decision === 'reject') this.observe('enqueue', decision)
+    return decision
   }
 
   // The answer right before dispatch. `allow` spends the budgets; `delay` spends nothing, so the
@@ -195,12 +231,14 @@ export class SendPolicyService {
   // deciding, Postgres included, is a delay: the policy never allows what it could not check.
   admit(intent: SendIntent): Promise<PolicyDecision> {
     return this.lock.run(intent.sessionId, async () => {
+      let decision: PolicyDecision
       try {
-        return await this.decide(intent)
+        decision = await this.decide(intent)
       } catch (error) {
         this.logger.error(`[${intent.sessionId}] The send policy failed (${kindOf(error)})`)
-        return this.unavailable(intent)
+        decision = this.unavailable(intent)
       }
+      return this.observe('dispatch', decision)
     })
   }
 
@@ -223,21 +261,25 @@ export class SendPolicyService {
   // Counts a `getNumberId` lookup made for a cold send against LOOKUPS_PER_DAY: many look-ups of
   // numbers that are not on WhatsApp is itself a signal
   admitLookup(sessionId: string): Promise<PolicyDecision> {
-    return this.lock.run(sessionId, async () => {
-      const intent = { sessionId, chatId: '', waitedMs: 0 }
-      const state = await this.tryState(sessionId)
-      const budgets = await this.budgetsOf(sessionId, state)
-      if (!budgets) return this.unavailable(intent, PolicyRule.SETTINGS_UNAVAILABLE)
-      if (!state) return this.unavailable(intent)
+    return this.lock.run(sessionId, async () =>
+      this.observe('lookup', await this.decideLookup(sessionId))
+    )
+  }
 
-      const recent = state.lookups.filter(at => at > budgets.now - MS_PER_DAY)
-      if (recent.length >= scaleBudget(budgets.limits.lookupsPerDay, budgets.factor)) {
-        return { decision: 'reject', code: 'POLICY_BLOCKED', rule: PolicyRule.LOOKUPS_PER_DAY }
-      }
-      const lookups = [...recent, budgets.now].slice(-STATE_LIST_LIMIT)
-      const saved = await this.commit(sessionId, { ...state, lookups })
-      return saved ? { decision: 'allow' } : this.unavailable(intent)
-    })
+  private async decideLookup(sessionId: string): Promise<PolicyDecision> {
+    const intent = { sessionId, chatId: '', waitedMs: 0 }
+    const state = await this.tryState(sessionId)
+    const budgets = await this.budgetsOf(sessionId, state)
+    if (!budgets) return this.unavailable(intent, PolicyRule.SETTINGS_UNAVAILABLE)
+    if (!state) return this.unavailable(intent)
+
+    const recent = state.lookups.filter(at => at > budgets.now - MS_PER_DAY)
+    if (recent.length >= scaleBudget(budgets.limits.lookupsPerDay, budgets.factor)) {
+      return { decision: 'reject', code: 'POLICY_BLOCKED', rule: PolicyRule.LOOKUPS_PER_DAY }
+    }
+    const lookups = [...recent, budgets.now].slice(-STATE_LIST_LIMIT)
+    const saved = await this.commit(sessionId, { ...state, lookups })
+    return saved ? { decision: 'allow' } : this.unavailable(intent)
   }
 
   // Feeds the health throttle. True once, when this result makes the bad ratio of the window pass
@@ -288,6 +330,91 @@ export class SendPolicyService {
   onReachabilityChange(listener: ReachabilityListener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  // Listens to every decision the policy takes (for the metrics). A listener that throws is ignored.
+  onDecision(listener: DecisionListener): () => void {
+    this.decisionListeners.add(listener)
+    return () => this.decisionListeners.delete(listener)
+  }
+
+  // The limits in force for the session: the environment defaults with its overrides on top. Throws
+  // PolicyUnavailable when the settings of the session cannot be read and none was read before.
+  async effective(sessionId: string): Promise<Limits> {
+    const settings = await this.settingsOf(sessionId, Date.now())
+    if (!settings) throw new PolicyUnavailable('settings')
+    return settings.limits
+  }
+
+  // The budgets of the session as of now, without spending anything
+  async usage(sessionId: string): Promise<PolicyUsage> {
+    const state = await this.tryState(sessionId)
+    if (!state) throw new PolicyUnavailable('state')
+    const budgets = await this.budgetsOf(sessionId, state)
+    const settings = this.settings.get(sessionId)
+    if (!budgets || !settings) throw new PolicyUnavailable('settings')
+    const { now, limits, factor } = budgets
+    const day = now - MS_PER_DAY
+    const bucket = (
+      max: number,
+      windowMs: number,
+      saved: { tokens: number; at: number } | undefined
+    ): { available: number; limit: number } => {
+      const capacity = scaleBudget(max, factor)
+      return {
+        available: new TokenBucket({ capacity, windowMs, now: () => now }, saved).available(),
+        limit: capacity
+      }
+    }
+    const hardFailures = state.results.filter(Boolean).length
+    return {
+      at: now,
+      factor,
+      warmup: {
+        factor: warmupFactor(
+          settings.linkedAt,
+          now,
+          this.config.WARMUP_DAYS,
+          this.config.WARMUP_START_FRACTION
+        ),
+        linkedAt: settings.linkedAt,
+        days: this.config.WARMUP_DAYS
+      },
+      throttle: {
+        active: state.degradedUntil > now,
+        until: state.degradedUntil > now ? state.degradedUntil : null
+      },
+      health: {
+        samples: state.results.length,
+        hardFailures,
+        maxBadRatio: this.config.HEALTH_MAX_BAD_RATIO,
+        minSamples: Math.min(this.config.HEALTH_WINDOW, this.config.HEALTH_MIN_SAMPLES)
+      },
+      coldSends: {
+        used: state.coldChats.filter(cold => cold.at > day).length,
+        limit: scaleBudget(limits.coldSendsPerDay, factor)
+      },
+      lookups: {
+        used: state.lookups.filter(at => at > day).length,
+        limit: scaleBudget(limits.lookupsPerDay, factor)
+      },
+      buckets: {
+        perMinute: bucket(limits.sessionMaxPerMinute, MS_PER_MINUTE, state.perMinute),
+        perHour: bucket(limits.sessionMaxPerHour, MS_PER_HOUR, state.perHour),
+        perDay: bucket(limits.sessionMaxPerDay, MS_PER_DAY, state.perDay)
+      }
+    }
+  }
+
+  private observe(stage: DecisionStage, decision: PolicyDecision): PolicyDecision {
+    for (const listener of this.decisionListeners) {
+      try {
+        listener({ stage, decision })
+      } catch {
+        this.logger.warn('A decision listener failed')
+      }
+    }
+    return decision
   }
 
   // The settings of the session changed: read them again on the next call. The last valid ones
