@@ -103,7 +103,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [ ] **6.3** Channels.
 - [ ] **6.4** Labels.
 - [ ] **6.5** Broadcasts and status.
-- [ ] **6.6** Calls (ring buffer, link, reject).
+- [ ] **6.6** Calls (ring buffer, link, reject). *Carried from #42:* the `call` event works again through the `setActiveCall` hook of the wwebjs patch (TDD §2.5), but `Call.participants` is not delivered: verify the shape of `groupCallParticipants` with a real group call and carry it in `mapCall`; confirm `isVideo`/`outgoing` values of a real video call in the same smoke test. Also from #42: the patch installs no hook, and says nothing, when `WAWebCallCollection.setActiveCall` is missing (a new WhatsApp Web build): add a start-up check that reports it (a `session_error`-style signal or a metric) and, in the same task, split the `Client.js` fallback count of `wwebjs-patch.spec.ts` per defect (poll parent key vs call peer).
 - [ ] **6.7** Customer notes and remaining Client-level operations. *Done when:* the parity expected-failures list only holds Phase 7–9 items.
 
 ## Milestone 7 — Outbound webhooks (`feat/outbound-webhooks`) — TDD §6.9

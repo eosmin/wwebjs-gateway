@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { runInNewContext } from 'node:vm'
 
 // The patch in patches/whatsapp-web.js@1.34.7.patch (TDD §2.5) is what makes the library work with
 // the current WhatsApp Web. These tests fail when a dependency refresh drops it. The library is
@@ -42,7 +43,8 @@ describe('the patched whatsapp-web.js', () => {
       (source(file).match(/_serialized \?\? String\(/g) ?? []).length
 
     expect(fallbacks('util/Injected/Utils.js')).toBe(5)
-    expect(fallbacks('Client.js')).toBe(2)
+    // two for the poll parent key (#40) and one for the peer of an incoming call (#42)
+    expect(fallbacks('Client.js')).toBe(3)
     expect(fallbacks('structures/Message.js')).toBe(1)
   })
 
@@ -149,6 +151,207 @@ describe('the patched whatsapp-web.js', () => {
 
       expect(error).toHaveProperty('message', 'Evaluation failed: not a chat')
       expect(error).not.toHaveProperty('afterDispatch')
+    })
+  })
+
+  // Probed against a real linked account on WhatsApp Web 2.3000.1052525806 (issue #42): an incoming
+  // call reaches `WAWebCallCollection.setActiveCall(call)` and `setActiveCall(null)` ends it. The
+  // internal Map the library used to wrap is never written, and `add` / `processIncomingCall` are never
+  // called. The page code cannot run in Jest, so the block of Client.js that installs the hook runs here
+  // against a fake `window`
+  describe('the incoming call hook', () => {
+    interface CallModule {
+      on?: () => void
+      setActiveCall?: (call: unknown, ...rest: unknown[]) => unknown
+    }
+    const hookSource = (): string => {
+      const text = source('Client.js')
+      const start = text.indexOf(
+        "const WAWebCallCollection = window.require('WAWebCallCollection');"
+      )
+      const end = text.indexOf("Chat.on('remove'", start)
+      expect(start).toBeGreaterThan(-1)
+      expect(end).toBeGreaterThan(start)
+      return text.slice(start, end)
+    }
+    // The object the probe saw (values redacted)
+    const ringing = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+      id: 'CALL1',
+      peerJid: { _serialized: '5210000000000@c.us' },
+      offerTime: 1793438493,
+      isVideo: false,
+      isGroup: false,
+      outgoing: false,
+      ...overrides
+    })
+    const install = (
+      module: CallModule | undefined,
+      onIncomingCall: (call: unknown) => unknown = () => undefined
+    ): void => {
+      const window = { require: () => module, onIncomingCall }
+      // Date and Promise are Jest's, so fake timers reach the block
+      runInNewContext(hookSource(), { window, Date, Promise })
+    }
+    const moduleWith = (inner: jest.Mock = jest.fn((): string => 'original')): CallModule => ({
+      on: () => undefined,
+      setActiveCall: inner
+    })
+
+    it('reports a call that reaches setActiveCall', () => {
+      const onIncomingCall = jest.fn()
+      const module = moduleWith()
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(ringing())
+
+      expect(onIncomingCall).toHaveBeenCalledTimes(1)
+      expect(onIncomingCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'CALL1',
+          peerJid: '5210000000000@c.us',
+          offerTime: 1793438493,
+          isVideo: false,
+          isGroup: false,
+          outgoing: false
+        })
+      )
+    })
+
+    // Seen with a real call: offerTime is 0 while the call rings
+    it('stamps a call with the time it arrived when WhatsApp Web has not set offerTime yet', () => {
+      jest.useFakeTimers().setSystemTime(new Date(1793438493500))
+      try {
+        const onIncomingCall = jest.fn()
+        const module = moduleWith()
+        install(module, onIncomingCall)
+
+        module.setActiveCall?.(ringing({ offerTime: 0 }))
+
+        expect(onIncomingCall).toHaveBeenCalledWith(
+          expect.objectContaining({ offerTime: 1793438493 })
+        )
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('keeps a peer id that is already a string', () => {
+      const onIncomingCall = jest.fn()
+      const module = moduleWith()
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(ringing({ peerJid: '5210000000000@c.us' }))
+
+      expect(onIncomingCall).toHaveBeenCalledWith(
+        expect.objectContaining({ peerJid: '5210000000000@c.us' })
+      )
+    })
+
+    it('reports no peer rather than the text "undefined" when the call has none', () => {
+      const onIncomingCall = jest.fn()
+      const module = moduleWith()
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(ringing({ peerJid: undefined }))
+
+      expect(onIncomingCall).toHaveBeenCalledWith(expect.objectContaining({ peerJid: undefined }))
+    })
+
+    it('still runs the original setActiveCall with its arguments and answers what it answers', () => {
+      const inner = jest.fn((): string => 'original')
+      const module = moduleWith(inner)
+      install(module)
+      const call = ringing()
+
+      const answer = module.setActiveCall?.(call, 'extra')
+
+      expect(inner).toHaveBeenCalledWith(call, 'extra')
+      expect(answer).toBe('original')
+    })
+
+    it('does not report the end of a call, which is setActiveCall(null)', () => {
+      const onIncomingCall = jest.fn()
+      const inner = jest.fn()
+      const module = moduleWith(inner)
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(null)
+
+      expect(onIncomingCall).not.toHaveBeenCalled()
+      expect(inner).toHaveBeenCalledWith(null)
+    })
+
+    it('reports a call once, however often WhatsApp Web sets it again', () => {
+      const onIncomingCall = jest.fn()
+      const module = moduleWith()
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(ringing())
+      module.setActiveCall?.(ringing({ isSilenced: true }))
+      module.setActiveCall?.(null)
+      module.setActiveCall?.(ringing({ id: 'CALL2' }))
+
+      expect(onIncomingCall).toHaveBeenCalledTimes(2)
+    })
+
+    it('reports each call once when two calls overlap', () => {
+      const onIncomingCall = jest.fn()
+      const module = moduleWith()
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(ringing({ id: 'A' }))
+      module.setActiveCall?.(ringing({ id: 'B' }))
+      module.setActiveCall?.(ringing({ id: 'A' }))
+
+      expect(onIncomingCall).toHaveBeenCalledTimes(2)
+    })
+
+    it('reports a call again on the next setActiveCall when the report failed', async () => {
+      const onIncomingCall = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('binding gone'))
+        .mockResolvedValue(undefined)
+      const module = moduleWith()
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(ringing())
+      await new Promise(resolve => setImmediate(resolve))
+      module.setActiveCall?.(ringing())
+
+      expect(onIncomingCall).toHaveBeenCalledTimes(2)
+    })
+
+    it('reports a call once even if the block that installs the hook runs twice in the page', () => {
+      const onIncomingCall = jest.fn()
+      const module = moduleWith()
+      install(module, onIncomingCall)
+      install(module, onIncomingCall)
+
+      module.setActiveCall?.(ringing())
+
+      expect(onIncomingCall).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not let a failure of the report stop WhatsApp Web setting the call', async () => {
+      const inner = jest.fn((): string => 'original')
+      const module = moduleWith(inner)
+      const onIncomingCall = jest.fn(() => Promise.reject(new Error('binding gone')))
+      install(module, onIncomingCall)
+
+      expect(module.setActiveCall?.(ringing())).toBe('original')
+      // The hook ran: without this the test would also pass if it was never installed
+      expect(onIncomingCall).toHaveBeenCalledTimes(1)
+      // A rejection nobody handles would crash the page's event loop of promises
+      await new Promise(resolve => setImmediate(resolve))
+    })
+
+    it('does nothing when the module is gone or has no setActiveCall', () => {
+      expect(() => {
+        install(undefined)
+      }).not.toThrow()
+      expect(() => {
+        install({ on: () => undefined })
+      }).not.toThrow()
     })
   })
 
