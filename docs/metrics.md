@@ -24,6 +24,9 @@ an admin key is also accepted, and when `METRICS_TOKEN` is unset only an admin k
 | `gw_wa_call_duration_seconds` | histogram | `op` | Seconds a call into whatsapp-web.js took, by operation. |
 | `gw_wa_call_errors_total` | counter | `op`, `type` | Failed calls into whatsapp-web.js, by operation and error type. |
 | `gw_watchdog_restarts_total` | counter | - | Sessions the watchdog restarted. |
+| `gw_policy_decisions_total` | counter | `rule`, `decision` | Decisions of the send policy that are not a plain allow at enqueue, by rule (`none` for an allow) and decision (allow, delay, reject). |
+| `gw_policy_delay_seconds` | histogram | - | Seconds the send policy asked a job to wait. |
+| `gw_suppressed_chats` | gauge | - | Chats on the suppression lists of all sessions. |
 | `gw_reconcile_recovered_total` | counter | - | Messages the reconciliation pass recovered after a reconnect. |
 
 Histograms also expose the `_bucket`, `_sum` and `_count` series Prometheus derives from them.

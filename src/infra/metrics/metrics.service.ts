@@ -39,6 +39,9 @@ export interface Metrics {
   waCallErrors: Counter<'op' | 'type'>
   watchdogRestarts: Counter
   reconcileRecovered: Counter
+  policyDecisions: Counter<'rule' | 'decision'>
+  policyDelaySeconds: Histogram
+  suppressedChats: Gauge
 }
 
 export function createMetrics(registry: Registry): Metrics {
@@ -61,7 +64,10 @@ export function createMetrics(registry: Registry): Metrics {
     waCallDurationSeconds: histogram(registry, d.waCallDurationSeconds),
     waCallErrors: counter(registry, d.waCallErrors),
     watchdogRestarts: counter(registry, d.watchdogRestarts),
-    reconcileRecovered: counter(registry, d.reconcileRecovered)
+    reconcileRecovered: counter(registry, d.reconcileRecovered),
+    policyDecisions: counter(registry, d.policyDecisions),
+    policyDelaySeconds: histogram(registry, d.policyDelaySeconds),
+    suppressedChats: gauge(registry, d.suppressedChats)
   }
 }
 

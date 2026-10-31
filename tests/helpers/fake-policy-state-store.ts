@@ -78,6 +78,15 @@ export class FakePolicyStateStore extends PolicyStateStore {
     return this.run(() => this.flags.delete(`${sessionId}:${chatId}`))
   }
 
+  listUnreachable(sessionId: string, limit: number): Promise<string[]> {
+    return this.run(() =>
+      [...this.flags]
+        .filter(key => key.startsWith(`${sessionId}:`))
+        .map(key => key.slice(sessionId.length + 1))
+        .slice(0, limit)
+    )
+  }
+
   delete(sessionId: string): Promise<void> {
     const held = this.heldDeletes.shift()
     return (held ?? Promise.resolve()).then(() =>

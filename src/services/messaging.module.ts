@@ -10,9 +10,11 @@ import { MediaResolverService } from './media-resolver.service.js'
 import { MessageSendService } from './message-send.service.js'
 import { MessageStoreService } from './message-store.service.js'
 import { MessagesService } from './messages.service.js'
+import { PolicyEventsService } from './policy-events.service.js'
 import { PollsEventsService } from './polls-events.service.js'
 import { PresenceProfileService } from './presence-profile.service.js'
 import { RecipientResolverService } from './recipient-resolver.service.js'
+import { SendPolicyAdminService } from './send-policy-admin.service.js'
 import { SendPolicyService } from './send-policy.service.js'
 import { PolicyStateStore, RedisPolicyStateStore } from './send-policy.store.js'
 import { SendQueueService } from './send-queue.service.js'
@@ -22,6 +24,8 @@ import { SendQueueService } from './send-queue.service.js'
   imports: [WhatsAppModule],
   providers: [
     SendPolicyService,
+    SendPolicyAdminService,
+    PolicyEventsService,
     SendQueueService,
     IdempotentSendService,
     MessageStoreService,
@@ -38,6 +42,7 @@ import { SendQueueService } from './send-queue.service.js'
   ],
   exports: [
     SendPolicyService,
+    SendPolicyAdminService,
     SendQueueService,
     IdempotentSendService,
     MessageStoreService,

@@ -58,9 +58,29 @@ Only cold sends to that chat are rejected. Replies in an open conversation never
 
 A flag in Redis (`policy:unreachable:<session>:<chat>`, 30-day expiry) exists only to know the moment the state changes, so `chat_unreachable` is published once when a chat becomes unreachable and once when it stops being so. `handleIncoming` clears it as soon as the contact writes; a delivered message clears it at the next cold check of that chat. If Redis cannot store the flag the decision does not change.
 
+## Endpoints
+
+All of them are gateway-native (nothing of whatsapp-web.js is behind them) and work whether or not the session is running. Reading needs the `read` scope, changing needs `manage`.
+
+| Operation | Route | What it does |
+| --- | --- | --- |
+| `sendPolicy.get` | `GET /v1/sessions/:sessionId/send-policy` | `effective` (environment defaults with the overrides on top) and `overrides` (what the session sets itself) |
+| `sendPolicy.update` | `PUT /v1/sessions/:sessionId/send-policy` | Replaces the overrides as a whole; a limit left out returns to its default and `{}` clears them. A value over a ceiling is `400`. Applies to the next decision, queued jobs included; the budgets already spent are not changed |
+| `sendPolicy.usage` | `GET /v1/sessions/:sessionId/send-policy/usage` | Levels of the session buckets, new chats and look-ups of the last 24 hours against their (scaled) limits, warm-up factor, health score, throttle state, suppressed chats. Reading spends nothing |
+| `suppressions.list` | `GET /v1/sessions/:sessionId/suppressions` | The list, newest first, with `reason` (`manual` or `opt_out`) and `note` |
+| `suppressions.add` | `POST /v1/sessions/:sessionId/suppressions` | `{ chatId, note? }`. `chatId` is a WhatsApp id or a phone number; a number is turned into the id the sends use (the same cached look-up, which counts against `LOOKUPS_PER_DAY` when it is not cached), because an entry for the wrong id would never match. The id to suppress is the `chatId` of that contact's incoming messages. Answers `200` with `created`; a chat already listed changes nothing and publishes nothing, a new one publishes `chat_suppressed` |
+| `suppressions.remove` | `DELETE /v1/sessions/:sessionId/suppressions/:chatId` | `204`, or `404` when the chat was not listed |
+| `unreachableChats.list` | `GET /v1/sessions/:sessionId/unreachable-chats` | The chats flagged right now (at most 1000, `truncated` says if there are more). The flag is set and cleared when a send to the chat is checked, so the list is as of the last check |
+
+`PUT` stores the overrides under `settings.sendPolicy` of the session, which `PATCH /v1/sessions/:sessionId` never touches. `GET /v1/sessions/:sessionId` shows them with the rest of the settings.
+
+**Metrics.** `gw_policy_decisions_total{rule,decision}` counts every dispatch decision, every number look-up decision and every rejection at enqueue (an allow at enqueue is not counted: the dispatch decides again and is the one counted; `rule` is `none` for an allow). `gw_policy_delay_seconds` is how long the policy asked jobs to wait. `gw_suppressed_chats` is the size of all the lists. Alert on a growing `rule="state_unavailable"` or `settings_unavailable` (Redis or Postgres trouble), on `lookups_per_day` rejections and on `rule="delay_exceeded"` (jobs ending because the wait was too long).
+
+**Not wired yet.** The send path asks the policy and feeds the health throttle, but the inbound pipeline does not call the policy yet: an incoming message does not match `optOutKeywords`, does not clear the unreachable flag, and `chat_unreachable` is only published when a send to the chat is checked. Until the pipeline hook lands (tracked in `docs/IMPLEMENTATION_PLAN.md`, "5.x, policy hooks in the inbound pipeline"), `optOutKeywords` is stored and returned but no message suppresses a chat by itself; use `POST …/suppressions`.
+
 ## Per-session settings
 
-`settings.sendPolicy` overrides the defaults for one session. A key left out keeps the environment value; an invalid object is ignored (and logged) and the defaults apply.
+`settings.sendPolicy` overrides the defaults for one session (change it with `PUT …/send-policy`). A key left out keeps the environment value; an invalid object is ignored (and logged) and the defaults apply.
 
 | Key | Overrides |
 | --- | --- |

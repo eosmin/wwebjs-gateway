@@ -47,6 +47,15 @@ export class SuppressionsRepository {
     return found !== null
   }
 
+  // Every list of every session, for the gauge
+  countAll(): Promise<number> {
+    return this.prisma.suppression.count()
+  }
+
+  countOf(sessionId: string): Promise<number> {
+    return this.prisma.suppression.count({ where: { sessionId } })
+  }
+
   list(sessionId: string): Promise<Suppression[]> {
     return this.prisma.suppression.findMany({
       where: { sessionId },
