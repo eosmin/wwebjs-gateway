@@ -126,7 +126,7 @@ const MimeType = z
   .max(127)
   .regex(/^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/, 'Not a media type such as image/png')
 
-const MediaSource = z.union([
+export const MediaSource = z.union([
   z.strictObject({
     base64: z.string().min(1),
     mimetype: MimeType,

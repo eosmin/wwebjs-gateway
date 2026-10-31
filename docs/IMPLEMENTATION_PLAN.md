@@ -92,7 +92,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
 - [x] **5.6** Polls and events controller.
 - [x] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
-- [ ] **5.8** Presence, profile and settings controller.
+- [x] **5.8** Presence, profile and settings controller.
 - [ ] **5.9** Lookup controller.
 - [ ] **5.10** Send-policy and suppressions controllers. *Done when:* usage and suppression endpoints are integration-tested.
 
@@ -194,6 +194,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **12.3, chats (from 5.7)** With a real account, check what the fake client cannot: that `Chat.sendStateTyping` shows for about 25 s and `clearState` stops it at once, what `Client.sendSeen`, `pinChat` (a fourth pinned chat) and `syncHistory` answer when WhatsApp refuses (the service reads `false` as `WHATSAPP_ERROR`), and that `getChatById` throws or answers nothing for an unknown id (the adapter turns both into `CHAT_NOT_FOUND`).
 - [ ] **6.3, channel chats (from 5.7)** `chats.list` and `chats.get` already answer channels, but `chats.setState`, `chats.clearMessages` and `chats.delete` refuse them with `WHATSAPP_ERROR` (`WaOperationError`); step 6.3 must make the channel routes the way to delete a channel and say so in `docs/chats.md`.
 - [ ] **8.x, `chat.state` countdown (from 5.7, accepted trade-off)** The `durationMs` of `chats.setState` is a timer in `ChatsService`: a restart of the gateway leaves the indicator to lapse by itself (about 25 s, the cap of `durationMs`). The countdown also does not know the typing of a send with `humanize` on the same chat, and may cut it short. Moving it to a BullMQ delayed job (or sharing the indicator with the send worker) is only worth it if a longer indicator is ever needed; do it then.
+- [ ] **12.3, presence and profile (from 5.8)** With a real account, check what the fake client cannot: that `sendPresenceAvailable` stops the push notifications of the linked phone and `sendPresenceUnavailable` brings them back, that `setDisplayName` and `setProfilePicture` answer `false` (and not a throw) when WhatsApp refuses, which image formats and sizes `setProfilePicture` takes, and that `setAutoDownload*` and `setBackgroundSync` still exist on the current WA Web. Also whether WhatsApp counts the 139 and 25 character limits in code points or in UTF-16 units (the schema counts units, so an emoji-heavy text may be refused early), and whether `image/svg+xml` or `image/gif` are taken as a picture. Fix the wording of `docs/presence-profile.md` to what is seen.
 - [ ] **12.3** Promote `getInviteInfo` to a named DTO once its shape is seen on a real invite (the adapter answers a sanitized `Record<string, unknown>`).
 - [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
@@ -245,7 +246,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 5.5 | done | `feat/5-5-messages-controller` | 2026-10-30 |
 | 5.6 | done | `feat/5-6-polls-events` | 2026-10-30 |
 | 5.7 | done | `feat/5-7-chats-controller` | 2026-10-31 |
-| 5.8 | todo | - | - |
+| 5.8 | done | `feat/5-8-presence-profile` | 2026-10-31 |
 | 5.9 | todo | - | - |
 | 5.10 | todo | - | - |
 | 6.1 | todo | - | - |

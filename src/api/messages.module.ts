@@ -6,9 +6,17 @@ import { MessagingModule } from '../services/messaging.module.js'
 import { ChatsController } from './controllers/chats.controller.js'
 import { MessagesController } from './controllers/messages.controller.js'
 import { PollsEventsController } from './controllers/polls-events.controller.js'
+import { PresenceProfileController } from './controllers/presence-profile.controller.js'
+import { SettingsController } from './controllers/settings.controller.js'
 
 @Module({
   imports: [AuthModule, MessagingModule],
-  controllers: [ChatsController, MessagesController, PollsEventsController]
+  controllers: [
+    ChatsController,
+    MessagesController,
+    PollsEventsController,
+    PresenceProfileController,
+    SettingsController
+  ]
 })
 export class MessagesModule {}
