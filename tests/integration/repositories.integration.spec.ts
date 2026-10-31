@@ -208,7 +208,7 @@ describe('repositories (integration)', () => {
 
       expect(await sessions.delete(id)).toBe(true)
       expect(await sessions.delete(id)).toBe(false)
-      expect(await suppressions.list(id)).toEqual([])
+      expect(await suppressions.list(id, 10)).toEqual([])
       expect(await apiKeys.findByHash(`h-${runId}-cascade`)).toBeNull()
     })
   })
@@ -1081,7 +1081,27 @@ describe('repositories (integration)', () => {
       expect(second.suppression).toMatchObject({ reason: 'opt_out', note: 'stop' })
       expect(await suppressions.isSuppressed(sessionId, 'c@c.us')).toBe(true)
       expect(await suppressions.isSuppressed(sessionId, 'other@c.us')).toBe(false)
-      expect((await suppressions.list(sessionId)).map(s => s.chatId)).toEqual(['c@c.us'])
+      expect((await suppressions.list(sessionId, 10)).map(s => s.chatId)).toEqual(['c@c.us'])
+    })
+
+    it('lists newest first, ties by chat id, and continues after a cursor', async () => {
+      const sessionId = await newSession('sup-page')
+      for (const chatId of ['a@c.us', 'b@c.us', 'c@c.us']) {
+        await suppressions.add({ sessionId, chatId, reason: 'manual' })
+      }
+      const all = await suppressions.list(sessionId, 10)
+      expect(all).toHaveLength(3)
+
+      const first = await suppressions.list(sessionId, 2)
+      const last = first.at(-1)
+      if (!last) throw new Error('no page')
+      const rest = await suppressions.list(sessionId, 2, {
+        createdAt: last.createdAt,
+        chatId: last.chatId
+      })
+
+      expect([...first, ...rest].map(s => s.chatId)).toEqual(all.map(s => s.chatId))
+      expect(rest).toHaveLength(1)
     })
 
     it('removes an entry and reports a chat that was not there', async () => {

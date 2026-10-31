@@ -1,11 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { z } from 'zod'
 
-import { AppError, NotFoundError } from '../common/errors.js'
+import { AppError, NotFoundError, ValidationError } from '../common/errors.js'
 import { withTimeout } from '../common/lib/timeout.js'
+import { isForeignKeyViolation } from '../database/db-errors.js'
 import type { Suppression } from '../database/models.js'
 import { SessionsRepository } from '../database/repositories/sessions.repository.js'
-import { SuppressionsRepository } from '../database/repositories/suppressions.repository.js'
+import {
+  SuppressionsRepository,
+  type SuppressionCursor
+} from '../database/repositories/suppressions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import type {
   AddedSuppressionDto,
@@ -13,6 +17,8 @@ import type {
   SendPolicyUsageDto,
   SendPolicyViewDto,
   SuppressionDto,
+  SuppressionListDto,
+  SuppressionListQueryDto,
   UnreachableChatsDto
 } from '../types/send-policy-api.dto.js'
 import { SendPolicySettings } from '../types/send-policy.dto.js'
@@ -31,6 +37,26 @@ const Envelope = z.looseObject({ sendPolicy: SendPolicySettings.optional() })
 
 const sessionNotFound = (id: string): NotFoundError =>
   new NotFoundError('NOT_FOUND', `Session ${id} does not exist`)
+
+const CursorPayload = z.strictObject({ createdAt: z.iso.datetime(), chatId: z.string().min(1) })
+
+const encodeCursor = (row: Suppression): string =>
+  Buffer.from(
+    JSON.stringify({ createdAt: row.createdAt.toISOString(), chatId: row.chatId })
+  ).toString('base64url')
+
+function decodeCursor(cursor: string): SuppressionCursor {
+  const invalid = new ValidationError('VALIDATION_ERROR', 'The cursor is not valid')
+  let json: unknown
+  try {
+    json = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
+  } catch {
+    throw invalid
+  }
+  const parsed = CursorPayload.safeParse(json)
+  if (!parsed.success) throw invalid
+  return { createdAt: new Date(parsed.data.createdAt), chatId: parsed.data.chatId }
+}
 
 function toSuppressionDto(row: Suppression): SuppressionDto {
   return {
@@ -75,8 +101,9 @@ export class SendPolicyAdminService {
     return this.get(sessionId)
   }
 
+  // The policy reads the session row itself (cached), so it is not read here as well: only when the
+  // policy cannot answer is the row looked at, to tell a session that does not exist from a failure
   async usage(sessionId: string): Promise<SendPolicyUsageDto> {
-    await this.requireSession(sessionId)
     try {
       const usage = await this.policy.usage(sessionId)
       return {
@@ -97,13 +124,26 @@ export class SendPolicyAdminService {
         suppressedChats: await this.suppressions.countOf(sessionId)
       }
     } catch (error) {
+      if (error instanceof PolicyUnavailable) await this.requireSession(sessionId)
       throw this.unavailable(error)
     }
   }
 
-  async listSuppressions(sessionId: string): Promise<SuppressionDto[]> {
+  // Newest first, a page at a time: the cursor is the last entry of the previous page
+  async listSuppressions(
+    sessionId: string,
+    { cursor, limit }: SuppressionListQueryDto
+  ): Promise<SuppressionListDto> {
     await this.requireSession(sessionId)
-    return (await this.suppressions.list(sessionId)).map(toSuppressionDto)
+    const before = cursor === undefined ? undefined : decodeCursor(cursor)
+    // One more than asked: its existence is what tells there is another page
+    const rows = await this.suppressions.list(sessionId, limit + 1, before)
+    const page = rows.slice(0, limit)
+    const last = page.at(-1)
+    return {
+      items: page.map(toSuppressionDto),
+      nextCursor: rows.length > limit && last ? encodeCursor(last) : null
+    }
   }
 
   // A phone number is turned into the id the sends use (the same cached look-up), or the entry
@@ -115,12 +155,7 @@ export class SendPolicyAdminService {
   ): Promise<AddedSuppressionDto> {
     await this.requireSession(sessionId)
     const chatId = await this.resolver.resolve(sessionId, to)
-    const { created, suppression } = await this.suppressions.add({
-      sessionId,
-      chatId,
-      reason: 'manual',
-      note: note ?? null
-    })
+    const { created, suppression } = await this.addRow(sessionId, chatId, note)
     if (created) {
       await this.announce(sessionId, chatId)
       await this.refreshGauge()
@@ -155,7 +190,7 @@ export class SendPolicyAdminService {
   }
 
   // The gauge is read again from the table, not counted up and down. It is refreshed at boot and on
-  // every change made here; other writers (opt-outs, a session deleted) must call it too (plan: 5.x)
+  // every change made here; the opt-out hook and the deletion of a session call it too
   async refreshGauge(): Promise<void> {
     try {
       this.metrics.metrics.suppressedChats.set(await this.suppressions.countAll())
@@ -170,6 +205,25 @@ export class SendPolicyAdminService {
       return { ...limits, quietHours: limits.quietHours ?? null }
     } catch (error) {
       throw this.unavailable(error)
+    }
+  }
+
+  // The session can be deleted while the number is being looked up: the row then points at nothing
+  private async addRow(
+    sessionId: string,
+    chatId: string,
+    note: string | undefined
+  ): ReturnType<SuppressionsRepository['add']> {
+    try {
+      return await this.suppressions.add({
+        sessionId,
+        chatId,
+        reason: 'manual',
+        note: note ?? null
+      })
+    } catch (error) {
+      if (isForeignKeyViolation(error)) throw sessionNotFound(sessionId)
+      throw error
     }
   }
 

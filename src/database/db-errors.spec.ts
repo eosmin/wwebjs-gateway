@@ -1,6 +1,7 @@
 import { Prisma } from '../generated/prisma/client.js'
 
 import {
+  isForeignKeyViolation,
   isRecordNotFound,
   isSerializationFailure,
   isUniqueViolation,
@@ -16,6 +17,8 @@ describe('db-errors', () => {
     expect(isRecordNotFound(knownError('P2002'))).toBe(false)
     expect(isUniqueViolation(knownError('P2002'))).toBe(true)
     expect(isUniqueViolation(knownError('P2025'))).toBe(false)
+    expect(isForeignKeyViolation(knownError('P2003'))).toBe(true)
+    expect(isForeignKeyViolation(knownError('P2002'))).toBe(false)
     expect(isSerializationFailure(knownError('P2034'))).toBe(true)
     expect(isSerializationFailure(knownError('P2002'))).toBe(false)
   })

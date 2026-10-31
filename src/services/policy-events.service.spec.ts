@@ -1,5 +1,6 @@
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import type { EventPipelineService } from '../whatsapp/event-pipeline.service.js'
+import type { SessionManager } from '../whatsapp/session-manager.service.js'
 
 import { PolicyEventsService } from './policy-events.service.js'
 import type { SendPolicyAdminService } from './send-policy-admin.service.js'
@@ -32,15 +33,36 @@ function setup() {
       return stopIncoming
     })
   }
+  const removed: { current?: (sessionId: string) => Promise<void> } = {}
+  const stopRemoved = jest.fn()
+  const sessions = {
+    onRemoved: jest.fn((fn: (sessionId: string) => Promise<void>) => {
+      removed.current = fn
+      return stopRemoved
+    })
+  }
   const metrics = new MetricsService()
   const service = new PolicyEventsService(
     policy as unknown as SendPolicyService,
     admin as unknown as SendPolicyAdminService,
     pipeline as unknown as EventPipelineService,
-    metrics
+    metrics,
+    sessions as unknown as SessionManager
   )
   service.onModuleInit()
-  return { service, listeners, stops, stopIncoming, hook, policy, admin, pipeline, metrics }
+  return {
+    service,
+    listeners,
+    stops,
+    stopIncoming,
+    stopRemoved,
+    removed,
+    hook,
+    policy,
+    admin,
+    pipeline,
+    metrics
+  }
 }
 
 describe('PolicyEventsService', () => {
@@ -110,12 +132,22 @@ describe('PolicyEventsService', () => {
   })
 
   it('fills the gauge at start and lets go of the policy at shutdown', () => {
-    const { service, admin, stops, stopIncoming } = setup()
+    const { service, admin, stops, stopIncoming, stopRemoved } = setup()
 
     expect(admin.refreshGauge).toHaveBeenCalledTimes(1)
     service.onModuleDestroy()
     expect(stops.decision).toHaveBeenCalledTimes(1)
     expect(stops.reach).toHaveBeenCalledTimes(1)
     expect(stopIncoming).toHaveBeenCalledTimes(1)
+    expect(stopRemoved).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes the gauge when a session is deleted, since its lists went with it', async () => {
+    const { removed, admin } = setup()
+    admin.refreshGauge.mockClear()
+
+    await removed.current?.('s1')
+
+    expect(admin.refreshGauge).toHaveBeenCalledTimes(1)
   })
 })

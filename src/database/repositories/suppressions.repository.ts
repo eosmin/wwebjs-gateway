@@ -10,6 +10,12 @@ export interface NewSuppression {
   note?: string | null
 }
 
+// Where a page continues from: the last entry of the previous one
+export interface SuppressionCursor {
+  createdAt: Date
+  chatId: string
+}
+
 export interface AddSuppressionResult {
   // False when the chat was already on the list (its reason and note are kept)
   created: boolean
@@ -56,10 +62,18 @@ export class SuppressionsRepository {
     return this.prisma.suppression.count({ where: { sessionId } })
   }
 
-  list(sessionId: string): Promise<Suppression[]> {
+  // Newest first, ties by chat id (the order the cursor continues from)
+  list(sessionId: string, limit: number, before?: SuppressionCursor): Promise<Suppression[]> {
     return this.prisma.suppression.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: 'desc' }
+      where: {
+        sessionId,
+        OR: before && [
+          { createdAt: { lt: before.createdAt } },
+          { createdAt: before.createdAt, chatId: { lt: before.chatId } }
+        ]
+      },
+      orderBy: [{ createdAt: 'desc' }, { chatId: 'desc' }],
+      take: limit
     })
   }
 }

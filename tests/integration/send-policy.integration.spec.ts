@@ -150,6 +150,50 @@ describe('send policy (integration)', () => {
       expect(await store.clearUnreachable(sessionId, 'a@c.us')).toBe(false)
     })
 
+    it('lists the flagged chats of one session from its index, and drops what lapsed', async () => {
+      const sessionId = await newSession('list')
+      const other = await newSession('list-other')
+      await store.flagUnreachable(sessionId, 'a@c.us')
+      await store.flagUnreachable(sessionId, 'b@c.us')
+      await store.flagUnreachable(sessionId, 'a@c.us')
+      await store.flagUnreachable(other, 'z@c.us')
+
+      expect(await store.listUnreachable(sessionId, 10)).toEqual(['a@c.us', 'b@c.us'])
+      expect(await store.listUnreachable(sessionId, 1)).toEqual(['a@c.us'])
+      expect(await store.listUnreachable(sessionId, 0)).toEqual([])
+
+      await store.clearUnreachable(sessionId, 'a@c.us')
+      expect(await store.listUnreachable(sessionId, 10)).toEqual(['b@c.us'])
+
+      // The flag lapsed by itself: its entry in the index goes at the next listing
+      await redis.client.del(`policy:unreachable:${sessionId}:b@c.us`)
+      await redis.client.zadd(`policy:unreachable-index:${sessionId}`, Date.now() - 1, 'b@c.us')
+      expect(await store.listUnreachable(sessionId, 10)).toEqual([])
+    })
+
+    it('scores a flag by when it lapses, also one that was already there', async () => {
+      const sessionId = await newSession('score')
+      await store.flagUnreachable(sessionId, 'a@c.us')
+      await redis.client.expire(`policy:unreachable:${sessionId}:a@c.us`, 100)
+      await store.flagUnreachable(sessionId, 'a@c.us')
+
+      const [score] = (
+        await redis.client.zrange(`policy:unreachable-index:${sessionId}`, '0', '-1', 'WITHSCORES')
+      ).slice(1)
+      const left = (Number(score) - Date.now()) / 1000
+      expect(left).toBeGreaterThan(90)
+      expect(left).toBeLessThan(110)
+    })
+
+    it('flags a chat again once its flag has lapsed', async () => {
+      const sessionId = await newSession('relapse')
+      await store.flagUnreachable(sessionId, 'a@c.us')
+      await redis.client.del(`policy:unreachable:${sessionId}:a@c.us`)
+
+      expect(await store.flagUnreachable(sessionId, 'a@c.us')).toBe(true)
+      expect(await store.listUnreachable(sessionId, 10)).toEqual(['a@c.us'])
+    })
+
     it('deletes the state and every flag of one session only', async () => {
       const sessionId = await newSession('delete')
       const other = await newSession('delete-other')
@@ -162,7 +206,20 @@ describe('send policy (integration)', () => {
 
       expect(await store.load(sessionId)).toBeNull()
       expect(await store.clearUnreachable(sessionId, 'a@c.us')).toBe(false)
+      expect(await store.listUnreachable(sessionId, 10)).toEqual([])
+      expect(await redis.client.exists(`policy:unreachable:${sessionId}:b@c.us`)).toBe(0)
+      expect(await redis.client.exists(`policy:unreachable-index:${sessionId}`)).toBe(0)
       expect(await store.clearUnreachable(other, 'a@c.us')).toBe(true)
+    })
+
+    it('deletes more flags than one page of the index holds', async () => {
+      const sessionId = await newSession('many')
+      for (let i = 0; i < 520; i += 1) await store.flagUnreachable(sessionId, `${i}@c.us`)
+
+      await store.delete(sessionId)
+
+      expect(await store.listUnreachable(sessionId, 1000)).toEqual([])
+      expect(await redis.client.exists(`policy:unreachable:${sessionId}:519@c.us`)).toBe(0)
     })
   })
 
