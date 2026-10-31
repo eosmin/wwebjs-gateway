@@ -776,6 +776,29 @@ describe('repositories (integration)', () => {
       expect((await messages.findById(sessionId, 'done'))?.emittedAt).toEqual(at)
     })
 
+    it('lists the incoming messages the send policy has not seen, and marks them once', async () => {
+      const sessionId = await newSession('msg-policy')
+      await messages.upsert(
+        message(sessionId, 'late', { sentAt: new Date('2026-06-01T10:00:09Z') })
+      )
+      await messages.upsert(
+        message(sessionId, 'early', { sentAt: new Date('2026-06-01T10:00:01Z') })
+      )
+      await messages.upsert(message(sessionId, 'mine', { direction: 'out', fromMe: true }))
+      await messages.upsert(message(sessionId, 'seen'))
+      const at = new Date('2026-06-01T10:01:00Z')
+      await messages.upsert(message(sessionId, 'kept', { policyText: 'stop' }))
+      expect(await messages.markPolicyHandled(sessionId, ['kept'], at)).toBe(1)
+      expect(await messages.markPolicyHandled(sessionId, ['seen'], at)).toBe(1)
+      expect(await messages.markPolicyHandled(sessionId, ['seen'], new Date())).toBe(0)
+
+      const pending = await messages.listPolicyPending(sessionId)
+
+      expect(pending.map(m => m.id)).toEqual(['early', 'late'])
+      expect((await messages.findById(sessionId, 'seen'))?.policyHandledAt).toEqual(at)
+      expect((await messages.findById(sessionId, 'kept'))?.policyText).toBeNull()
+    })
+
     it('lists the unpublished incoming messages of one chat', async () => {
       const sessionId = await newSession('msg-unemitted-chat')
       await messages.upsert(message(sessionId, 'a'))

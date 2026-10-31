@@ -17,6 +17,8 @@ export interface NewStoredMessage {
   sentAt: Date
   receivedAt: Date
   origin?: JsonInput
+  // See the `policyText` column: set only for a short incoming text when bodies are not stored
+  policyText?: string
   dto: JsonInput
 }
 
@@ -88,6 +90,25 @@ export class MessagesRepository {
       data: { emittedAt: at }
     })
     return count
+  }
+
+  // Marks as seen by the send policy and drops the text kept for it; a row that already has a
+  // date keeps it
+  async markPolicyHandled(sessionId: string, ids: string[], at: Date): Promise<number> {
+    const { count } = await this.prisma.storedMessage.updateMany({
+      where: { sessionId, id: { in: ids }, policyHandledAt: null },
+      data: { policyHandledAt: at, policyText: null }
+    })
+    return count
+  }
+
+  // Incoming messages the send policy has not seen yet (the process died or the policy failed
+  // after they were stored), oldest first so an opt-out and what follows it keep their order
+  listPolicyPending(sessionId: string): Promise<StoredMessage[]> {
+    return this.prisma.storedMessage.findMany({
+      where: { sessionId, direction: 'in', policyHandledAt: null },
+      orderBy: [{ sentAt: 'asc' }, { receivedAt: 'asc' }]
+    })
   }
 
   // Incoming messages that were stored but not yet published (held when the process died, or whose

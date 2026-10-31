@@ -34,6 +34,13 @@ export class PolicyEventsService implements OnModuleInit, OnModuleDestroy {
           })
       })
     )
+    this.stops.push(
+      this.pipeline.setIncomingPolicy(async (sessionId, chatId, text) => {
+        const suppressed = await this.policy.handleIncoming(sessionId, chatId, text)
+        if (suppressed) void this.admin.refreshGauge()
+        return suppressed
+      })
+    )
     void this.admin.refreshGauge()
   }
 

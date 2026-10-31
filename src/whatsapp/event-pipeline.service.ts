@@ -26,8 +26,17 @@ const REDIS_TIMEOUT_MS = 5000
 const DEDUPE_TIMEOUT_MS = 1000
 const DB_TIMEOUT_MS = 5000
 const FETCH_TIMEOUT_MS = 10_000
+const POLICY_TIMEOUT_MS = 5000
 const REPLAY_DELAY_MS = 5000
 const MAX_REPLAY_DELAY_MS = 60_000
+
+// What the send policy does with an incoming message: true when it suppressed the chat. The policy
+// lives in the messaging module, which imports this one, so it registers itself here.
+export type IncomingPolicyHook = (
+  sessionId: string,
+  chatId: string,
+  text: string
+) => Promise<boolean>
 
 export interface OpenSessionOptions {
   // `settings.ordering.enabled` of the session; INBOUND_ORDERING_ENABLED can still turn it off
@@ -44,6 +53,7 @@ export class EventPipelineService implements OnApplicationShutdown {
   private readonly sequencer: EventSequencer
   private readonly seqAllocator: SeqAllocator
   private readonly activity: ActivityRecorder
+  private incomingPolicy: IncomingPolicyHook | undefined
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -67,6 +77,15 @@ export class EventPipelineService implements OnApplicationShutdown {
       nextSeq: sessionId => this.seqAllocator.next(sessionId),
       publish: envelope => bus.publish(envelope)
     })
+  }
+
+  // Registers the send policy's view of incoming messages; sessions opened afterwards use it.
+  // Returns the function that removes it.
+  setIncomingPolicy(hook: IncomingPolicyHook): () => void {
+    this.incomingPolicy = hook
+    return () => {
+      if (this.incomingPolicy === hook) this.incomingPolicy = undefined
+    }
   }
 
   // Starts the pipeline of a session on its client; the one it had before is closed first. A new
@@ -93,7 +112,8 @@ export class EventPipelineService implements OnApplicationShutdown {
         storeBodies: this.config.STORE_MESSAGE_BODIES,
         replayDelayMs: REPLAY_DELAY_MS,
         maxReplayDelayMs: MAX_REPLAY_DELAY_MS,
-        fetchTimeoutMs: FETCH_TIMEOUT_MS
+        fetchTimeoutMs: FETCH_TIMEOUT_MS,
+        policyTimeoutMs: POLICY_TIMEOUT_MS
       },
       {
         client,
@@ -102,6 +122,11 @@ export class EventPipelineService implements OnApplicationShutdown {
         claim: key => this.claim(key),
         unclaim: key => this.unclaim(key),
         noteIncoming: sentAt => this.activity.note(sessionId, sentAt.getTime()),
+        // Read at call time: the policy registered after this session opened is used too
+        handleIncoming: (chatId, text) =>
+          this.incomingPolicy
+            ? this.incomingPolicy(sessionId, chatId, text)
+            : Promise.reject(new Error('the send policy is not registered')),
         metrics: this.metrics.metrics
       }
     )

@@ -1,5 +1,6 @@
 import { buildMessageDto } from '../../tests/helpers/fake-whatsapp-client.js'
 import type { StoredMessage } from '../database/models.js'
+import type { MessageDto } from '../types/dto.js'
 
 import { toMessageDto, toNewStoredMessage } from './event-pipeline.storage.js'
 
@@ -19,7 +20,7 @@ const dto = buildMessageDto({
 
 describe('toNewStoredMessage', () => {
   it('maps an incoming message to its row', () => {
-    const row = toNewStoredMessage('s1', dto, true)
+    const row = toNewStoredMessage('s1', dto, true, true)
 
     expect(row).toMatchObject({
       id: 'm1',
@@ -40,14 +41,14 @@ describe('toNewStoredMessage', () => {
 
   it('stores a message without an ack with a null ack and reads it back', () => {
     const noAck = buildMessageDto({ ack: null })
-    const row = toNewStoredMessage('s1', noAck, true)
+    const row = toNewStoredMessage('s1', noAck, true, true)
 
     expect(row.ack).toBeNull()
     expect(toMessageDto({ dto: row.dto } as unknown as StoredMessage)).toEqual(noAck)
   })
 
   it('marks the messages of the session as outgoing and leaves the origin out when there is none', () => {
-    const row = toNewStoredMessage('s1', buildMessageDto({ fromMe: true }), true)
+    const row = toNewStoredMessage('s1', buildMessageDto({ fromMe: true }), true, true)
 
     expect(row.direction).toBe('out')
     expect('origin' in row).toBe(false)
@@ -57,6 +58,7 @@ describe('toNewStoredMessage', () => {
     const row = toNewStoredMessage(
       's1',
       buildMessageDto({ duration: undefined, author: undefined }),
+      true,
       true
     )
 
@@ -65,7 +67,7 @@ describe('toNewStoredMessage', () => {
   })
 
   it('keeps neither the text nor the raw copy when bodies are not stored', () => {
-    const row = toNewStoredMessage('s1', dto, false)
+    const row = toNewStoredMessage('s1', dto, false, true)
 
     expect(row.body).toBeNull()
     expect(row.dto).toMatchObject({ id: 'm1', body: '' })
@@ -78,7 +80,7 @@ describe('toMessageDto', () => {
   const stored = (value: unknown): StoredMessage => ({ dto: value }) as unknown as StoredMessage
 
   it('reads back what was stored', () => {
-    const row = toNewStoredMessage('s1', dto, true)
+    const row = toNewStoredMessage('s1', dto, true, true)
 
     expect(toMessageDto(stored(row.dto))).toEqual(dto)
   })
@@ -86,5 +88,33 @@ describe('toMessageDto', () => {
   it('gives undefined for a row that no longer fits the DTO', () => {
     expect(toMessageDto(stored({ id: 'm1' }))).toBeUndefined()
     expect(toMessageDto(stored(null))).toBeUndefined()
+  })
+})
+
+describe('toNewStoredMessage policy text', () => {
+  const dto = (overrides: Partial<MessageDto>): MessageDto =>
+    buildMessageDto({ fromMe: false, ...overrides })
+
+  it('keeps a short incoming text for the policy only when bodies are not stored', () => {
+    expect(toNewStoredMessage('s', dto({ body: 'stop' }), false, true).policyText).toBe('stop')
+    expect(toNewStoredMessage('s', dto({ body: 'stop' }), true, true)).not.toHaveProperty(
+      'policyText'
+    )
+  })
+
+  it('keeps nothing when no send policy will clear it', () => {
+    expect(toNewStoredMessage('s', dto({ body: 'stop' }), false, false)).not.toHaveProperty(
+      'policyText'
+    )
+  })
+
+  it('keeps nothing for an empty, long or own message', () => {
+    expect(toNewStoredMessage('s', dto({ body: '' }), false, true)).not.toHaveProperty('policyText')
+    expect(toNewStoredMessage('s', dto({ body: 'x'.repeat(65) }), false, true)).not.toHaveProperty(
+      'policyText'
+    )
+    expect(
+      toNewStoredMessage('s', dto({ body: 'stop', fromMe: true }), false, true)
+    ).not.toHaveProperty('policyText')
   })
 })

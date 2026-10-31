@@ -31,7 +31,8 @@ const OPTIONS: Omit<SessionPipelineOptions, 'sessionId'> = {
   storeBodies: true,
   replayDelayMs: 80,
   maxReplayDelayMs: 400,
-  fetchTimeoutMs: 1000
+  fetchTimeoutMs: 1000,
+  policyTimeoutMs: 1000
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))

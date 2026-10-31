@@ -20,13 +20,16 @@ import {
 } from './inbound-order-buffer.js'
 import type { ClientEvent, WhatsAppClientPort } from './whatsapp-client.port.js'
 
-export type PipelineStage = 'dedupe' | 'store' | 'publish' | 'replay' | 'event'
+export type PipelineStage = 'dedupe' | 'store' | 'publish' | 'replay' | 'event' | 'policy'
 
 export interface PipelineMessages {
-  upsert(message: NewStoredMessage): Promise<unknown>
+  // The row as stored: a repeat of a message comes back with the policy mark it already has
+  upsert(message: NewStoredMessage): Promise<{ policyHandledAt?: Date | null }>
   updateAck(sessionId: string, id: string, ack: number): Promise<boolean>
   markEmitted(sessionId: string, ids: string[], at: Date): Promise<number>
   listUnemitted(sessionId: string, chatId?: string): Promise<StoredMessage[]>
+  markPolicyHandled(sessionId: string, ids: string[], at: Date): Promise<number>
+  listPolicyPending(sessionId: string): Promise<StoredMessage[]>
 }
 
 export interface SessionPipelineOptions {
@@ -40,6 +43,8 @@ export interface SessionPipelineOptions {
   replayDelayMs: number
   maxReplayDelayMs: number
   fetchTimeoutMs: number
+  // How long the send policy may take to see one incoming message before it counts as failed
+  policyTimeoutMs: number
 }
 
 export interface SessionPipelineDeps {
@@ -52,11 +57,21 @@ export interface SessionPipelineDeps {
   unclaim(key: string): Promise<void>
   // A live incoming message was stored (not a recovered one), written by the sender at `sentAt`
   noteIncoming(sentAt: Date): void
+  // The send policy's view of an incoming message (clears the unreachable flag, matches the
+  // opt-out keywords of the session): true when the chat was just suppressed. Absent while nothing
+  // provides it; the messages then stay pending for a later start.
+  handleIncoming?(chatId: string, text: string): Promise<boolean>
   metrics: Metrics
 }
 
 // A failing stage logs once per this long; every failure is still counted
 const LOG_INTERVAL_MS = 10_000
+
+interface PolicyItem {
+  id: string
+  chatId: string
+  text: string
+}
 
 type MessageEventName = 'message' | 'message_create'
 type MessageEvent = Extract<ClientEvent, { event: MessageEventName }>
@@ -92,6 +107,13 @@ export class SessionEventPipeline {
   // Ids marked as emitted while a read of the table is running, which that read may still list
   private readonly readers = new Set<Set<string>>()
   private readonly lastLogged = new Map<PipelineStage, number>()
+  private policyRetry: NodeJS.Timeout | undefined
+  private policyFailures = 0
+  // The last pass found the policy unavailable: messages wait for the retry instead of each paying
+  // the timeout in front of the stream
+  private policyDown = false
+  // Chats suppressed whose chat_suppressed could not be published yet; retried while the process lives
+  private readonly unannounced = new Set<string>()
   private intake: Promise<void> = Promise.resolve()
   private stopListening: (() => void) | undefined
   private stopListeningSkipped: (() => void) | undefined
@@ -132,6 +154,9 @@ export class SessionEventPipeline {
     this.stopListeningSkipped?.()
     this.buffer?.close()
     for (const timer of this.replays.values()) clearTimeout(timer)
+    clearTimeout(this.policyRetry)
+    this.policyRetry = undefined
+    this.unannounced.clear()
     this.replays.clear()
     this.orphans.clear()
     await Promise.allSettled([this.intake, ...this.publishing])
@@ -170,6 +195,14 @@ export class SessionEventPipeline {
       // Only what is stored moves the baseline: a message that was not cannot be replayed
       if (stored && isMessageEvent(event) && !event.data.fromMe) {
         this.deps.noteIncoming(new Date(event.data.sentAt))
+        // Before the message goes out: a contact who asked to stop is suppressed by the time the
+        // consumer sees it. Only a message the policy has not seen: a repeat of an old one (the twin
+        // event, a re-emit after a reconnect) must not suppress a chat again after an operator lifted it.
+        if (stored.policyPending) {
+          await this.applyPolicy([
+            { id: event.data.id, chatId: event.data.chatId, text: event.data.body }
+          ])
+        }
       }
       this.route(event)
       if (event.event === 'ready') await this.recover()
@@ -186,9 +219,13 @@ export class SessionEventPipeline {
         const event: ClientEvent = { event: 'message', data: message }
         const key = this.dedupeKey(event)
         if (key !== undefined && !(await this.claim(key))) continue
-        if (!(await this.store(event))) {
+        const stored = await this.store(event)
+        if (!stored) {
           if (key !== undefined) await this.unclaim(key)
           continue
+        }
+        if (!message.fromMe && stored.policyPending) {
+          await this.applyPolicy([{ id: message.id, chatId: message.chatId, text: message.body }])
         }
         this.hold(message, 'reconcile')
         admitted++
@@ -225,16 +262,24 @@ export class SessionEventPipeline {
     }
   }
 
-  // false when the event could not be stored
-  private async store(event: ClientEvent): Promise<boolean> {
+  // false when the event could not be stored; otherwise whether the send policy still has to see it
+  private async store(event: ClientEvent): Promise<false | { policyPending: boolean }> {
     const { sessionId, storeBodies } = this.options
     try {
       if (isMessageEvent(event)) {
-        await this.deps.messages.upsert(toNewStoredMessage(sessionId, event.data, storeBodies))
+        const row = await this.deps.messages.upsert(
+          toNewStoredMessage(
+            sessionId,
+            event.data,
+            storeBodies,
+            this.deps.handleIncoming !== undefined
+          )
+        )
+        return { policyPending: !row.policyHandledAt }
       } else if (event.event === 'message_ack') {
         await this.deps.messages.updateAck(sessionId, event.data.message.id, event.data.ack)
       }
-      return true
+      return { policyPending: false }
     } catch (error) {
       this.fail('store', error)
       return false
@@ -419,10 +464,106 @@ export class SessionEventPipeline {
   // Feeds the stored, unpublished messages of the session back through the order buffer. It runs on
   // every `ready`: after a crash, a restart, or a reconnect.
   private async recover(): Promise<void> {
+    await this.retryPolicy()
     try {
       this.feed(await this.listUnemitted())
     } catch (error) {
       this.fail('replay', error)
+    }
+  }
+
+  // Shows the send policy each incoming message it has not seen, once, in order. The first failure
+  // stops the pass (the policy is down for all of them) and schedules another: a contact who asked
+  // to stop must not be left unsuppressed. A message is marked only after the policy answered.
+  // While the policy is known to be down only the retry asks it: the messages stay pending.
+  private async applyPolicy(items: PolicyItem[], retry = false): Promise<void> {
+    if (!this.deps.handleIncoming || (this.policyDown && !retry)) return
+    const { policyTimeoutMs } = this.options
+    for (const { id, chatId, text } of items) {
+      if (this.closed) return
+      try {
+        const suppressed = await withTimeout(
+          this.deps.handleIncoming(chatId, text),
+          policyTimeoutMs,
+          'send policy'
+        )
+        if (suppressed) await this.announceSuppressed(chatId)
+      } catch (error) {
+        this.fail('policy', error)
+        this.policyDown = true
+        this.schedulePolicyRetry()
+        return
+      }
+      // Not marked: the database is failing too, so the pass stops and the retry shows it again
+      if (!(await this.markPolicyHandled(id))) return
+    }
+    this.policyDown = false
+    this.settleBackoff()
+  }
+
+  // The backoff starts over once nothing is failing
+  private settleBackoff(): void {
+    if (!this.policyDown && this.unannounced.size === 0) this.policyFailures = 0
+  }
+
+  // The suppression is stored already and rejects every send; the event only tells the consumers.
+  // A failed publish is retried with the policy retry while the process lives (not after a crash).
+  private async announceSuppressed(chatId: string): Promise<void> {
+    try {
+      await this.deps.sequencer.publish(this.options.sessionId, 'chat_suppressed', {
+        chatId,
+        reason: 'opt_out'
+      })
+      this.unannounced.delete(chatId)
+    } catch (error) {
+      this.fail('publish', error)
+      this.unannounced.add(chatId)
+      this.schedulePolicyRetry()
+    }
+  }
+
+  private async markPolicyHandled(id: string): Promise<boolean> {
+    try {
+      await this.deps.messages.markPolicyHandled(this.options.sessionId, [id], new Date())
+      return true
+    } catch (error) {
+      // Seen but not marked: the retry shows it again, which the policy tolerates
+      this.fail('store', error)
+      this.schedulePolicyRetry()
+      return false
+    }
+  }
+
+  private schedulePolicyRetry(): void {
+    if (this.closed || this.policyRetry) return
+    const delayMs = Math.min(
+      this.options.replayDelayMs * 2 ** this.policyFailures,
+      this.options.maxReplayDelayMs
+    )
+    this.policyFailures++
+    this.policyRetry = setTimeout(() => {
+      this.policyRetry = undefined
+      this.enqueue(() => this.retryPolicy())
+    }, delayMs)
+  }
+
+  private async retryPolicy(): Promise<void> {
+    if (this.closed || !this.deps.handleIncoming) return
+    try {
+      const rows = await this.deps.messages.listPolicyPending(this.options.sessionId)
+      await this.applyPolicy(
+        rows.map(row => ({
+          id: row.id,
+          chatId: row.chatId,
+          text: row.body ?? row.policyText ?? ''
+        })),
+        true
+      )
+      for (const chatId of [...this.unannounced]) await this.announceSuppressed(chatId)
+      this.settleBackoff()
+    } catch (error) {
+      this.fail('policy', error)
+      this.schedulePolicyRetry()
     }
   }
 
@@ -532,6 +673,7 @@ const COLUMNS: Record<keyof NewStoredMessage, true> = {
   sentAt: true,
   receivedAt: true,
   origin: true,
+  policyText: true,
   dto: true
 }
 
