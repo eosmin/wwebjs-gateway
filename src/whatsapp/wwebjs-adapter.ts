@@ -56,7 +56,12 @@ import {
   type MessageMapOptions
 } from './mappers.js'
 import { failedAfterDispatch, isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
-import { MapperFailure, WaMappingError, WaOperationError } from './wa-errors.js'
+import {
+  MapperFailure,
+  WaChatNotFoundError,
+  WaMappingError,
+  WaOperationError
+} from './wa-errors.js'
 import type {
   AddParticipantsOptions,
   AddParticipantsResult,
@@ -348,7 +353,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
 
   private async chatById(operation: string, chatId: string): Promise<Chat | Channel> {
     const found: Chat | Channel | null | undefined = await this.client.getChatById(chatId)
-    if (!found) throw new WaOperationError(operation, 'Chat not found')
+    if (!found) throw new WaChatNotFoundError(operation)
     return found
   }
 

@@ -3,6 +3,7 @@ import { withTimeout } from '../common/lib/timeout.js'
 
 import {
   MapperFailure,
+  WaChatNotFoundError,
   WaDisconnectedError,
   WaMappingError,
   WaOperationError,
@@ -57,6 +58,7 @@ const isTimeout = (error: unknown): boolean =>
 // through `onFailure` to log what it deems safe.
 function translate(operation: string, error: unknown): Error {
   if (
+    error instanceof WaChatNotFoundError ||
     error instanceof WaDisconnectedError ||
     error instanceof WaTimeoutError ||
     error instanceof WaOperationError ||

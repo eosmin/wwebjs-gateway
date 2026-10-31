@@ -1,6 +1,7 @@
 import { isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
 import {
   MapperFailure,
+  WaChatNotFoundError,
   WaDisconnectedError,
   WaMappingError,
   WaOperationError,
@@ -70,6 +71,16 @@ describe('runWaCall', () => {
 
     expect(error).toBeInstanceOf(WaTimeoutError)
     expect(error).toMatchObject({ operation: 'downloadMedia', dispatched: true })
+  })
+
+  it('lets a chat that does not exist through as it is, so that it answers 404', async () => {
+    const missing = new WaChatNotFoundError('getChatById')
+
+    const error: unknown = await runWaCall('getChatById', 1000, () =>
+      Promise.reject(missing)
+    ).catch((e: unknown) => e)
+
+    expect(error).toBe(missing)
   })
 
   it('turns any other failure, even a thrown string, into WaOperationError', async () => {

@@ -1,4 +1,4 @@
-import { ConflictError, WhatsAppError } from '../common/errors.js'
+import { ConflictError, NotFoundError, WhatsAppError } from '../common/errors.js'
 
 // What the adapter throws, so that no Puppeteer or wwebjs error ever leaves it
 
@@ -24,6 +24,14 @@ export class WaTimeoutError extends WhatsAppError {
     message?: string
   ) {
     super('WHATSAPP_TIMEOUT', message, { operation, dispatched })
+  }
+}
+
+// The page has no chat with that id: nothing was sent or changed, and it is the caller's id that is
+// wrong, so it answers 404 and not a WhatsApp failure
+export class WaChatNotFoundError extends NotFoundError {
+  constructor(readonly operation: string) {
+    super('CHAT_NOT_FOUND', undefined, { operation })
   }
 }
 

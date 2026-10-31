@@ -9,6 +9,7 @@ import { MessageDto } from '../types/dto.js'
 import { WA_EVENTS, type WaEventName } from '../types/events.js'
 
 import {
+  WaChatNotFoundError,
   WaDisconnectedError,
   WaMappingError,
   WaOperationError,
@@ -672,6 +673,23 @@ describe('calls', () => {
     await expect(h.adapter.addParticipants('g@g.us', ['a@c.us'])).resolves.toEqual({
       'a@c.us': { code: 200, message: 'ok', isInviteV4Sent: false }
     })
+  })
+
+  it('answers a chat the page does not have as not found, in the chat operations and the group ones', async () => {
+    const h = harness()
+    stub(h.client, 'getChatById').mockResolvedValue(undefined)
+    ready(h)
+
+    await expect(h.adapter.getChatById('x@c.us')).rejects.toBeInstanceOf(WaChatNotFoundError)
+    await expect(h.adapter.sendChatState('x@c.us', 'typing')).rejects.toBeInstanceOf(
+      WaChatNotFoundError
+    )
+    await expect(h.adapter.fetchMessages('x@c.us')).rejects.toBeInstanceOf(WaChatNotFoundError)
+    await expect(h.adapter.clearChatMessages('x@c.us')).rejects.toBeInstanceOf(WaChatNotFoundError)
+    await expect(h.adapter.deleteChat('x@c.us')).rejects.toBeInstanceOf(WaChatNotFoundError)
+    await expect(h.adapter.setGroupSubject('x@g.us', 'x')).rejects.toBeInstanceOf(
+      WaChatNotFoundError
+    )
   })
 
   it('refuses a group call on a chat that is not a group', async () => {

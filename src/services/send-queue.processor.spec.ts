@@ -4,6 +4,7 @@ import type { PolicyDecision } from '../types/send-policy.dto.js'
 import { runWaCall } from '../whatsapp/wa-call.js'
 import * as waErrors from '../whatsapp/wa-errors.js'
 import {
+  WaChatNotFoundError,
   WaDisconnectedError,
   WaMappingError,
   WaOperationError,
@@ -258,6 +259,10 @@ describe('SendJobProcessor', () => {
         make: () => new WaOperationError('sendMessage', 'rejected'),
         code: 'WHATSAPP_ERROR'
       },
+      // Raised only by the adapter's chatById, which no send uses (sendMessage looks the chat up in the
+      // page and answers null, which is a WaOperationError). Were it raised, nothing was sent, so
+      // afterDispatch would fail the job with CHAT_NOT_FOUND and not with UNKNOWN_OUTCOME
+      WaChatNotFoundError: { make: undefined, code: undefined },
       // Raised inside the adapter and always translated by runWaCall; it never reaches a worker
       MapperFailure: { make: undefined, code: undefined }
     } as const
@@ -279,6 +284,16 @@ describe('SendJobProcessor', () => {
       const result = await run(build())
 
       expect(result).toMatchObject({ outcome: { ok: false, error: { code } }, hardFailure: true })
+      expect(client.callsOf('sendMessage')).toHaveLength(1)
+    })
+
+    it('ends a chat the page does not have as CHAT_NOT_FOUND, not as an unknown outcome', async () => {
+      client.script('sendMessage', () => {
+        throw new WaChatNotFoundError('sendMessage')
+      })
+      const result = await run(build())
+
+      expect(result.outcome).toMatchObject({ ok: false, error: { code: 'CHAT_NOT_FOUND' } })
       expect(client.callsOf('sendMessage')).toHaveLength(1)
     })
 

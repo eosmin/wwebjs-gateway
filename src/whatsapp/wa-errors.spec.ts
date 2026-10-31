@@ -1,8 +1,13 @@
 import { HttpStatus } from '@nestjs/common'
 
-import { AppError, ConflictError, WhatsAppError } from '../common/errors.js'
+import { AppError, ConflictError, NotFoundError, WhatsAppError } from '../common/errors.js'
 
-import { WaDisconnectedError, WaOperationError, WaTimeoutError } from './wa-errors.js'
+import {
+  WaChatNotFoundError,
+  WaDisconnectedError,
+  WaOperationError,
+  WaTimeoutError
+} from './wa-errors.js'
 
 describe('wa-errors', () => {
   it('maps a lost browser to SESSION_NOT_READY (409)', () => {
@@ -67,5 +72,17 @@ describe('wa-errors', () => {
     expect(timeout).not.toBeInstanceOf(WaDisconnectedError)
     expect(new WaOperationError('x')).not.toBeInstanceOf(WaTimeoutError)
     expect(new WaDisconnectedError('x', false)).not.toBeInstanceOf(WhatsAppError)
+  })
+
+  it('maps a chat WhatsApp Web does not have to CHAT_NOT_FOUND (404), not to a WhatsApp failure', () => {
+    const error = new WaChatNotFoundError('sendChatState')
+
+    expect(error).toBeInstanceOf(NotFoundError)
+    expect(error).not.toBeInstanceOf(WhatsAppError)
+    expect(error.name).toBe('WaChatNotFoundError')
+    expect(error.code).toBe('CHAT_NOT_FOUND')
+    expect(error.status).toBe(HttpStatus.NOT_FOUND)
+    expect(error.operation).toBe('sendChatState')
+    expect(error.details).toEqual({ operation: 'sendChatState' })
   })
 })
