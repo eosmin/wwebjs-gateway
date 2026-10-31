@@ -87,8 +87,17 @@ export const Suppression = z.strictObject({
 })
 export class SuppressionDto extends createZodDto(Suppression) {}
 
-export const SuppressionList = z.strictObject({ items: z.array(Suppression) })
+export const SuppressionList = z.strictObject({
+  items: z.array(Suppression),
+  nextCursor: z.string().nullable().describe('The `cursor` of the next page; null on the last one')
+})
 export class SuppressionListDto extends createZodDto(SuppressionList) {}
+
+export const SuppressionListQuery = z.strictObject({
+  cursor: z.string().min(1).max(512).optional().describe('The `nextCursor` of the previous page'),
+  limit: z.coerce.number().int().min(1).max(500).default(100)
+})
+export class SuppressionListQueryDto extends createZodDto(SuppressionListQuery) {}
 
 export const AddedSuppression = Suppression.extend({
   created: z.boolean().describe('False when the chat was already on the list; nothing changed')

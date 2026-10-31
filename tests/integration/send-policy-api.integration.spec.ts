@@ -289,6 +289,32 @@ describe('send policy API (integration)', () => {
       ).not.toContainEqual(expect.objectContaining({ chatId }))
     })
 
+    it('lists the entries a page at a time, newest first, without skipping or repeating', async () => {
+      const base = Math.floor(Math.random() * 1e9) * 10
+      const ids = [1, 2, 3, 4, 5].map(n => `${base + n}@c.us`)
+      for (const chatId of ids) await call('POST', '/suppressions', { chatId })
+
+      const seen: string[] = []
+      let cursor: string | null = null
+      let pages = 0
+      do {
+        const query: string = cursor === null ? '?limit=2' : `?limit=2&cursor=${cursor}`
+        const page = (await call('GET', `/suppressions${query}`)).json<{
+          items: Suppression[]
+          nextCursor: string | null
+        }>()
+        seen.push(...page.items.map(item => item.chatId))
+        cursor = page.nextCursor
+        pages += 1
+      } while (cursor !== null && pages < 100)
+
+      expect(new Set(seen).size).toBe(seen.length)
+      expect(seen).toEqual(expect.arrayContaining(ids))
+      expect((await call('GET', '/suppressions?cursor=nope')).statusCode).toBe(400)
+      expect((await call('GET', '/suppressions?limit=0')).statusCode).toBe(400)
+      for (const chatId of ids) await call('DELETE', `/suppressions/${chatId}`)
+    })
+
     it('turns a phone number into the id the sends use', async () => {
       const number = `52${Math.floor(Math.random() * 1e10)
         .toString()

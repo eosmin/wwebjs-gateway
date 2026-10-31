@@ -7,7 +7,8 @@ import {
   HttpStatus,
   Inject,
   Param,
-  Post
+  Post,
+  Query
 } from '@nestjs/common'
 import { ZodResponse } from 'nestjs-zod'
 
@@ -17,6 +18,7 @@ import {
   AddSuppressionBodyDto,
   AddedSuppressionDto,
   SuppressionListDto,
+  SuppressionListQueryDto,
   SuppressionParamsDto,
   UnreachableChatsDto
 } from '../../types/send-policy-api.dto.js'
@@ -45,7 +47,7 @@ export class SuppressionsController {
     scope: 'read',
     summary: 'List the suppressed chats of a session',
     description:
-      'Every chat that rejects sends with `RECIPIENT_SUPPRESSED`, newest first, with why it is there (`manual` from the API, `opt_out` from an opt-out keyword).',
+      'Every chat that rejects sends with `RECIPIENT_SUPPRESSED`, newest first, with why it is there (`manual` from the API, `opt_out` from an opt-out keyword). Page with `cursor`: take `nextCursor` of one page as the `cursor` of the next, and stop when it is null.',
     errors: ON_SESSION,
     examples: {
       request: null,
@@ -57,14 +59,18 @@ export class SuppressionsController {
             note: 'asked by phone',
             createdAt: '2026-10-31T12:00:00.000Z'
           }
-        ]
+        ],
+        nextCursor: null
       }
     },
     wwebjs: [],
     gateway: true
   })
-  async list(@Param() { sessionId }: SessionIdParamsDto): Promise<SuppressionListDto> {
-    return { items: await this.service.listSuppressions(sessionId) }
+  list(
+    @Param() { sessionId }: SessionIdParamsDto,
+    @Query() query: SuppressionListQueryDto
+  ): Promise<SuppressionListDto> {
+    return this.service.listSuppressions(sessionId, query)
   }
 
   @Post(':sessionId/suppressions')

@@ -1,4 +1,4 @@
-import { AppError, NotFoundError } from '../common/errors.js'
+import { AppError, NotFoundError, ValidationError } from '../common/errors.js'
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import type { SuppressionsRepository } from '../database/repositories/suppressions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
@@ -8,6 +8,12 @@ import type { RecipientResolverService } from './recipient-resolver.service.js'
 import { SendPolicyAdminService } from './send-policy-admin.service.js'
 import { PolicyUnavailable, type SendPolicyService } from './send-policy.service.js'
 import type { PolicyStateStore } from './send-policy.store.js'
+
+// The service only asks whether an error is a foreign key violation; `db-errors.spec.ts` covers the
+// check on real Prisma errors, which only `src/database` may build
+jest.mock('../database/db-errors.js', () => ({
+  isForeignKeyViolation: (error: unknown) => error instanceof Error && error.message === 'fk'
+}))
 
 const LIMITS = {
   allowColdSends: false,
@@ -83,7 +89,9 @@ describe('SendPolicyAdminService', () => {
     })
 
     it('answers NOT_FOUND for a session that does not exist', async () => {
-      const { service } = setup({ session: null })
+      const { service, policy } = setup({ session: null })
+      // What the policy does for a row it cannot find
+      policy.usage.mockRejectedValue(new PolicyUnavailable('settings'))
 
       await expect(service.get('s1')).rejects.toBeInstanceOf(NotFoundError)
       await expect(service.usage('s1')).rejects.toBeInstanceOf(NotFoundError)
@@ -150,6 +158,35 @@ describe('SendPolicyAdminService', () => {
 
       await expect(service.usage('s1')).rejects.toBeInstanceOf(AppError)
     })
+
+    it('does not read the session row itself when the policy answers', async () => {
+      const { service, policy, sessions } = setup()
+      policy.usage.mockResolvedValue({
+        at: CREATED_AT.getTime(),
+        factor: 1,
+        warmup: { factor: 1, linkedAt: null, days: 14 },
+        throttle: { active: false, until: null },
+        health: { samples: 0, hardFailures: 0, maxBadRatio: 0.3, minSamples: 10 },
+        coldSends: { used: 0, limit: 20 },
+        lookups: { used: 0, limit: 100 },
+        buckets: {
+          perMinute: { available: 1, limit: 1 },
+          perHour: { available: 1, limit: 1 },
+          perDay: { available: 1, limit: 1 }
+        }
+      })
+
+      await service.usage('s1')
+
+      expect(sessions.findById).not.toHaveBeenCalled()
+    })
+
+    it('answers NOT_FOUND, not INTERNAL, when the policy cannot answer for a session that is gone', async () => {
+      const { service, policy } = setup({ session: null })
+      policy.usage.mockRejectedValue(new PolicyUnavailable('settings'))
+
+      await expect(service.usage('s1')).rejects.toBeInstanceOf(NotFoundError)
+    })
   })
 
   describe('suppressions', () => {
@@ -204,6 +241,22 @@ describe('SendPolicyAdminService', () => {
       expect(suppressions.add).not.toHaveBeenCalled()
     })
 
+    it('answers NOT_FOUND when the session is deleted during the number look-up', async () => {
+      const { service, suppressions } = setup()
+      suppressions.add.mockRejectedValue(new Error('fk'))
+
+      await expect(service.addSuppression('s1', 'a@c.us', undefined)).rejects.toBeInstanceOf(
+        NotFoundError
+      )
+    })
+
+    it('does not hide any other failure of the write', async () => {
+      const { service, suppressions } = setup()
+      suppressions.add.mockRejectedValue(new Error('db down'))
+
+      await expect(service.addSuppression('s1', 'a@c.us', undefined)).rejects.toThrow('db down')
+    })
+
     it('removes a chat, and answers NOT_FOUND for one that is not listed', async () => {
       const { service, suppressions } = setup()
       await service.removeSuppression('s1', 'a@c.us')
@@ -218,9 +271,54 @@ describe('SendPolicyAdminService', () => {
         { chatId: 'a@c.us', reason: 'opt_out', note: null, createdAt: CREATED_AT }
       ] as never)
 
-      await expect(service.listSuppressions('s1')).resolves.toEqual([
-        { chatId: 'a@c.us', reason: 'opt_out', note: null, createdAt: '2026-10-31T12:00:00.000Z' }
-      ])
+      await expect(service.listSuppressions('s1', { limit: 100 })).resolves.toEqual({
+        items: [
+          { chatId: 'a@c.us', reason: 'opt_out', note: null, createdAt: '2026-10-31T12:00:00.000Z' }
+        ],
+        nextCursor: null
+      })
+      expect(suppressions.list).toHaveBeenCalledWith('s1', 101, undefined)
+    })
+
+    it('gives a cursor when there is another page and continues from it', async () => {
+      const { service, suppressions } = setup()
+      const row = (chatId: string) => ({
+        chatId,
+        reason: 'manual',
+        note: null,
+        createdAt: CREATED_AT
+      })
+      suppressions.list.mockResolvedValueOnce([
+        row('c@c.us'),
+        row('b@c.us'),
+        row('a@c.us')
+      ] as never)
+
+      const first = await service.listSuppressions('s1', { limit: 2 })
+
+      expect(first.items.map(item => item.chatId)).toEqual(['c@c.us', 'b@c.us'])
+      expect(first.nextCursor).not.toBeNull()
+
+      suppressions.list.mockResolvedValueOnce([row('a@c.us')] as never)
+      const second = await service.listSuppressions('s1', {
+        limit: 2,
+        cursor: first.nextCursor ?? ''
+      })
+
+      expect(suppressions.list).toHaveBeenLastCalledWith('s1', 3, {
+        createdAt: CREATED_AT,
+        chatId: 'b@c.us'
+      })
+      expect(second).toMatchObject({ items: [{ chatId: 'a@c.us' }], nextCursor: null })
+    })
+
+    it('refuses a cursor that is not one of ours, before listing anything', async () => {
+      const { service, suppressions } = setup()
+
+      await expect(
+        service.listSuppressions('s1', { limit: 10, cursor: 'not-a-cursor' })
+      ).rejects.toBeInstanceOf(ValidationError)
+      expect(suppressions.list).not.toHaveBeenCalled()
     })
   })
 

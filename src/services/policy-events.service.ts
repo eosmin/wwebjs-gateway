@@ -2,12 +2,14 @@ import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } f
 
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import { EventPipelineService } from '../whatsapp/event-pipeline.service.js'
+import { SessionManager } from '../whatsapp/session-manager.service.js'
 
 import { SendPolicyAdminService } from './send-policy-admin.service.js'
 import { SendPolicyService, type DecisionEvent } from './send-policy.service.js'
 
 // What the send policy reports about itself: its decisions go to the metrics, and a chat becoming
-// unreachable (or reachable again) is published as `chat_unreachable`
+// unreachable (or reachable again) is published as `chat_unreachable`, and the gauge of suppressed
+// chats follows the sessions that are deleted
 @Injectable()
 export class PolicyEventsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PolicyEventsService.name)
@@ -17,7 +19,8 @@ export class PolicyEventsService implements OnModuleInit, OnModuleDestroy {
     @Inject(SendPolicyService) private readonly policy: SendPolicyService,
     @Inject(SendPolicyAdminService) private readonly admin: SendPolicyAdminService,
     @Inject(EventPipelineService) private readonly pipeline: EventPipelineService,
-    @Inject(MetricsService) private readonly metrics: MetricsService
+    @Inject(MetricsService) private readonly metrics: MetricsService,
+    @Inject(SessionManager) private readonly sessions: SessionManager
   ) {}
 
   onModuleInit(): void {
@@ -41,6 +44,8 @@ export class PolicyEventsService implements OnModuleInit, OnModuleDestroy {
         return suppressed
       })
     )
+    // The lists of a deleted session go with its row, so the gauge drops by their size
+    this.stops.push(this.sessions.onRemoved(() => this.admin.refreshGauge()))
     void this.admin.refreshGauge()
   }
 
