@@ -27,7 +27,8 @@ const OPTIONS: SessionPipelineOptions = {
   storeBodies: true,
   replayDelayMs: 5000,
   maxReplayDelayMs: 60_000,
-  fetchTimeoutMs: 10_000
+  fetchTimeoutMs: 10_000,
+  policyTimeoutMs: 2000
 }
 
 type Row = StoredMessage
@@ -38,17 +39,21 @@ class MemoryMessages implements PipelineMessages {
   failUpsert = false
   upsertError = new Error('db down')
 
-  upsert(message: NewStoredMessage): Promise<unknown> {
+  upsert(message: NewStoredMessage): Promise<Row> {
     if (this.failUpsert) return Promise.reject(this.upsertError)
-    if (!this.rows.has(message.id)) {
-      this.rows.set(message.id, {
+    let row = this.rows.get(message.id)
+    if (!row) {
+      row = {
         ...message,
         origin: message.origin ?? null,
         emittedAt: null,
+        policyHandledAt: null,
+        policyText: message.policyText ?? null,
         createdAt: new Date()
-      } as unknown as Row)
+      } as unknown as Row
+      this.rows.set(message.id, row)
     }
-    return Promise.resolve()
+    return Promise.resolve(row)
   }
 
   updateAck(_sessionId: string, id: string, ack: number): Promise<boolean> {
@@ -68,6 +73,27 @@ class MemoryMessages implements PipelineMessages {
       }
     }
     return Promise.resolve(count)
+  }
+
+  markPolicyHandled(_sessionId: string, ids: string[], at: Date): Promise<number> {
+    let count = 0
+    for (const id of ids) {
+      const row = this.rows.get(id)
+      if (row && row.policyHandledAt === null) {
+        row.policyHandledAt = at
+        row.policyText = null
+        count += 1
+      }
+    }
+    return Promise.resolve(count)
+  }
+
+  listPolicyPending(): Promise<Row[]> {
+    return Promise.resolve(
+      [...this.rows.values()]
+        .filter(row => row.direction === 'in' && row.policyHandledAt === null)
+        .sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime())
+    )
   }
 
   listUnemitted(_sessionId: string, chatId?: string): Promise<Row[]> {
@@ -95,6 +121,7 @@ interface Env {
   claim: jest.Mock<Promise<boolean>, [string]>
   unclaim: jest.Mock<Promise<void>, [string]>
   noteIncoming: jest.Mock<void, [Date]>
+  handleIncoming: jest.Mock<Promise<boolean>, [string, string]>
 }
 
 // The database and Redis (the dedupe keys and the seq counter) outlive a pipeline, as they outlive
@@ -113,6 +140,7 @@ function environment(previous?: Env): Env {
     nextSeq: jest.fn((_sessionId: string) => Promise.resolve(++counter.seq)),
     claim: jest.fn(key => Promise.resolve(!seen.has(key) && Boolean(seen.add(key)))),
     noteIncoming: jest.fn<void, [Date]>(),
+    handleIncoming: jest.fn((_chatId: string, _text: string) => Promise.resolve(false)),
     unclaim: jest.fn((key: string) => {
       seen.delete(key)
       return Promise.resolve()
@@ -134,6 +162,7 @@ function start(env: Env, options: Partial<SessionPipelineOptions> = {}): Session
       claim: key => env.claim(key),
       unclaim: key => env.unclaim(key),
       noteIncoming: at => env.noteIncoming(at),
+      handleIncoming: (chatId, text) => env.handleIncoming(chatId, text),
       metrics: env.metrics.metrics
     }
   )
@@ -1452,6 +1481,221 @@ describe('SessionEventPipeline (review findings)', () => {
   })
 })
 
+describe('SessionEventPipeline send policy', () => {
+  it('shows an incoming message to the policy before it is published, then marks it handled', async () => {
+    const env = environment()
+    open(env)
+
+    env.client.emit(message(incoming('a', 1)))
+    await advance(0)
+
+    expect(env.handleIncoming).toHaveBeenCalledWith(CHAT, 'text of a')
+    expect(env.messages.rows.get('a')?.policyHandledAt).toEqual(NOW)
+    expect(names(env)).toEqual(['message:a'])
+  })
+
+  it('publishes chat_suppressed ahead of the message when the policy suppressed the chat', async () => {
+    const env = environment()
+    env.handleIncoming.mockResolvedValue(true)
+    open(env)
+
+    env.client.emit(message(incoming('a', 1, { body: 'stop' })))
+    await advance(0)
+
+    expect(names(env)).toEqual(['chat_suppressed:', 'message:a'])
+    expect(env.published[0]?.data).toEqual({ chatId: CHAT, reason: 'opt_out' })
+  })
+
+  it('does not show our own messages to the policy', async () => {
+    const env = environment()
+    open(env)
+
+    env.client.emit(message(incoming('a', 1, { fromMe: true })))
+    await advance(0)
+
+    expect(env.handleIncoming).not.toHaveBeenCalled()
+  })
+
+  it('still publishes the message when the policy fails, and retries until it answers', async () => {
+    const env = environment()
+    env.handleIncoming.mockRejectedValueOnce(new Error('redis down'))
+    env.handleIncoming.mockResolvedValue(true)
+    open(env)
+
+    env.client.emit(message(incoming('a', 1, { body: 'stop' })))
+    await advance(0)
+
+    expect(names(env)).toEqual(['message:a'])
+    expect(env.messages.rows.get('a')?.policyHandledAt).toBeNull()
+    expect(await countOf(env, 'policy')).toBe(1)
+
+    await advance(OPTIONS.replayDelayMs)
+
+    expect(env.handleIncoming).toHaveBeenCalledTimes(2)
+    expect(env.messages.rows.get('a')?.policyHandledAt).not.toBeNull()
+    expect(names(env)).toEqual(['message:a', 'chat_suppressed:'])
+  })
+
+  it('counts a policy that never answers as a failure', async () => {
+    const env = environment()
+    env.handleIncoming.mockReturnValueOnce(new Promise(() => undefined))
+    open(env)
+
+    env.client.emit(message(incoming('a', 1)))
+    await advance(OPTIONS.policyTimeoutMs)
+
+    expect(await countOf(env, 'policy')).toBe(1)
+    expect(names(env)).toEqual(['message:a'])
+  })
+
+  it('shows the policy the messages a crash left unseen when the session is ready again', async () => {
+    const first = environment()
+    first.handleIncoming.mockRejectedValue(new Error('down'))
+    const crashed = open(first)
+    first.client.emit(message(incoming('a', 1, { body: 'stop' })))
+    await advance(0)
+    await crashed.close()
+
+    const second = environment(first)
+    second.handleIncoming.mockResolvedValue(true)
+    open(second)
+    second.client.emit({ event: 'ready', data: {} })
+    await advance(0)
+
+    expect(second.handleIncoming).toHaveBeenCalledWith(CHAT, 'stop')
+    expect(second.messages.rows.get('a')?.policyHandledAt).not.toBeNull()
+    expect(names(second)).toContain('chat_suppressed:')
+  })
+
+  it('does nothing while no policy is provided, and leaves the message pending', async () => {
+    const env = environment()
+    const sequencer = new EventSequencer({
+      nextSeq: sessionId => env.nextSeq(sessionId),
+      publish: envelope => env.published.push(envelope)
+    })
+    const pipeline = new SessionEventPipeline(OPTIONS, {
+      client: env.client,
+      messages: env.messages,
+      sequencer,
+      claim: key => env.claim(key),
+      unclaim: key => env.unclaim(key),
+      noteIncoming: at => env.noteIncoming(at),
+      metrics: env.metrics.metrics
+    })
+    pipeline.start()
+    pipelines.push(pipeline)
+
+    env.client.emit(message(incoming('a', 1)))
+    await advance(0)
+
+    expect(names(env)).toEqual(['message:a'])
+    expect(env.messages.rows.get('a')?.policyHandledAt).toBeNull()
+  })
+
+  it('keeps a short text for the policy while bodies are not stored, and drops it once seen', async () => {
+    const env = environment()
+    env.handleIncoming.mockRejectedValueOnce(new Error('down'))
+    open(env, { storeBodies: false })
+
+    env.client.emit(message(incoming('a', 1, { body: 'stop' })))
+    await advance(0)
+
+    expect(env.messages.rows.get('a')?.body).toBeNull()
+    expect(env.messages.rows.get('a')?.policyText).toBe('stop')
+
+    await advance(OPTIONS.replayDelayMs)
+
+    expect(env.handleIncoming).toHaveBeenLastCalledWith(CHAT, 'stop')
+    expect(env.messages.rows.get('a')?.policyText).toBeNull()
+  })
+
+  it('keeps no text for the policy when it is long or when bodies are stored', async () => {
+    const env = environment()
+    open(env, { storeBodies: false })
+
+    env.client.emit(message(incoming('long', 1, { body: 'x'.repeat(65) })))
+    await advance(0)
+    expect(env.messages.rows.get('long')?.policyText).toBeNull()
+
+    const stored = environment()
+    open(stored)
+    stored.client.emit(message(incoming('b', 1, { body: 'stop' })))
+    await advance(0)
+    expect(stored.messages.rows.get('b')?.policyText).toBeNull()
+  })
+
+  it('retries a chat_suppressed that could not be published', async () => {
+    const env = environment()
+    env.handleIncoming.mockResolvedValue(true)
+    env.nextSeq.mockRejectedValueOnce(new Error('redis down'))
+    open(env)
+
+    env.client.emit(message(incoming('a', 1, { body: 'stop' })))
+    await advance(0)
+    expect(names(env)).toEqual(['message:a'])
+
+    await advance(OPTIONS.replayDelayMs)
+
+    expect(names(env)).toEqual(['message:a', 'chat_suppressed:'])
+  })
+
+  it('does not show the policy a message it has already seen again', async () => {
+    const env = environment()
+    open(env)
+
+    env.client.emit(message(incoming('a', 1, { body: 'stop' })))
+    env.client.emit(created(incoming('a', 1, { body: 'stop' })))
+    await advance(0)
+
+    expect(env.handleIncoming).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the messages pending, without waiting, while the policy is known to be down', async () => {
+    const env = environment()
+    env.handleIncoming.mockRejectedValueOnce(new Error('down'))
+    open(env)
+
+    env.client.emit(message(incoming('a', 1)))
+    env.client.emit(message(incoming('b', 1)))
+    await advance(0)
+
+    expect(env.handleIncoming).toHaveBeenCalledTimes(1)
+    expect(names(env)).toEqual(['message:a', 'message:b'])
+
+    await advance(OPTIONS.replayDelayMs)
+
+    expect(env.handleIncoming).toHaveBeenCalledTimes(3)
+    expect(env.messages.rows.get('b')?.policyHandledAt).not.toBeNull()
+  })
+
+  it('stops the pass and backs off when a message cannot be marked as handled', async () => {
+    const env = environment()
+    jest.spyOn(env.messages, 'markPolicyHandled').mockRejectedValue(new Error('db down'))
+    open(env)
+
+    env.client.emit(message(incoming('a', 1)))
+    await advance(0)
+    await advance(OPTIONS.replayDelayMs)
+    await advance(OPTIONS.replayDelayMs)
+
+    // 5 s then 10 s: the second wait is not over yet
+    expect(env.handleIncoming).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops retrying when it is closed', async () => {
+    const env = environment()
+    env.handleIncoming.mockRejectedValue(new Error('down'))
+    const pipeline = open(env)
+
+    env.client.emit(message(incoming('a', 1)))
+    await advance(0)
+    await pipeline.close()
+    await advance(OPTIONS.maxReplayDelayMs)
+
+    expect(env.handleIncoming).toHaveBeenCalledTimes(1)
+  })
+})
+
 function incomingRow(id: string): Row {
   const dto = incoming(id, 10)
   return {
@@ -1467,6 +1711,8 @@ function incomingRow(id: string): Row {
     sentAt: new Date(dto.sentAt),
     receivedAt: new Date(dto.receivedAt),
     emittedAt: null,
+    policyHandledAt: null,
+    policyText: null,
     origin: null,
     dto: JSON.parse(JSON.stringify(dto)) as Row['dto'],
     createdAt: new Date()

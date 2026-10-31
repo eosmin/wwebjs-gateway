@@ -159,31 +159,38 @@ model InboundHook {
 
 model StoredMessage {
   // Serialized wwebjs id
-  id         String
-  sessionId  String
-  session    Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  chatId     String
-  direction  MessageDirection
-  fromMe     Boolean
-  type       String
+  id              String
+  sessionId       String
+  session         Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  chatId          String
+  direction       MessageDirection
+  fromMe          Boolean
+  type            String
   // Null when STORE_MESSAGE_BODIES=false
-  body       String?
-  hasMedia   Boolean
+  body            String?
+  hasMedia        Boolean
   // Null when WhatsApp gave the message none (some incoming ones); unknown, not pending (0)
-  ack        Int?
+  ack             Int?
   // Sender timestamp
-  sentAt     DateTime         @db.Timestamptz(3)
+  sentAt          DateTime         @db.Timestamptz(3)
   // Gateway arrival
-  receivedAt DateTime         @db.Timestamptz(3)
+  receivedAt      DateTime         @db.Timestamptz(3)
   // Set when the event was published; null = still pending or held (crash recovery)
-  emittedAt  DateTime?        @db.Timestamptz(3)
-  origin     Json?
-  dto        Json
-  createdAt  DateTime         @default(now()) @db.Timestamptz(3)
+  emittedAt       DateTime?        @db.Timestamptz(3)
+  // Set when the send policy has seen this incoming message (opt-out match, unreachable flag
+  // cleared); null = still pending, retried after a crash. Outgoing rows keep it null.
+  policyHandledAt DateTime?        @db.Timestamptz(3)
+  // The short text of an incoming message, kept only while STORE_MESSAGE_BODIES=false and the policy
+  // has not seen it, so an opt-out survives a crash; cleared when policyHandledAt is set
+  policyText      String?
+  origin          Json?
+  dto             Json
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
 
   @@id([sessionId, id])
   @@index([sessionId, chatId, sentAt(sort: Desc)])
   @@index([sessionId, emittedAt])
+  @@index([sessionId, direction, policyHandledAt])
   @@map("messages")
 }
 

@@ -65,7 +65,7 @@ export const METRIC_DEFINITIONS = {
   pipelineErrors: {
     name: 'gw_pipeline_errors_total',
     type: 'counter',
-    help: 'Failures of the event pipeline, by stage (dedupe, store, publish, replay, event).',
+    help: 'Failures of the event pipeline, by stage (dedupe, store, publish, replay, event, policy).',
     labels: ['stage']
   },
   sends: {

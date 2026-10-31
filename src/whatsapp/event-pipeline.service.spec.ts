@@ -20,7 +20,15 @@ interface Built {
   bus: EventBusService
   published: EventEnvelope[]
   redis: { status: string; incr: jest.Mock; set: jest.Mock; del: jest.Mock }
-  messages: Record<'upsert' | 'updateAck' | 'markEmitted' | 'listUnemitted', jest.Mock>
+  messages: Record<
+    | 'upsert'
+    | 'updateAck'
+    | 'markEmitted'
+    | 'listUnemitted'
+    | 'markPolicyHandled'
+    | 'listPolicyPending',
+    jest.Mock
+  >
   sessions: Record<'findById' | 'update' | 'raiseSeqHighWater', jest.Mock>
 }
 
@@ -41,7 +49,9 @@ function build(env: Record<string, string> = {}): Built {
     upsert: jest.fn(() => Promise.resolve({})),
     updateAck: jest.fn(() => Promise.resolve(true)),
     markEmitted: jest.fn(() => Promise.resolve(1)),
-    listUnemitted: jest.fn(() => Promise.resolve([]))
+    listUnemitted: jest.fn(() => Promise.resolve([])),
+    markPolicyHandled: jest.fn(() => Promise.resolve(1)),
+    listPolicyPending: jest.fn(() => Promise.resolve([]))
   }
   const sessions = {
     findById: jest.fn(() => Promise.resolve({ seqHighWater: 0n })),
@@ -160,6 +170,53 @@ describe('EventPipelineService', () => {
 
     expect(first.listenerCount).toBe(0)
     expect(second.listenerCount).toBe(1)
+  })
+
+  it('hands the registered send policy the incoming messages of a session opened afterwards', async () => {
+    const { service, published, messages } = build()
+    const hook = jest.fn((_sessionId: string, _chatId: string, _text: string) =>
+      Promise.resolve(true)
+    )
+    const client = new FakeWhatsAppClient(SESSION)
+    service.setIncomingPolicy(hook)
+
+    await service.open(SESSION, client, { orderingEnabled: true })
+    client.emit({
+      event: 'message',
+      data: buildMessageDto({ id: 'a', fromMe: false, body: 'stop', chatId: 'c@c.us' })
+    })
+    await flush()
+
+    expect(hook).toHaveBeenCalledWith(SESSION, 'c@c.us', 'stop')
+    expect(messages.markPolicyHandled).toHaveBeenCalledWith(SESSION, ['a'], expect.any(Date))
+    expect(published.map(envelope => envelope.event)).toEqual(['chat_suppressed', 'message'])
+  })
+
+  it('uses a policy registered after the session opened', async () => {
+    const { service } = build()
+    const hook = jest.fn((_s: string, _c: string, _t: string) => Promise.resolve(false))
+    const client = new FakeWhatsAppClient(SESSION)
+
+    await service.open(SESSION, client, { orderingEnabled: true })
+    service.setIncomingPolicy(hook)
+    client.emit({ event: 'message', data: buildMessageDto({ id: 'a', fromMe: false }) })
+    await flush()
+
+    expect(hook).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops handing messages to a policy that was removed', async () => {
+    const { service, messages } = build()
+    const hook = jest.fn((_s: string, _c: string, _t: string) => Promise.resolve(false))
+    const client = new FakeWhatsAppClient(SESSION)
+    service.setIncomingPolicy(hook)()
+
+    await service.open(SESSION, client, { orderingEnabled: true })
+    client.emit({ event: 'message', data: buildMessageDto({ id: 'a', fromMe: false }) })
+    await flush()
+
+    expect(hook).not.toHaveBeenCalled()
+    expect(messages.markPolicyHandled).not.toHaveBeenCalled()
   })
 
   it('keeps a single pipeline when a session is opened twice at the same time', async () => {
