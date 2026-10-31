@@ -91,7 +91,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 - [x] **5.4** Idempotency flow. *Done when:* replay and conflict tests pass.
 - [x] **5.5** Messages controller. *Done when:* every message type sends through the fake client. *Carried over from 4.7:* the adapter takes 1 MiB bodies; the send routes must raise their own `bodyLimit` to 40 MiB (TDD §6.11 cross-cutting) and a test must show a body over it is refused with 413.
 - [x] **5.6** Polls and events controller.
-- [ ] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
+- [x] **5.7** Chats controller (incl. typing/recording state). *Done when:* the `chat.state` operation is covered over REST.
 - [ ] **5.8** Presence, profile and settings controller.
 - [ ] **5.9** Lookup controller.
 - [ ] **5.10** Send-policy and suppressions controllers. *Done when:* usage and suppression endpoints are integration-tested.
@@ -191,6 +191,9 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 - [ ] **5.x, the send route** `SendOptions.extra` (and `EditOptions.extra`, `ChannelSendOptions.extra`) reaches wwebjs untouched, and wwebjs merges it into the message built inside the WhatsApp Web page. The request schema must be a `strictObject`, bound `extra` (key count, depth, size) and the docs must say it is a power-user escape hatch behind the `send` scope; decide with the owner whether to allow-list its keys.
 - [ ] **9.5** Write `docs/upgrading.md`: `dependabot.yml`, `wwebjs-watch.yml` and TDD §6.14 point to it and it does not exist yet. Include the three levels, the typings-vs-runtime check of TDD §2.5, and re-enabling the release watch after GitHub pauses an idle repository's schedules.
 - [ ] **11.1** The image must install Chromium and the deployment must set `PUPPETEER_EXECUTABLE_PATH` (the install runs no puppeteer build script, so no browser is downloaded). `--no-sandbox` is always on (TDD §6.3): the image runs as a non-root user, and the threat model (ADR) must say that the container is the boundary, so no extra privileges, a read-only root where possible and a restricted network egress. The first `security-scan` run after 3.10 may report the puppeteer tree: judge each finding and add a justified `.trivyignore` entry only for a real false positive.
+- [ ] **12.3, chats (from 5.7)** With a real account, check what the fake client cannot: that `Chat.sendStateTyping` shows for about 25 s and `clearState` stops it at once, what `Client.sendSeen`, `pinChat` (a fourth pinned chat) and `syncHistory` answer when WhatsApp refuses (the service reads `false` as `WHATSAPP_ERROR`), and that `getChatById` throws or answers nothing for an unknown id (the adapter turns both into `CHAT_NOT_FOUND`).
+- [ ] **6.3, channel chats (from 5.7)** `chats.list` and `chats.get` already answer channels, but `chats.setState`, `chats.clearMessages` and `chats.delete` refuse them with `WHATSAPP_ERROR` (`WaOperationError`); step 6.3 must make the channel routes the way to delete a channel and say so in `docs/chats.md`.
+- [ ] **8.x, `chat.state` countdown (from 5.7, accepted trade-off)** The `durationMs` of `chats.setState` is a timer in `ChatsService`: a restart of the gateway leaves the indicator to lapse by itself (about 25 s, the cap of `durationMs`). The countdown also does not know the typing of a send with `humanize` on the same chat, and may cut it short. Moving it to a BullMQ delayed job (or sharing the indicator with the send worker) is only worth it if a longer indicator is ever needed; do it then.
 - [ ] **12.3** Promote `getInviteInfo` to a named DTO once its shape is seen on a real invite (the adapter answers a sanitized `Record<string, unknown>`).
 - [ ] **7.x, the webhook retry endpoints** `POST …/deliveries/retry-failed` needs a bulk reset (the repository only has `resetForRetry` per delivery).
 
@@ -241,7 +244,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 5.4 | done | `feat/5-4-idempotency` | 2026-10-30 |
 | 5.5 | done | `feat/5-5-messages-controller` | 2026-10-30 |
 | 5.6 | done | `feat/5-6-polls-events` | 2026-10-30 |
-| 5.7 | todo | - | - |
+| 5.7 | done | `feat/5-7-chats-controller` | 2026-10-31 |
 | 5.8 | todo | - | - |
 | 5.9 | todo | - | - |
 | 5.10 | todo | - | - |

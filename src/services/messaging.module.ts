@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 
 import { WhatsAppModule } from '../whatsapp/whatsapp.module.js'
 
+import { ChatsService } from './chats.service.js'
 import { HumanizeDefaultsService } from './humanize-defaults.service.js'
 import { IdempotentSendService } from './idempotent-send.service.js'
 import { MediaResolverService } from './media-resolver.service.js'
@@ -28,6 +29,7 @@ import { SendQueueService } from './send-queue.service.js'
     MessageSendService,
     MessagesService,
     PollsEventsService,
+    ChatsService,
     { provide: PolicyStateStore, useClass: RedisPolicyStateStore }
   ],
   exports: [
@@ -37,7 +39,8 @@ import { SendQueueService } from './send-queue.service.js'
     MessageStoreService,
     MessageSendService,
     MessagesService,
-    PollsEventsService
+    PollsEventsService,
+    ChatsService
   ]
 })
 export class MessagingModule {}
