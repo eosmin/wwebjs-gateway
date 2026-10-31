@@ -10,6 +10,7 @@ import { MessageSendService } from './message-send.service.js'
 import { MessageStoreService } from './message-store.service.js'
 import { MessagesService } from './messages.service.js'
 import { PollsEventsService } from './polls-events.service.js'
+import { PresenceProfileService } from './presence-profile.service.js'
 import { RecipientResolverService } from './recipient-resolver.service.js'
 import { SendPolicyService } from './send-policy.service.js'
 import { PolicyStateStore, RedisPolicyStateStore } from './send-policy.store.js'
@@ -30,6 +31,7 @@ import { SendQueueService } from './send-queue.service.js'
     MessagesService,
     PollsEventsService,
     ChatsService,
+    PresenceProfileService,
     { provide: PolicyStateStore, useClass: RedisPolicyStateStore }
   ],
   exports: [
@@ -40,7 +42,8 @@ import { SendQueueService } from './send-queue.service.js'
     MessageSendService,
     MessagesService,
     PollsEventsService,
-    ChatsService
+    ChatsService,
+    PresenceProfileService
   ]
 })
 export class MessagingModule {}

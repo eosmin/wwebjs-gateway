@@ -22,6 +22,7 @@ import { MetricsService } from '../infra/metrics/metrics.service.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 import { SESSION_STATUSES, type SessionStatus } from '../types/dto.js'
 
+import { ACCOUNT_SETTING_CALLS } from './account-settings.js'
 import { EventPipelineService } from './event-pipeline.service.js'
 import {
   WHATSAPP_CLIENT_FACTORY,
@@ -48,15 +49,6 @@ const SessionSettings = z.looseObject({
   backgroundSync: z.boolean().optional()
 })
 type SessionSettings = z.infer<typeof SessionSettings>
-
-// The client call that applies each flag of the settings every time the session is ready
-const SETTING_CALLS = [
-  ['autoDownloadAudio', 'setAutoDownloadAudio'],
-  ['autoDownloadDocuments', 'setAutoDownloadDocuments'],
-  ['autoDownloadPhotos', 'setAutoDownloadPhotos'],
-  ['autoDownloadVideos', 'setAutoDownloadVideos'],
-  ['backgroundSync', 'setBackgroundSync']
-] as const
 
 // The statuses a session has when nothing runs for it
 const STATUSES_WITHOUT_CLIENT: readonly SessionStatus[] = ['created', 'stopped', 'failed']
@@ -566,7 +558,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     client: WhatsAppClientPort,
     settings: SessionSettings
   ): Promise<void> {
-    for (const [key, method] of SETTING_CALLS) {
+    for (const [key, method] of ACCOUNT_SETTING_CALLS) {
       const flag = settings[key]
       if (flag === undefined) continue
       try {
