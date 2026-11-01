@@ -5,6 +5,7 @@ import { MessagingModule } from '../services/messaging.module.js'
 
 import { ChatsController } from './controllers/chats.controller.js'
 import { ContactsController } from './controllers/contacts.controller.js'
+import { GroupsController } from './controllers/groups.controller.js'
 import { LookupController } from './controllers/lookup.controller.js'
 import { MessagesController } from './controllers/messages.controller.js'
 import { PollsEventsController } from './controllers/polls-events.controller.js'
@@ -18,6 +19,7 @@ import { SuppressionsController } from './controllers/suppressions.controller.js
   controllers: [
     ChatsController,
     ContactsController,
+    GroupsController,
     LookupController,
     MessagesController,
     PollsEventsController,

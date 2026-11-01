@@ -4,6 +4,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module.js'
 
 import { ChatsService } from './chats.service.js'
 import { ContactsService } from './contacts.service.js'
+import { GroupsService } from './groups.service.js'
 import { HumanizeDefaultsService } from './humanize-defaults.service.js'
 import { IdempotentSendService } from './idempotent-send.service.js'
 import { LookupService } from './lookup.service.js'
@@ -38,6 +39,7 @@ import { SendQueueService } from './send-queue.service.js'
     PollsEventsService,
     ChatsService,
     ContactsService,
+    GroupsService,
     PresenceProfileService,
     LookupService,
     { provide: PolicyStateStore, useClass: RedisPolicyStateStore }
@@ -53,6 +55,7 @@ import { SendQueueService } from './send-queue.service.js'
     PollsEventsService,
     ChatsService,
     ContactsService,
+    GroupsService,
     PresenceProfileService,
     LookupService
   ]
