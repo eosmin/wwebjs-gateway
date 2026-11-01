@@ -75,3 +75,32 @@ export class MuteResultDto extends createZodDto(
       .describe('Unix seconds when the mute ends; -1 for ever, 0 when not muted')
   })
 ) {}
+
+// WhatsApp Business keeps one free-text note per customer chat. The limit is the gateway's, so a
+// body cannot grow without bound; what WhatsApp itself accepts is checked in step 12.3.
+export const MAX_CUSTOMER_NOTE_LENGTH = 5000
+
+export const CustomerNoteBody = z.strictObject({
+  note: z
+    .string()
+    .min(1)
+    .max(MAX_CUSTOMER_NOTE_LENGTH)
+    .describe('Text of the note; it replaces the one the chat has')
+})
+export class CustomerNoteBodyDto extends createZodDto(CustomerNoteBody) {}
+
+export const CustomerNoteResponse = z.object({
+  id: z.string().describe('Id of the note'),
+  chatId: z.string().describe('Serialized id of the customer chat the note belongs to'),
+  content: z.string().describe('Text of the note'),
+  type: z.string().describe('Kind of note, `unstructured` for free text'),
+  createdAt: z
+    .number()
+    .int()
+    .describe('When the note was created, as the unix time WhatsApp gives'),
+  modifiedAt: z
+    .number()
+    .int()
+    .describe('When the note last changed, as the unix time WhatsApp gives')
+})
+export class CustomerNoteResponseDto extends createZodDto(CustomerNoteResponse) {}

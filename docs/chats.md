@@ -22,8 +22,10 @@ A route on one chat first checks that the chat exists: WhatsApp Web answers a ca
 | `chats.clearMessages`  | `POST …/chats/:chatId/clear-messages` | `manage` | `204`                                    |
 | `chats.delete`         | `DELETE …/chats/:chatId`              | `manage` | `204`                                    |
 | `chats.syncHistory`    | `POST …/chats/:chatId/sync-history`   | `manage` | `204`                                    |
+| `chats.customerNote`   | `GET …/chats/:chatId/customer-note`   | `read`   | the note                                 |
+| `chats.setCustomerNote`| `PUT …/chats/:chatId/customer-note`   | `manage` | the note, as WhatsApp kept it            |
 
-The labels of a chat are [`labels.ofChat` and `labels.setForChat`](labels.md); its customer note belongs to step 6.7.
+The labels of a chat are [`labels.ofChat` and `labels.setForChat`](labels.md).
 
 ## Reads
 
@@ -47,6 +49,14 @@ The labels of a chat are [`labels.ofChat` and `labels.setForChat`](labels.md); i
 - **`chats.mute`** takes `until` (ISO date, in the future) or nothing to mute for ever; a past date is `400 VALIDATION_ERROR`. `muteExpiration` is Unix seconds, `-1` for ever, `0` when not muted.
 - **`chats.clearMessages` and `chats.delete`** act on the linked account only; the other side keeps its copy, and they cannot be undone. The copy in the gateway store stays until its retention ends. A channel has no history to clear and is not deleted here: `channels.delete` deletes it, for every subscriber.
 - `chats.syncHistory` asks the linked phone for older messages; they arrive over time as events, not in the answer.
+
+## Customer notes
+
+WhatsApp Business keeps one free-text note per customer chat (`{ id, chatId, content, type, createdAt, modifiedAt }`; the times are the unix time WhatsApp gives).
+
+- **`chats.customerNote`** is `404 NOT_FOUND` when the chat has no note, and also on an account that is not WhatsApp Business, which has none: WhatsApp Web answers the same for both.
+- **`chats.setCustomerNote`** takes `{ note }` (1 to 5000 characters, the gateway's own cap) and replaces the note. An account without customer notes ignores the call without an error, so the gateway reads the note back and answers `502 WHATSAPP_ERROR` when what it finds is not what was written. The text of a note is never logged.
+- A group or a channel has no note: both routes answer `400 VALIDATION_ERROR` for it, and `404 CHAT_NOT_FOUND` for a chat the page does not have.
 
 ## Errors
 

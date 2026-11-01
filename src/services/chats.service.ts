@@ -1,11 +1,12 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
 
-import { ValidationError, WhatsAppError } from '../common/errors.js'
+import { NotFoundError, ValidationError, WhatsAppError } from '../common/errors.js'
 import type { MessageDto } from '../types/dto.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
 import type {
   AnyChatDto,
   ChatStateKind,
+  CustomerNote,
   FetchMessagesOptions,
   MuteResult,
   WhatsAppClientPort
@@ -146,6 +147,50 @@ export class ChatsService implements OnModuleDestroy {
   async unmute(sessionId: string, chatId: string): Promise<MuteResult> {
     const client = await this.existing(sessionId, chatId)
     return client.unmuteChat(chatId)
+  }
+
+  // ---- Customer notes (WhatsApp Business) --------------------------------------------------------
+
+  async customerNote(sessionId: string, chatId: string): Promise<CustomerNote> {
+    const client = await this.customerChat(sessionId, chatId)
+    const note = await client.getCustomerNote(chatId)
+    if (!note) {
+      throw new NotFoundError(
+        'NOT_FOUND',
+        `Chat ${chatId} has no customer note (an account that is not WhatsApp Business has none)`
+      )
+    }
+    return note
+  }
+
+  // WhatsApp Web does nothing, and says nothing, on an account without customer notes, so the note
+  // is read back: a note that is not there afterwards was not saved. The text is never logged.
+  async setCustomerNote(sessionId: string, chatId: string, text: string): Promise<CustomerNote> {
+    const client = await this.customerChat(sessionId, chatId)
+    await client.addOrEditCustomerNote(chatId, text)
+    const saved = await client.getCustomerNote(chatId)
+    // WhatsApp may trim the text it keeps, so the edges are not compared
+    if (saved?.content.trim() !== text.trim()) {
+      throw new WhatsAppError(
+        'WHATSAPP_ERROR',
+        'WhatsApp did not save the customer note (only WhatsApp Business accounts have them)'
+      )
+    }
+    return saved
+  }
+
+  // A note belongs to a customer, so a group or a channel is refused before WhatsApp ignores it
+  private async customerChat(sessionId: string, chatId: string): Promise<WhatsAppClientPort> {
+    const client = this.sessions.requireReady(sessionId)
+    const chat = await client.getChatById(chatId)
+    if (chat.isGroup || ('isChannel' in chat && chat.isChannel)) {
+      throw new ValidationError(
+        'VALIDATION_ERROR',
+        'Only a chat with one customer has a note, not a group or a channel',
+        { chatId }
+      )
+    }
+    return client
   }
 
   // ---- Helpers ---------------------------------------------------------------------------------

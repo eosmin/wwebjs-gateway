@@ -28,7 +28,15 @@ const EXPECTED: Record<string, { scope: string; wwebjs: string[] }> = {
   'chats.unmute': { scope: 'manage', wwebjs: ['Chat.unmute', 'Client.unmuteChat'] },
   'chats.clearMessages': { scope: 'manage', wwebjs: ['Chat.clearMessages'] },
   'chats.delete': { scope: 'manage', wwebjs: ['Chat.delete'] },
-  'chats.syncHistory': { scope: 'manage', wwebjs: ['Chat.syncHistory', 'Client.syncHistory'] }
+  'chats.syncHistory': { scope: 'manage', wwebjs: ['Chat.syncHistory', 'Client.syncHistory'] },
+  'chats.customerNote': {
+    scope: 'read',
+    wwebjs: ['Chat.getCustomerNote', 'Client.getCustomerNote']
+  },
+  'chats.setCustomerNote': {
+    scope: 'manage',
+    wwebjs: ['Chat.addOrEditCustomerNote', 'Client.addOrEditCustomerNote']
+  }
 }
 
 describe('ChatsController operations', () => {

@@ -8,6 +8,7 @@ import {
   Inject,
   Param,
   Post,
+  Put,
   Query
 } from '@nestjs/common'
 import { ZodResponse } from 'nestjs-zod'
@@ -18,6 +19,8 @@ import {
   ChatListDto,
   ChatMessagesQueryDto,
   ChatResponseDto,
+  CustomerNoteBodyDto,
+  CustomerNoteResponseDto,
   MuteChatBodyDto,
   MuteResultDto,
   SessionChatParamsDto,
@@ -51,6 +54,15 @@ const CHAT = {
   unreadCount: 0,
   pinned: false,
   isLocked: false
+}
+
+const CUSTOMER_NOTE = {
+  id: 'AAAAAAAAAAAAAAAAAAAA',
+  chatId: '5215500000001@c.us',
+  content: 'Prefers to be called after 6 pm',
+  type: 'unstructured',
+  createdAt: 1767225600,
+  modifiedAt: 1767225600
 }
 
 // Chats of a session: reading them, the typing and recording indicators, and what the account does
@@ -329,5 +341,42 @@ export class ChatsController {
   })
   syncHistory(@Param() { sessionId, chatId }: SessionChatParamsDto): Promise<void> {
     return this.chats.syncHistory(sessionId, chatId)
+  }
+
+  @Get(':sessionId/chats/:chatId/customer-note')
+  @ZodResponse({ type: CustomerNoteResponseDto })
+  @WaOperation({
+    id: 'chats.customerNote',
+    scope: 'read',
+    summary: 'Read the customer note of a chat',
+    description:
+      'The note a WhatsApp Business account keeps about a customer. `404 NOT_FOUND` when the chat has none, and also on an account that is not WhatsApp Business, which has no notes. A group or a channel is `400`.',
+    errors: ON_CHAT,
+    examples: { request: null, response: CUSTOMER_NOTE },
+    wwebjs: ['Chat.getCustomerNote', 'Client.getCustomerNote']
+  })
+  customerNote(
+    @Param() { sessionId, chatId }: SessionChatParamsDto
+  ): Promise<CustomerNoteResponseDto> {
+    return this.chats.customerNote(sessionId, chatId)
+  }
+
+  @Put(':sessionId/chats/:chatId/customer-note')
+  @ZodResponse({ type: CustomerNoteResponseDto })
+  @WaOperation({
+    id: 'chats.setCustomerNote',
+    scope: 'manage',
+    summary: 'Write the customer note of a chat',
+    description:
+      'Creates the note of the customer, or replaces it. The gateway reads it back: if WhatsApp did not keep it (an account that is not WhatsApp Business ignores the call) the answer is `502 WHATSAPP_ERROR`. A group or a channel is `400`.',
+    errors: ON_CHAT,
+    examples: { request: { note: 'Prefers to be called after 6 pm' }, response: CUSTOMER_NOTE },
+    wwebjs: ['Chat.addOrEditCustomerNote', 'Client.addOrEditCustomerNote']
+  })
+  setCustomerNote(
+    @Param() { sessionId, chatId }: SessionChatParamsDto,
+    @Body() { note }: CustomerNoteBodyDto
+  ): Promise<CustomerNoteResponseDto> {
+    return this.chats.setCustomerNote(sessionId, chatId, note)
   }
 }

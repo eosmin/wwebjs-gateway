@@ -1,4 +1,11 @@
-import { ChatMessagesQuery, ChatResponseDto, MuteChatBody, SetChatStateBody } from './chats.dto.js'
+import {
+  ChatMessagesQuery,
+  ChatResponseDto,
+  CustomerNoteBody,
+  MAX_CUSTOMER_NOTE_LENGTH,
+  MuteChatBody,
+  SetChatStateBody
+} from './chats.dto.js'
 
 const base = {
   archived: false,
@@ -95,5 +102,23 @@ describe('ChatMessagesQuery', () => {
     [{ x: 1 }]
   ])('refuses %j', query => {
     expect(ChatMessagesQuery.safeParse(query).success).toBe(false)
+  })
+})
+
+describe('customer note body', () => {
+  it('accepts a note up to the limit', () => {
+    expect(CustomerNoteBody.safeParse({ note: 'x' }).success).toBe(true)
+    expect(CustomerNoteBody.safeParse({ note: 'x'.repeat(MAX_CUSTOMER_NOTE_LENGTH) }).success).toBe(
+      true
+    )
+  })
+
+  it.each([
+    {},
+    { note: '' },
+    { note: 'x'.repeat(MAX_CUSTOMER_NOTE_LENGTH + 1) },
+    { note: 'x', a: 1 }
+  ])('refuses %j', body => {
+    expect(CustomerNoteBody.safeParse(body).success).toBe(false)
   })
 })
