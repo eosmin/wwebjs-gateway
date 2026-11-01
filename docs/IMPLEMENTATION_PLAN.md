@@ -98,7 +98,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 6 — Contacts, groups, channels (`feat/contacts-groups-channels`) — TDD §6.11, §6.12
 
-- [ ] **6.1** Contacts (incl. business profile, block/unblock, addressbook).
+- [x] **6.1** Contacts (incl. business profile, block/unblock, addressbook). *Carried to the manual smoke test (step 10.x, real account):* what `getContactById` answers for an id WhatsApp has never seen (decide then between a `404` and the current pass-through), and the `@lid` of a business account in `businessProfile`. *Known limit:* `contacts.list` and `contacts.blocked` return every contact WhatsApp Web has loaded in one response, with no cursor (as `chats.list` does); measure the size with a real account and add pagination or a cap in the same task if it is large (owner: step 10.x smoke test).
 - [ ] **6.2** Groups.
 - [ ] **6.3** Channels.
 - [ ] **6.4** Labels.
@@ -253,7 +253,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 5.8 | done | `feat/5-8-presence-profile` | 2026-10-31 |
 | 5.9 | done | `feat/5-9-lookup-controller` | 2026-10-31 |
 | 5.10 | done | `feat/5-10-policy-suppressions` | 2026-10-31 |
-| 6.1 | todo | - | - |
+| 6.1 | done | `feat/6-1-contacts` | 2026-11-01 |
 | 6.2 | todo | - | - |
 | 6.3 | todo | - | - |
 | 6.4 | todo | - | - |
