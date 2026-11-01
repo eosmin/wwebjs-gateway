@@ -43,9 +43,19 @@ describe('the patched whatsapp-web.js', () => {
       (source(file).match(/_serialized \?\? String\(/g) ?? []).length
 
     expect(fallbacks('util/Injected/Utils.js')).toBe(5)
-    // two for the poll parent key (#40) and one for the peer of an incoming call (#42)
     expect(fallbacks('Client.js')).toBe(3)
     expect(fallbacks('structures/Message.js')).toBe(1)
+  })
+
+  // The three fallbacks of Client.js are two defects, counted apart so that losing one cannot be
+  // hidden by the other: the poll parent key (#40, two) and the peer of an incoming call (#42, one)
+  it('keeps the poll parent key and the call peer fallbacks of Client.js apart', () => {
+    const client = source('Client.js')
+
+    expect(
+      client.match(/parentMsgKey\._serialized \?\? String\(parentMsgKey\)/g) ?? []
+    ).toHaveLength(2)
+    expect(client.match(/peer\._serialized \?\? String\(peer\)/g) ?? []).toHaveLength(1)
   })
 
   // The tests run the real Client.sendMessage with a page we control: the library builds its Message

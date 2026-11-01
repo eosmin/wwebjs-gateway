@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common'
 import { WhatsAppModule } from '../whatsapp/whatsapp.module.js'
 
 import { BroadcastsService } from './broadcasts.service.js'
+import { CallsService } from './calls.service.js'
 import { ChannelsService } from './channels.service.js'
 import { ChatsService } from './chats.service.js'
 import { ContactsService } from './contacts.service.js'
@@ -42,6 +43,7 @@ import { SendQueueService } from './send-queue.service.js'
     PollsEventsService,
     ChatsService,
     BroadcastsService,
+    CallsService,
     ContactsService,
     ChannelsService,
     GroupsService,
@@ -61,6 +63,7 @@ import { SendQueueService } from './send-queue.service.js'
     PollsEventsService,
     ChatsService,
     BroadcastsService,
+    CallsService,
     ContactsService,
     ChannelsService,
     GroupsService,
