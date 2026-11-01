@@ -4,6 +4,7 @@ import { AuthModule } from '../services/auth.module.js'
 import { MessagingModule } from '../services/messaging.module.js'
 
 import { BroadcastsController } from './controllers/broadcasts.controller.js'
+import { CallsController } from './controllers/calls.controller.js'
 import { ChannelsController } from './controllers/channels.controller.js'
 import { ChatsController } from './controllers/chats.controller.js'
 import { ContactsController } from './controllers/contacts.controller.js'
@@ -23,6 +24,7 @@ import { SuppressionsController } from './controllers/suppressions.controller.js
     ChatsController,
     ContactsController,
     BroadcastsController,
+    CallsController,
     ChannelsController,
     GroupsController,
     LabelsController,

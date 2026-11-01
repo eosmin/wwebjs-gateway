@@ -1,0 +1,19 @@
+# Calls
+
+The routes under `/v1/sessions/:sessionId/calls` (TDD §6.11). Each one is a call to the session's WhatsApp client, so the session must be `ready` (`409 SESSION_NOT_READY` otherwise). The library cannot place or answer a call: it offers a link for a scheduled call and rejecting an incoming one. The incoming calls themselves arrive as the `call` event ([events](events.md)).
+
+| Operation          | Route                     | Scope    | Answer                    |
+| ------------------ | ------------------------- | -------- | ------------------------- |
+| `calls.createLink` | `POST …/calls/link`       | `manage` | `200` with `{ link }`     |
+| `calls.reject`     | `POST …/calls/:callId/reject` | `manage` | `204`, no body        |
+
+- **`calls.createLink`** takes `{ startTime, callType }`: `startTime` is an ISO 8601 date and `callType` is `voice` or `video`. The answer is `{ link }`, such as `https://call.whatsapp.com/video/XxXx`. When WhatsApp Web cannot make a link the library answers an empty string, and the gateway turns that into `502 WHATSAPP_ERROR` instead of passing it on.
+- **`calls.reject`** rejects the call whose id the `call` event gave (`:callId`). wwebjs can only reject through the call object it delivered, so the gateway keeps the most recent incoming calls in memory, a ring buffer of `CALL_CACHE_SIZE` entries (default 50, [config](config-reference.md)); the oldest goes when a new one arrives. A call the gateway no longer holds, never saw, or already rejected is `404 NOT_FOUND`. The buffer is not kept across a restart of the gateway, and each session has its own.
+
+## The `call` event
+
+`data` is a call: `{ id, from?, timestamp, isVideo, isGroup, fromMe, canHandleLocally, webClientShouldHandle, participants? }`. `from` is usually a `@lid` id, `timestamp` is the time the call arrived when WhatsApp gives none (it is 0 while the call rings), and outgoing calls arrive too (`fromMe` tells them apart). `participants` is not delivered for a group call yet (see TDD §2.5 and step 12.3).
+
+## What the other wwebjs symbols map to
+
+The fields of `Call` (`id`, `from`, `timestamp`, `isVideo`, `isGroup`, `fromMe`, `canHandleLocally`, `webClientShouldHandle`, `participants`) are the fields of the `call` event; `Call.reject` is `calls.reject`.
