@@ -45,3 +45,11 @@ export function signWebhook(secret: string, timestamp: number, rawBody: string):
   if (secret === '') throw new RangeError('A webhook secret must not be empty')
   return `sha256=${createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')}`
 }
+
+export const WEBHOOK_SECRET_PREFIX = 'whsec_'
+
+// Unlike an API key, the secret is kept in clear: it signs every delivery. It is shown on creation
+// and rotation only.
+export function generateWebhookSecret(): string {
+  return `${WEBHOOK_SECRET_PREFIX}${generateToken()}`
+}

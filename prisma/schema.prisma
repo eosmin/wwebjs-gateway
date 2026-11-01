@@ -104,17 +104,19 @@ model ApiKey {
 }
 
 model Webhook {
-  id        String           @id @default(uuid()) @db.Uuid
+  id         String           @id @default(uuid()) @db.Uuid
   // Null = every session
-  sessionId String?
-  session   Session?         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  url       String
+  sessionId  String?
+  session    Session?         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  url        String
   // Stored in clear because it signs the deliveries; never returned after creation
-  secret    String
-  events    String[]         @default(["*"])
-  enabled   Boolean          @default(true)
-  mediaMode WebhookMediaMode @default(reference)
-  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+  secret     String
+  events     String[]         @default(["*"])
+  enabled    Boolean          @default(true)
+  mediaMode  WebhookMediaMode @default(reference)
+  // Null = follow INCLUDE_RAW
+  includeRaw Boolean?
+  createdAt  DateTime         @default(now()) @db.Timestamptz(3)
 
   deliveries WebhookDelivery[]
 
