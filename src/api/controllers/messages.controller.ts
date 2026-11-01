@@ -18,14 +18,13 @@ import { ApiAcceptedResponse, ApiBody, ApiOkResponse, ApiProduces } from '@nestj
 import type { FastifyReply } from 'fastify'
 import { ZodResponse, ZodValidationPipe } from 'nestjs-zod'
 
-import { AppError, type ErrorCode, ValidationError } from '../../common/errors.js'
-import { MessageSendService, type SendResult } from '../../services/message-send.service.js'
+import type { ErrorCode } from '../../common/errors.js'
+import { MessageSendService } from '../../services/message-send.service.js'
 import { MessagesService } from '../../services/messages.service.js'
 import {
   DeleteMessageQueryDto,
   EditMessageBodyDto,
   ForwardBodyDto,
-  IdempotencyKeyHeader,
   MessageContactsDto,
   MessageGroupsDto,
   MessageInfoResponseDto,
@@ -49,6 +48,8 @@ import {
 import { SessionIdParamsDto } from '../../types/sessions.dto.js'
 import { requestSchemaOf } from '../request-schema.js'
 import { WaOperation } from '../wa-operation.decorator.js'
+
+import { SEND_ERRORS, idempotencyKeyOf, sendAnswer } from './send-answer.js'
 
 const MESSAGE_ID = 'false_5215500000001@c.us_3EB0C767D0F2A2B91F42'
 const MESSAGE_EXAMPLE = {
@@ -83,24 +84,6 @@ const SEND_REQUEST = { to: '+52 55 0000 0001', type: 'text', body: 'Hola, tu ped
 
 const ROUTE: ErrorCode[] = ['VALIDATION_ERROR', 'UNAUTHORIZED', 'FORBIDDEN', 'INSUFFICIENT_SCOPE']
 const ON_MESSAGE: ErrorCode[] = [...ROUTE, 'NOT_FOUND', 'SESSION_NOT_READY', 'WHATSAPP_ERROR']
-const SEND_ERRORS: ErrorCode[] = [
-  ...ROUTE,
-  'NOT_FOUND',
-  'PAYLOAD_TOO_LARGE',
-  'MEDIA_FETCH_FAILED',
-  'IDEMPOTENCY_KEY_REUSED',
-  'NUMBER_NOT_ON_WHATSAPP',
-  'POLICY_BLOCKED',
-  'DUPLICATE_CONTENT',
-  'RECIPIENT_SUPPRESSED',
-  'RECIPIENT_UNREACHABLE',
-  'POLICY_DELAY_EXCEEDED',
-  'SESSION_NOT_READY',
-  'UNKNOWN_OUTCOME',
-  'ACK_ERROR',
-  'WHATSAPP_ERROR',
-  'WHATSAPP_TIMEOUT'
-]
 
 // Shown by a browser without running anything; the rest of what a sender can attach is downloaded
 const INLINE_MEDIA_TYPES: ReadonlySet<string> = new Set([
@@ -113,19 +96,6 @@ const INLINE_MEDIA_TYPES: ReadonlySet<string> = new Set([
   'audio/mpeg',
   'application/pdf'
 ])
-
-const idempotencyKeyOf = (header: string | undefined): string | undefined => {
-  if (header === undefined) return undefined
-  const parsed = IdempotencyKeyHeader.safeParse(header)
-  if (!parsed.success) {
-    throw new ValidationError(
-      'VALIDATION_ERROR',
-      'The Idempotency-Key header must have 1 to 128 characters',
-      { field: 'Idempotency-Key' }
-    )
-  }
-  return parsed.data
-}
 
 // The messages of a session: sending (TDD §6.8) and what can be read or done to one message.
 // Sending is asynchronous by nature: the answer is 201 with the message when it went out within
@@ -167,7 +137,7 @@ export class MessagesController {
       { sessionId, wait, idempotencyKey: idempotencyKeyOf(idempotencyKey) },
       body
     )
-    return this.answer(result, reply)
+    return sendAnswer(result, reply)
   }
 
   @Post(':sessionId/messages/:messageId/reply')
@@ -199,7 +169,7 @@ export class MessagesController {
       messageId,
       body
     )
-    return this.answer(result, reply)
+    return sendAnswer(result, reply)
   }
 
   @Get(':sessionId/send-jobs/:jobId')
@@ -504,7 +474,7 @@ export class MessagesController {
       messageId,
       chatId
     )
-    return this.answer(result, reply)
+    return sendAnswer(result, reply)
   }
 
   @Post(':sessionId/messages/:messageId/star')
@@ -627,20 +597,4 @@ export class MessagesController {
   // ---- Helpers ---------------------------------------------------------------------------------
 
   // 201 with the message, 202 with the job, or the error the send ended with
-  private answer(result: SendResult, reply: FastifyReply): SendJobDto {
-    if (result.replayed) void reply.header('idempotent-replayed', 'true')
-    const { jobId, outcome } = result
-    if (outcome === undefined) {
-      void reply.status(HttpStatus.ACCEPTED)
-      return { jobId, status: 'queued' }
-    }
-    if (!outcome.ok) {
-      throw new AppError(outcome.error.code, outcome.error.message, outcome.error.details)
-    }
-    return {
-      jobId,
-      status: 'sent',
-      ...(outcome.message !== undefined && { message: outcome.message })
-    }
-  }
 }

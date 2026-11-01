@@ -1,9 +1,10 @@
 import { Logger } from '@nestjs/common'
 
-import { AppError, ConflictError, WhatsAppError } from '../common/errors.js'
+import { AppError, ConflictError, ValidationError, WhatsAppError } from '../common/errors.js'
 import { abortableSleep } from '../common/lib/abortable-sleep.js'
 import { resolveTypingMs, typingSegments } from '../common/lib/humanize.js'
 import { IntervalThrottle } from '../common/lib/throttle.js'
+import { isChannelId } from '../common/lib/wa-id.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { MessageDto } from '../types/dto.js'
 import { WaDisconnectedError, WaMappingError, WaTimeoutError } from '../whatsapp/wa-errors.js'
@@ -224,6 +225,18 @@ export class SendJobProcessor {
     if (content.type === 'forward') {
       await client.forwardMessage(content.messageId, data.chatId)
       return { outcome: { ok: true }, hardFailure: false }
+    }
+    if (isChannelId(data.chatId)) {
+      // A channel is posted to with its own call, which takes text or one media file
+      if (content.type !== 'text' && content.type !== 'media') {
+        throw new ValidationError('VALIDATION_ERROR', 'A channel takes text or one media file')
+      }
+      const { caption, mentions } = data.options ?? {}
+      const post = await client.sendChannelMessage(data.chatId, content, {
+        ...(caption !== undefined && { caption }),
+        ...(mentions !== undefined && { mentions })
+      })
+      return { outcome: { ok: true, message: post }, hardFailure: isAckError(post) }
     }
     const message = await client.sendMessage(data.chatId, content, data.options)
     return { outcome: { ok: true, message }, hardFailure: isAckError(message) }

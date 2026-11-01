@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common'
 import { AuthModule } from '../services/auth.module.js'
 import { MessagingModule } from '../services/messaging.module.js'
 
+import { ChannelsController } from './controllers/channels.controller.js'
 import { ChatsController } from './controllers/chats.controller.js'
 import { ContactsController } from './controllers/contacts.controller.js'
 import { GroupsController } from './controllers/groups.controller.js'
@@ -19,6 +20,7 @@ import { SuppressionsController } from './controllers/suppressions.controller.js
   controllers: [
     ChatsController,
     ContactsController,
+    ChannelsController,
     GroupsController,
     LookupController,
     MessagesController,

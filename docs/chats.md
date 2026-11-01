@@ -38,14 +38,14 @@ Labels and customer notes of a chat belong to steps 6.4 and 6.7.
 - With `durationMs` the gateway sends `clear` when that time ends. A new state on the same chat replaces the countdown, and `clear` cancels it. A clear that fails when the countdown ends is only logged.
 - **Limit:** the countdown lives in memory. If the gateway restarts before it ends, the indicator lapses by itself within 25 s, which is why `durationMs` cannot be larger than that. The countdown knows nothing of the typing a send with `humanize` shows on the same chat, so it may cut that short when it ends.
 - A text sent with `humanize` shows its own typing; this route is for a client that wants the indicator without sending, or for a longer pause before a reply.
-- A channel has no chat state (`502 WHATSAPP_ERROR`).
+- A channel has no chat state (`502 WHATSAPP_ERROR`). The routes of a channel are in [channels](channels.md).
 
 ## Actions
 
 - **`chats.seen`** sends the read receipt of the chat: the other side sees the blue ticks. `chats.markUnread` only changes how the linked phone shows the chat.
 - **`chats.archive`, `unarchive`, `pin`, `unpin`, `seen`, `clearMessages`, `delete`, `syncHistory`** answer `502 WHATSAPP_ERROR` when WhatsApp Web says it did not do it. WhatsApp allows three pinned chats.
 - **`chats.mute`** takes `until` (ISO date, in the future) or nothing to mute for ever; a past date is `400 VALIDATION_ERROR`. `muteExpiration` is Unix seconds, `-1` for ever, `0` when not muted.
-- **`chats.clearMessages` and `chats.delete`** act on the linked account only; the other side keeps its copy, and they cannot be undone. The copy in the gateway store stays until its retention ends. A channel has no history to clear and is not deleted here.
+- **`chats.clearMessages` and `chats.delete`** act on the linked account only; the other side keeps its copy, and they cannot be undone. The copy in the gateway store stays until its retention ends. A channel has no history to clear and is not deleted here: `channels.delete` deletes it, for every subscriber.
 - `chats.syncHistory` asks the linked phone for older messages; they arrive over time as events, not in the answer.
 
 ## Errors

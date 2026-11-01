@@ -60,7 +60,7 @@ const plain = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) => z.object(sche
 
 // A business contact has everything a contact has plus its profile, so it is tried first (an object
 // schema strips what it does not know)
-const AnyContact = z.union([
+export const AnyContact = z.union([
   z.object({ ...BusinessContactDto.shape, businessProfile: plain(BusinessProfileDto) }),
   plain(ContactDto)
 ])
