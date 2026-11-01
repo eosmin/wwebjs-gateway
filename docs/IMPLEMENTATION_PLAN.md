@@ -108,7 +108,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 7 — Outbound webhooks (`feat/outbound-webhooks`) — TDD §6.9
 
-- [ ] **7.1** `webhook.service.ts`.
+- [x] **7.1** `webhook.service.ts` (CRUD, secret generation and rotation, SSRF check of the URL, cached `forEvent` list that every write invalidates). Adds the nullable `webhooks.includeRaw` column the TDD names in §6.6 but §5 did not list. *Carried to 7.2:* the webhooks routes and `docs/webhooks.md` (including that rotating the secret takes effect at once, also for retries). *Carried to 7.3/7.4:* the dispatcher and processor read `forEvent`, `includeRaw` (null follows `INCLUDE_RAW`) and `mediaMode`.
 - [ ] **7.2** Webhooks controller (CRUD, rotate-secret, test, deliveries, retry, retry-failed).
 - [ ] **7.3** `webhook-dispatcher.service.ts`.
 - [ ] **7.4** `delivery.processor.ts`. *Done when:* signature, retry and SSRF tests pass.
@@ -266,7 +266,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 6.5 | done | `feat/6-5-broadcasts` | 2026-11-01 |
 | 6.6 | done | `feat/6-6-calls` | 2026-11-01 |
 | 6.7 | done | `feat/6-7-client-ops` | 2026-11-01 |
-| 7.1 | todo | - | - |
+| 7.1 | done | `feat/7-1-webhook-service` | 2026-11-01 |
 | 7.2 | todo | - | - |
 | 7.3 | todo | - | - |
 | 7.4 | todo | - | - |
