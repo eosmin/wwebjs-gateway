@@ -9,7 +9,9 @@ const EXPECTED: Record<string, { scope: string; wwebjs: string[] }> = {
       'Client.getNumberId',
       'Client.isRegisteredUser',
       'Client.getCountryCode',
-      'Client.getFormattedNumber'
+      'Client.getFormattedNumber',
+      'Contact.getCountryCode',
+      'Contact.getFormattedNumber'
     ]
   },
   'contacts.lidPhone': { scope: 'read', wwebjs: ['Client.getContactLidAndPhone'] }
@@ -17,8 +19,8 @@ const EXPECTED: Record<string, { scope: string; wwebjs: string[] }> = {
 
 describe('lookup operations', () => {
   it('declares exactly the operations of the table, each with its scope and wwebjs symbols', async () => {
-    const operations = (await collectOperations(MessagesModule)).filter(operation =>
-      /^(numbers|contacts)\./.test(operation.id)
+    const operations = (await collectOperations(MessagesModule)).filter(
+      operation => operation.id.startsWith('numbers.') || operation.id === 'contacts.lidPhone'
     )
 
     expect(

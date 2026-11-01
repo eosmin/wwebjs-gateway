@@ -51,7 +51,9 @@ export class LookupController {
       'Client.getNumberId',
       'Client.isRegisteredUser',
       'Client.getCountryCode',
-      'Client.getFormattedNumber'
+      'Client.getFormattedNumber',
+      'Contact.getCountryCode',
+      'Contact.getFormattedNumber'
     ]
   })
   number(@Param() { sessionId, number }: NumberParamsDto): Promise<NumberLookupDto> {
