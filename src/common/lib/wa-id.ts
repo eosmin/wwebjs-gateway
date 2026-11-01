@@ -17,6 +17,11 @@ export function isWaId(value: string): boolean {
   return id === BROADCAST_ID || WA_ID_PATTERN.test(id)
 }
 
+// A channel (newsletter) is posted to with its own call, not with the one of chats
+export function isChannelId(value: string): boolean {
+  return value.endsWith('@newsletter') && isWaId(value)
+}
+
 // The digits of a phone number written with spaces, dashes, dots, parentheses and an optional
 // leading `+`; null when they are not 7 to 15
 export function phoneDigits(value: string): string | null {

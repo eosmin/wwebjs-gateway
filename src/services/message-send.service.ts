@@ -1,10 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { AppError, NotFoundError } from '../common/errors.js'
+import { AppError, NotFoundError, ValidationError } from '../common/errors.js'
 import { canonicalJson } from '../common/lib/canonical-json.js'
 import { sha256Hex } from '../common/lib/crypto.js'
+import { isChannelId } from '../common/lib/wa-id.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
+import type { ChannelPostBody } from '../types/channels.dto.js'
 import type { ReplyMessageBody, SendMessageBody } from '../types/messages.dto.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
 import type { OutboundContent, SendOptions } from '../whatsapp/whatsapp-client.port.js'
@@ -99,6 +101,20 @@ export class MessageSendService {
     return this.submit(request, body, to, messageId, hash)
   }
 
+  // A post to a channel is a send like any other: same queue, policy, pacing and idempotency. Only
+  // text and one media file can be posted, and a channel has no typing indicator to humanize with.
+  async postToChannel(
+    request: SendRequest,
+    channelId: string,
+    body: ChannelPostBody
+  ): Promise<SendResult> {
+    const hash = this.hashOf(request, { op: 'channelPost', channelId, body })
+    return (
+      (await this.replayOf(request, hash)) ??
+      this.submit(request, { ...body, to: channelId }, channelId, undefined, hash)
+    )
+  }
+
   // A forward is a send like any other: same queue, policy, pacing and idempotency. It has no
   // humanize (there is no text to type) and its outcome carries no message.
   async forward(request: SendRequest, messageId: string, to: string): Promise<SendResult> {
@@ -106,6 +122,11 @@ export class MessageSendService {
     const replay = await this.replayOf(request, hash)
     if (replay) return replay
     const chatId = await this.recipients.resolve(request.sessionId, to)
+    if (isChannelId(chatId)) {
+      throw new ValidationError('VALIDATION_ERROR', 'A message cannot be forwarded to a channel', {
+        field: 'chatId'
+      })
+    }
     await this.checkPolicy(request.sessionId, chatId, undefined)
     return this.enqueue(
       request,
@@ -147,8 +168,20 @@ export class MessageSendService {
     const { sessionId } = request
     const chatId = await this.recipients.resolve(sessionId, to)
     await this.checkPolicy(sessionId, chatId, policyTextOf(body))
+    const toChannel = isChannelId(chatId)
+    if (toChannel && body.type !== 'text' && body.type !== 'media') {
+      throw new ValidationError(
+        'VALIDATION_ERROR',
+        'A channel takes text or one media file, nothing else',
+        { field: 'type' }
+      )
+    }
     const { content, options } = await this.contentOf(sessionId, body)
-    const humanize = await this.humanizeDefaults.resolve(sessionId, body.humanize, content.type)
+    if (toChannel) this.assertChannelOptions(options, quotedMessageId)
+    // A channel has no chat state, so there is nothing to type or mark as seen first
+    const humanize = toChannel
+      ? undefined
+      : await this.humanizeDefaults.resolve(sessionId, body.humanize, content.type)
     return this.enqueue(
       request,
       {
@@ -175,6 +208,22 @@ export class MessageSendService {
       ...(request.wait && { waitMs: this.config.SEND_SYNC_TIMEOUT_MS }),
       ...(requestHash !== undefined && { requestHash })
     })
+  }
+
+  // The channel call carries a caption and mentions only: anything else would be dropped while the
+  // job reported `sent`, a quote above all (a reply would go out as a plain post)
+  private assertChannelOptions(options: SendOptions, quotedMessageId: string | undefined): void {
+    const unsupported = [
+      ...(quotedMessageId === undefined ? [] : ['quotedMessageId']),
+      ...Object.keys(options).filter(key => key !== 'caption' && key !== 'mentions')
+    ]
+    if (unsupported.length > 0) {
+      throw new ValidationError(
+        'VALIDATION_ERROR',
+        'A channel post takes text or media with a caption and mentions only',
+        { fields: unsupported }
+      )
+    }
   }
 
   // The cheap answer of the policy at enqueue; the worker asks again before it dispatches

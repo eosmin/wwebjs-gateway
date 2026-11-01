@@ -1,6 +1,7 @@
 import { buildMessageDto } from '../../tests/helpers/fake-whatsapp-client.js'
 import { NotFoundError, ValidationError } from '../common/errors.js'
 import type { AppConfig } from '../config/env.schema.js'
+import { ChannelPostBody } from '../types/channels.dto.js'
 import { SendMessageBody } from '../types/messages.dto.js'
 import type { PolicyDecision } from '../types/send-policy.dto.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
@@ -489,5 +490,122 @@ describe('MessageSendService', () => {
         service.reply(request, 'gone', { type: 'text', body: 'ok' })
       ).rejects.toBeInstanceOf(NotFoundError)
     })
+  })
+})
+
+describe('post to a channel', () => {
+  const CHANNEL = '120363000000000001@newsletter'
+
+  it('queues the post for the channel, with no humanize even when the session has defaults', async () => {
+    const { service, jobOf, humanize, check } = build()
+
+    await service.postToChannel(
+      { ...request, idempotencyKey: 'k1' },
+      CHANNEL,
+      ChannelPostBody.parse({ type: 'text', body: 'Nueva colección', mentions: [CHAT] })
+    )
+
+    expect(jobOf()).toEqual({
+      sessionId: 's',
+      chatId: CHANNEL,
+      content: { type: 'text', body: 'Nueva colección' },
+      options: { mentions: [CHAT] },
+      idempotencyKey: 'k1'
+    })
+    expect(humanize).not.toHaveBeenCalled()
+    // The policy sees the channel like any other chat, with the text of the post
+    expect(check).toHaveBeenCalledWith({
+      sessionId: 's',
+      chatId: CHANNEL,
+      body: 'Nueva colección',
+      waitedMs: 0
+    })
+  })
+
+  it('resolves the media of a post and keeps its caption', async () => {
+    const { service, jobOf, media } = build()
+
+    await service.postToChannel(
+      request,
+      CHANNEL,
+      ChannelPostBody.parse({
+        type: 'media',
+        source: { base64: 'QUJD', mimetype: 'image/png' },
+        caption: 'Foto'
+      })
+    )
+
+    expect(media.resolve).toHaveBeenCalledWith('s', { base64: 'QUJD', mimetype: 'image/png' })
+    expect(jobOf().content).toEqual({
+      type: 'media',
+      media: { mimetype: 'image/png', data: 'QUJD' }
+    })
+    expect(jobOf().options).toEqual({ caption: 'Foto' })
+  })
+
+  it('answers the first result again for the same key and post, and does not queue twice', async () => {
+    const { service, send } = build({ replay: { jobId: 'job-0', replayed: true } })
+
+    await expect(
+      service.postToChannel(
+        { ...request, idempotencyKey: 'k1' },
+        CHANNEL,
+        ChannelPostBody.parse({ type: 'text', body: 'hola' })
+      )
+    ).resolves.toEqual({ jobId: 'job-0', replayed: true })
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('refuses a poll sent with messages.send to a channel id before anything is queued', async () => {
+    const { service, send } = build()
+
+    await expect(
+      service.send(request, parse({ to: CHANNEL, type: 'poll', name: 'Q', options: ['a', 'b'] }))
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('does not humanize a text sent with messages.send to a channel id', async () => {
+    const { service, jobOf, humanize } = build()
+
+    await service.send(
+      request,
+      parse({ to: CHANNEL, type: 'text', body: 'hola', humanize: { typing: 'auto' } })
+    )
+
+    expect(jobOf().humanize).toBeUndefined()
+    expect(humanize).not.toHaveBeenCalled()
+  })
+
+  it('refuses a quote or a media flag sent to a channel, which the channel call cannot carry', async () => {
+    const { service, send } = build()
+
+    await expect(
+      service.send(
+        request,
+        parse({ to: CHANNEL, type: 'text', body: 'hola', quotedMessageId: 'false_x@c.us_A' })
+      )
+    ).rejects.toBeInstanceOf(ValidationError)
+    await expect(
+      service.send(
+        request,
+        parse({
+          to: CHANNEL,
+          type: 'media',
+          source: { url: 'https://example.com/a.png' },
+          asSticker: true
+        })
+      )
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('refuses to forward a message to a channel', async () => {
+    const { service, send } = build()
+
+    await expect(service.forward(request, 'false_x@c.us_A', CHANNEL)).rejects.toBeInstanceOf(
+      ValidationError
+    )
+    expect(send).not.toHaveBeenCalled()
   })
 })

@@ -15,7 +15,7 @@ const EXPECTED: Record<string, { scope: string; wwebjs: string[] }> = {
     scope: 'send',
     wwebjs: ['Chat.sendStateTyping', 'Chat.sendStateRecording', 'Chat.clearState']
   },
-  'chats.seen': { scope: 'send', wwebjs: ['Chat.sendSeen', 'Client.sendSeen'] },
+  'chats.seen': { scope: 'send', wwebjs: ['Channel.sendSeen', 'Chat.sendSeen', 'Client.sendSeen'] },
   'chats.markUnread': { scope: 'manage', wwebjs: ['Chat.markUnread', 'Client.markChatUnread'] },
   'chats.archive': { scope: 'manage', wwebjs: ['Chat.archive', 'Client.archiveChat'] },
   'chats.unarchive': { scope: 'manage', wwebjs: ['Chat.unarchive', 'Client.unarchiveChat'] },

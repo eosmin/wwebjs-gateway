@@ -1,6 +1,6 @@
 import { ValidationError } from '../errors.js'
 
-import { isWaId, parseRecipient, phoneDigits, userIdFromDigits } from './wa-id.js'
+import { isChannelId, isWaId, parseRecipient, phoneDigits, userIdFromDigits } from './wa-id.js'
 
 describe('parseRecipient', () => {
   it.each([
@@ -72,4 +72,14 @@ describe('phoneDigits', () => {
       expect(phoneDigits(value)).toBeNull()
     }
   )
+})
+
+describe('isChannelId', () => {
+  it('is true only for a valid channel id', () => {
+    expect(isChannelId('120363000000000001@newsletter')).toBe(true)
+    expect(isChannelId('120363000000000001@g.us')).toBe(false)
+    expect(isChannelId('5215500000001@c.us')).toBe(false)
+    expect(isChannelId('@newsletter')).toBe(false)
+    expect(isChannelId('a b@newsletter')).toBe(false)
+  })
 })

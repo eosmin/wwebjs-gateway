@@ -162,7 +162,7 @@ export class ChatsController {
       'Sends the read receipt of every message of the chat: the other side sees the blue ticks.',
     errors: ON_CHAT,
     examples: { request: null, response: null },
-    wwebjs: ['Chat.sendSeen', 'Client.sendSeen']
+    wwebjs: ['Channel.sendSeen', 'Chat.sendSeen', 'Client.sendSeen']
   })
   seen(@Param() { sessionId, chatId }: SessionChatParamsDto): Promise<void> {
     return this.chats.seen(sessionId, chatId)
@@ -306,7 +306,7 @@ export class ChatsController {
     scope: 'manage',
     summary: 'Delete a chat',
     description:
-      'Removes the chat and its messages from the linked account only; the other side keeps them. Cannot be undone. A channel is not deleted here: that is a channels route.',
+      'Removes the chat and its messages from the linked account only; the other side keeps them. Cannot be undone. A channel is not deleted here: `channels.delete` does it.',
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.delete']

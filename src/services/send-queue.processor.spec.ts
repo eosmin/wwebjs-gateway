@@ -111,6 +111,41 @@ describe('SendJobProcessor', () => {
       expect(hooks.markDispatched).toHaveBeenCalledTimes(1)
     })
 
+    it('posts to a channel with its own call, passing the caption and the mentions only', async () => {
+      const channel = '120363000000000001@newsletter'
+      const media = { type: 'media', media: { mimetype: 'image/png', data: 'AA==' } } as const
+      const result = await run(
+        build(),
+        job({
+          chatId: channel,
+          content: media,
+          options: { caption: 'Foto', mentions: [CHAT], linkPreview: true }
+        })
+      )
+
+      expect(result.outcome.ok).toBe(true)
+      expect(client.callsOf('sendMessage')).toHaveLength(0)
+      expect(client.callsOf('sendChannelMessage')[0]?.args).toEqual([
+        channel,
+        media,
+        { caption: 'Foto', mentions: [CHAT] }
+      ])
+      expect(hooks.markDispatched).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses content a channel cannot take, as a definite failure', async () => {
+      const result = await run(
+        build(),
+        job({
+          chatId: '120363000000000001@newsletter',
+          content: { type: 'location', latitude: 1, longitude: 2 }
+        })
+      )
+
+      expect(result.outcome).toMatchObject({ ok: false, error: { code: 'VALIDATION_ERROR' } })
+      expect(client.callsOf('sendChannelMessage')).toHaveLength(0)
+    })
+
     it('ends a forward whose outcome is unknown as UNKNOWN_OUTCOME, marked first and never retried', async () => {
       const order: string[] = []
       hooks.markDispatched.mockImplementation(() => order.push('mark'))

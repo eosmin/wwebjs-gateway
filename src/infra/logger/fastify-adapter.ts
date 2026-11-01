@@ -12,7 +12,8 @@ export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024
 export const SEND_BODY_LIMIT_BYTES = 40 * 1024 * 1024
 export const SEND_ROUTES: ReadonlySet<string> = new Set([
   '/v1/sessions/:sessionId/messages',
-  '/v1/sessions/:sessionId/messages/:messageId/reply'
+  '/v1/sessions/:sessionId/messages/:messageId/reply',
+  '/v1/sessions/:sessionId/channels/:channelId/messages'
 ])
 
 // Fastify numbers requests (`req-1`) and pino-http keeps an id that is already set, so the id a caller
