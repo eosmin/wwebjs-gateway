@@ -8,6 +8,7 @@ import { ContactsService } from './contacts.service.js'
 import { GroupsService } from './groups.service.js'
 import { HumanizeDefaultsService } from './humanize-defaults.service.js'
 import { IdempotentSendService } from './idempotent-send.service.js'
+import { LabelsService } from './labels.service.js'
 import { LookupService } from './lookup.service.js'
 import { MediaResolverService } from './media-resolver.service.js'
 import { MessageSendService } from './message-send.service.js'
@@ -42,6 +43,7 @@ import { SendQueueService } from './send-queue.service.js'
     ContactsService,
     ChannelsService,
     GroupsService,
+    LabelsService,
     PresenceProfileService,
     LookupService,
     { provide: PolicyStateStore, useClass: RedisPolicyStateStore }
@@ -59,6 +61,7 @@ import { SendQueueService } from './send-queue.service.js'
     ContactsService,
     ChannelsService,
     GroupsService,
+    LabelsService,
     PresenceProfileService,
     LookupService
   ]

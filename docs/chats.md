@@ -23,7 +23,7 @@ A route on one chat first checks that the chat exists: WhatsApp Web answers a ca
 | `chats.delete`         | `DELETE …/chats/:chatId`              | `manage` | `204`                                    |
 | `chats.syncHistory`    | `POST …/chats/:chatId/sync-history`   | `manage` | `204`                                    |
 
-Labels and customer notes of a chat belong to steps 6.4 and 6.7.
+The labels of a chat are [`labels.ofChat` and `labels.setForChat`](labels.md); its customer note belongs to step 6.7.
 
 ## Reads
 

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { ChannelDto, ChatDto, GroupChatDto, MessageDto } from './dto.js'
 import { SessionId } from './sessions.dto.js'
 
-const ChatId = z
+export const ChatId = z
   .string()
   .min(1)
   .max(100)
