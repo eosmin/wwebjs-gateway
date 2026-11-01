@@ -328,4 +328,87 @@ describe('ChatsService', () => {
       })
     })
   })
+  describe('customer notes', () => {
+    const NOTE = {
+      id: 'n1',
+      chatId: CHAT,
+      content: 'Call after 6 pm',
+      type: 'unstructured',
+      createdAt: 1,
+      modifiedAt: 2
+    }
+    const person = { isGroup: false }
+
+    it('reads the note of a customer chat', async () => {
+      const getCustomerNote = ok(NOTE)
+      const { service } = build({ getCustomerNote, getChatById: ok(person) })
+
+      await expect(service.customerNote('s', CHAT)).resolves.toEqual(NOTE)
+      expect(getCustomerNote).toHaveBeenCalledWith(CHAT)
+    })
+
+    it('answers 404 when the chat has no note', async () => {
+      const { service } = build({ getCustomerNote: ok(null), getChatById: ok(person) })
+
+      await expect(service.customerNote('s', CHAT)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+        status: 404
+      })
+    })
+
+    it('writes the note and returns what WhatsApp kept', async () => {
+      const addOrEditCustomerNote = ok(undefined)
+      const getCustomerNote = ok(NOTE)
+      const { service } = build({ addOrEditCustomerNote, getCustomerNote, getChatById: ok(person) })
+
+      await expect(service.setCustomerNote('s', CHAT, NOTE.content)).resolves.toEqual(NOTE)
+      expect(addOrEditCustomerNote).toHaveBeenCalledWith(CHAT, NOTE.content)
+    })
+
+    it.each([
+      ['an account without notes (nothing is stored)', null],
+      ['a note that differs from the one written', { ...NOTE, content: 'old' }]
+    ])('answers 502 when the note read back is %s', async (_name, saved) => {
+      const { service } = build({
+        addOrEditCustomerNote: ok(undefined),
+        getCustomerNote: ok(saved),
+        getChatById: ok(person)
+      })
+
+      await expect(service.setCustomerNote('s', CHAT, NOTE.content)).rejects.toMatchObject({
+        code: 'WHATSAPP_ERROR'
+      })
+    })
+
+    it.each([
+      ['a group', { isGroup: true }],
+      ['a channel', { isGroup: false, isChannel: true }]
+    ])('refuses %s before touching the note', async (_name, chat) => {
+      const addOrEditCustomerNote = ok(undefined)
+      const getCustomerNote = ok(NOTE)
+      const { service } = build({ addOrEditCustomerNote, getCustomerNote, getChatById: ok(chat) })
+
+      await expect(service.customerNote('s', CHAT)).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR'
+      })
+      await expect(service.setCustomerNote('s', CHAT, 'x')).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR'
+      })
+      expect(addOrEditCustomerNote).not.toHaveBeenCalled()
+      expect(getCustomerNote).not.toHaveBeenCalled()
+    })
+
+    it('answers 404 for a chat the page does not have', async () => {
+      const addOrEditCustomerNote = ok(undefined)
+      const { service } = build({
+        addOrEditCustomerNote,
+        getChatById: jest.fn(() => Promise.reject(new WaChatNotFoundError('getChatById')))
+      })
+
+      await expect(service.setCustomerNote('s', CHAT, 'x')).rejects.toBeInstanceOf(
+        WaChatNotFoundError
+      )
+      expect(addOrEditCustomerNote).not.toHaveBeenCalled()
+    })
+  })
 })

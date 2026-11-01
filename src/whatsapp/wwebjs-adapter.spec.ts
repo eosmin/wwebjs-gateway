@@ -767,6 +767,33 @@ describe('calls', () => {
     await expect(h.adapter.rejectCall('c1')).resolves.toBe(false)
   })
 
+  it('keeps the six fields of a customer note and answers null when there is none', async () => {
+    const h = harness()
+    ready(h)
+    const get = stub(h.client, 'getCustomerNote')
+    get.mockResolvedValueOnce({
+      id: 'n1',
+      chatId: '5215500000001@c.us',
+      content: 'Call after 6 pm',
+      type: 'unstructured',
+      createdAt: 1,
+      modifiedAt: 2,
+      chatJid: 'internal',
+      extra: { deep: true }
+    })
+    get.mockResolvedValueOnce(null)
+
+    await expect(h.adapter.getCustomerNote('5215500000001@c.us')).resolves.toEqual({
+      id: 'n1',
+      chatId: '5215500000001@c.us',
+      content: 'Call after 6 pm',
+      type: 'unstructured',
+      createdAt: 1,
+      modifiedAt: 2
+    })
+    await expect(h.adapter.getCustomerNote('5215500000001@c.us')).resolves.toBeNull()
+  })
+
   it('answers the client info only once WhatsApp Web gave it', async () => {
     const h = harness()
     ready(h)

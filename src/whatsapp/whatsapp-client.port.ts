@@ -353,7 +353,8 @@ export interface WhatsAppClientPort {
   deleteChat(chatId: string): Promise<boolean>
   syncHistory(chatId: string): Promise<boolean>
   addOrEditCustomerNote(userId: string, note: string): Promise<void>
-  getCustomerNote(userId: string): Promise<CustomerNote>
+  // null when the chat has no note, or the account has no customer notes
+  getCustomerNote(userId: string): Promise<CustomerNote | null>
 
   // Contacts and numbers
   getContacts(): Promise<AnyContactDto[]>

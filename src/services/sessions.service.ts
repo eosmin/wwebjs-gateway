@@ -1,13 +1,16 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { toBuffer } from 'qrcode'
 import { z } from 'zod'
 
-import { NotFoundError } from '../common/errors.js'
+import { NotFoundError, WhatsAppError } from '../common/errors.js'
 import type { Session } from '../database/models.js'
 import { SessionsRepository } from '../database/repositories/sessions.repository.js'
-import type { ClientInfoDto } from '../types/dto.js'
+import { BatteryInfoDto } from '../types/dto.js'
 import type {
   CreateSessionDto,
+  PairingCodeBodyDto,
+  PairingCodeResponseDto,
+  SessionClientInfoDto,
   SessionDto,
   SessionListDto,
   SessionQrDto,
@@ -48,6 +51,8 @@ const sessionNotFound = (id: string): NotFoundError =>
 
 @Injectable()
 export class SessionsService {
+  private readonly logger = new Logger(SessionsService.name)
+
   constructor(
     @Inject(SessionsRepository) private readonly sessions: SessionsRepository,
     @Inject(SessionManager) private readonly manager: SessionManager
@@ -120,8 +125,38 @@ export class SessionsService {
     return { version: await this.manager.requireReady(id).getWWebVersion() }
   }
 
-  async info(id: string): Promise<ClientInfoDto> {
-    return this.manager.requireReady(id).getClientInfo()
+  // The battery is read apart: a linked device often cannot give it, and that must not hide the
+  // account. Only a failure of WhatsApp Web is left out; anything else is a real error.
+  async info(id: string): Promise<SessionClientInfoDto> {
+    const client = this.manager.requireReady(id)
+    const info = await client.getClientInfo()
+    try {
+      // A linked device can answer with empty values instead of failing
+      const battery = BatteryInfoDto.safeParse(await client.getBatteryStatus())
+      return battery.success ? { ...info, battery: battery.data } : info
+    } catch (error: unknown) {
+      if (!(error instanceof WhatsAppError)) throw error
+      this.logger.debug(`[${id}] the battery could not be read (${error.code})`)
+      return info
+    }
+  }
+
+  // Asked while the session waits to be linked: a code instead of the QR. A new request replaces
+  // the pending code. The code is a credential for the account, so it is never logged.
+  async requestPairingCode(id: string, body: PairingCodeBodyDto): Promise<PairingCodeResponseDto> {
+    const client = this.manager.requireLinking(id, 'qr', 'pairing_code')
+    return {
+      code: await client.requestPairingCode({
+        phoneNumber: body.phoneNumber,
+        ...(body.showNotification === undefined ? {} : { showNotification: body.showNotification })
+      })
+    }
+  }
+
+  // Goes back to the QR code. The `code` event may not have moved the status yet when the caller
+  // cancels the code it just received, so `qr` is accepted too.
+  async cancelPairingCode(id: string): Promise<void> {
+    await this.manager.requireLinking(id, 'qr', 'pairing_code').cancelPairingCode()
   }
 
   private requireQr(id: string): string {

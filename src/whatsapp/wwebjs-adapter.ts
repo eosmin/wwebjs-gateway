@@ -33,6 +33,7 @@ import type {
 
 import {
   mapBatteryInfo,
+  mapCustomerNote,
   mapBroadcast,
   mapBusinessContact,
   mapCall,
@@ -1216,8 +1217,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('addOrEditCustomerNote', () => this.client.addOrEditCustomerNote(userId, note))
   }
 
-  getCustomerNote(userId: string): Promise<CustomerNote> {
-    return this.run('getCustomerNote', () => this.client.getCustomerNote(userId))
+  getCustomerNote(userId: string): Promise<CustomerNote | null> {
+    return this.run('getCustomerNote', async () => {
+      const note = await this.client.getCustomerNote(userId)
+      return note ? mapping(() => mapCustomerNote(note)) : null
+    })
   }
 
   // ---- Contacts and numbers --------------------------------------------------------------------

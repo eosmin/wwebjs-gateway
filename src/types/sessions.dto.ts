@@ -1,7 +1,7 @@
 import { createZodDto } from 'nestjs-zod'
 import { z } from 'zod'
 
-import { ClientInfoDto as ClientInfo, SessionStatus } from './dto.js'
+import { BatteryInfoDto as BatteryInfo, ClientInfoDto as ClientInfo, SessionStatus } from './dto.js'
 
 const isoDate = z.iso.datetime()
 
@@ -108,5 +108,32 @@ export const SessionWebVersion = z.object({
 export class SessionWebVersionDto extends createZodDto(SessionWebVersion) {}
 
 // A copy without the id `ClientInfoDto` carries in its meta: the id would clash with the name that
-// nestjs-zod gives the class in the OpenAPI document
-export class SessionClientInfoDto extends createZodDto(z.object(ClientInfo.shape)) {}
+// nestjs-zod gives the class in the OpenAPI document. The battery is left out when WhatsApp Web
+// cannot read it (a linked device often cannot), so it never fails the whole read.
+export const SessionClientInfo = z.object({
+  ...ClientInfo.shape,
+  battery: z
+    .object(BatteryInfo.shape)
+    .optional()
+    .describe('Battery of the phone; absent when WhatsApp Web cannot read it')
+})
+export class SessionClientInfoDto extends createZodDto(SessionClientInfo) {}
+
+// Digits only, country code included and no "+": what wwebjs takes to link by a code
+export const PairingCodeBody = z.strictObject({
+  phoneNumber: z
+    .string()
+    .trim()
+    .regex(/^\d{7,15}$/, 'must be digits only, country code included, without "+"')
+    .describe('Phone number of the account to link, such as 5215500000001'),
+  showNotification: z
+    .boolean()
+    .optional()
+    .describe('Whether WhatsApp notifies the phone to enter the code. Default true')
+})
+export class PairingCodeBodyDto extends createZodDto(PairingCodeBody) {}
+
+export const PairingCodeResponse = z.object({
+  code: z.string().describe('The code to type on the phone, such as ABCD-1234')
+})
+export class PairingCodeResponseDto extends createZodDto(PairingCodeResponse) {}

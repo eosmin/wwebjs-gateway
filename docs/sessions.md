@@ -112,13 +112,15 @@ Every route is under `/v1/sessions` and needs an API key ([authentication](authe
 | `POST /v1/sessions/:sessionId/reset-state` | `manage` | `resetState`. `204`; `409 SESSION_NOT_READY` unless the session is ready. |
 | `GET /v1/sessions/:sessionId/qr` | `manage` | `{ qr, status }`: the text WhatsApp encodes. `404` when the session shows no QR code. |
 | `GET /v1/sessions/:sessionId/qr.png` | `manage` | The same QR code as a PNG (`image/png`). |
-| `GET /v1/sessions/:sessionId/state` `/wweb-version` `/info` | `read` | What the client of a ready session answers: the connection state, the WhatsApp Web version and the linked account. `409 SESSION_NOT_READY` otherwise. |
+| `GET /v1/sessions/:sessionId/state` `/wweb-version` `/info` | `read` | What the client of a ready session answers: the connection state, the WhatsApp Web version and the linked account, with the battery of the phone (`battery`) when WhatsApp Web can read it; a linked device often cannot, and the field is then absent. `409 SESSION_NOT_READY` otherwise. |
+| `POST /v1/sessions/:sessionId/pairing-code` | `manage` | Links by a code instead of a QR code. Body `{ phoneNumber, showNotification? }` (digits, country code included, no `+`); answers `{ code }`. The session must be in `qr` or `pairing_code` (a new request replaces the pending code); otherwise `409 SESSION_NOT_READY`. |
+| `DELETE /v1/sessions/:sessionId/pairing-code` | `manage` | Drops the pending code and goes back to the QR code. `204`; `409 SESSION_NOT_READY` unless the session is in `qr` or `pairing_code` (the `code` event can arrive after the answer of the request). |
 
 The session DTO has the columns of the row except `seqHighWater`, an internal bigint that never leaves the gateway. `settings` accepts the keys `ordering.enabled`, `autoDownloadAudio`, `autoDownloadDocuments`, `autoDownloadPhotos`, `autoDownloadVideos` and `backgroundSync`, and nothing else; a `PATCH` replaces the keys it names as a whole (the `ordering` object is replaced, its keys are not merged) and keeps the others, including those that other services keep in the same column. The merge is one SQL statement (`jsonb ||`), so concurrent requests, or another service writing its own keys, never overwrite each other. A `PATCH` with no field is `400 VALIDATION_ERROR`. `settings` is returned whole to any key that can read the session, so it never holds a secret: those live in their own tables.
 
 The QR code is a credential until it is scanned: whoever scans it links a device to the account and reads and sends as it, so both routes need `manage` and not `read`, which is in the default scopes of a key (a chatbot key must not be able to ask for it). Besides that, both routes answer `Cache-Control: no-store`, the code is kept in memory only, and it never reaches the logs or the database. WhatsApp renews it every few seconds, so read it again instead of keeping it.
 
-Not part of this pass: the pairing-code routes (`POST` and `DELETE …/pairing-code`) and the battery of the account; the manager has no way yet to reach a client that is not ready.
+The pairing code is a credential like the QR code, so its routes need `manage`, the code is also delivered as the `code` event (which moves the session to `pairing_code`), and the gateway never logs it. WhatsApp Web renews the code about every three minutes while it is pending; each one arrives as a `code` event. The manager reaches the client of a session that is not ready only through `requireLinking`, which names the statuses it accepts.
 
 ## Boot and shutdown
 

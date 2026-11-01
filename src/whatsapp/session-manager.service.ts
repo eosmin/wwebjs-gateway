@@ -264,6 +264,20 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     return client
   }
 
+  // The client of a session that waits for the account to be linked, which is where a pairing code
+  // is asked for or cancelled: `requireReady` would refuse it, since nothing is logged in yet
+  requireLinking(id: string, ...allowed: readonly SessionStatus[]): WhatsAppClientPort {
+    const status = this.status(id)
+    const client = this.runtimes.get(id)?.client
+    if (!allowed.includes(status) || !client) {
+      throw new ConflictError(
+        'SESSION_NOT_READY',
+        `Session ${id} is ${status}, not one of: ${allowed.join(', ')}`
+      )
+    }
+    return client
+  }
+
   // ---- Watchdog entry points -------------------------------------------------------------------
 
   running(): RunningSession[] {

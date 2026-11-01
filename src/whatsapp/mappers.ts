@@ -24,6 +24,8 @@ import type {
   ReactionListDto
 } from '../types/dto.js'
 
+import type { CustomerNote } from './whatsapp-client.port.js'
+
 // Pure functions from what whatsapp-web.js hands out to our DTOs. They take structural inputs
 // (the `*Source` types below), never a wwebjs type, so they run in unit tests without the library
 // and `wwebjs-adapter.ts` stays the only file that imports it. Each mapper copies the fields it
@@ -776,6 +778,19 @@ export function mapPayment(source: PaymentSource): PaymentDto {
 
 export function mapBatteryInfo(source: BatteryInfoDto): BatteryInfoDto {
   return { battery: source.battery, plugged: source.plugged }
+}
+
+// The note comes out of the page serialized, with whatever else WhatsApp keeps on it: only the six
+// fields of the contract leave
+export function mapCustomerNote(source: CustomerNote): CustomerNote {
+  return {
+    id: source.id,
+    chatId: source.chatId,
+    content: source.content,
+    type: source.type,
+    createdAt: source.createdAt,
+    modifiedAt: source.modifiedAt
+  }
 }
 
 export type ClientInfoSource = Omit<WithIds<ClientInfoDto, 'wid' | 'me'>, 'phone'> & {
