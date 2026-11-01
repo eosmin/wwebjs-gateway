@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { nullIfMissing } from '../db-errors.js'
+import { isForeignKeyViolation, nullIfMissing } from '../db-errors.js'
 import type { Webhook, WebhookMediaMode } from '../models.js'
 import { PrismaService } from '../prisma.service.js'
 
@@ -12,6 +12,8 @@ export interface NewWebhook {
   events?: string[]
   enabled?: boolean
   mediaMode?: WebhookMediaMode
+  // Null = follow INCLUDE_RAW
+  includeRaw?: boolean | null
 }
 
 export interface WebhookPatch {
@@ -20,14 +22,21 @@ export interface WebhookPatch {
   events?: string[]
   enabled?: boolean
   mediaMode?: WebhookMediaMode
+  includeRaw?: boolean | null
 }
 
 @Injectable()
 export class WebhooksRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  create(data: NewWebhook): Promise<Webhook> {
-    return this.prisma.webhook.create({ data })
+  // Null when the session of the webhook does not exist (any more)
+  async create(data: NewWebhook): Promise<Webhook | null> {
+    try {
+      return await this.prisma.webhook.create({ data })
+    } catch (error) {
+      if (isForeignKeyViolation(error)) return null
+      throw error
+    }
   }
 
   findById(id: string): Promise<Webhook | null> {

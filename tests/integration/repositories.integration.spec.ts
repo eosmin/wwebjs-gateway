@@ -81,6 +81,7 @@ describe('repositories (integration)', () => {
       url: 'https://example.test/hook',
       secret: 's'
     })
+    if (webhook === null) throw new Error('the webhook could not be created')
     webhookIds.push(webhook.id)
     return webhook.id
   }
@@ -399,17 +400,34 @@ describe('repositories (integration)', () => {
         sessionId: null,
         events: ['*'],
         enabled: true,
-        mediaMode: 'reference'
+        mediaMode: 'reference',
+        includeRaw: null
       })
       const updated = await webhooks.update(id, {
         enabled: false,
         events: ['message'],
-        mediaMode: 'inline'
+        mediaMode: 'inline',
+        includeRaw: false
       })
-      expect(updated).toMatchObject({ enabled: false, events: ['message'], mediaMode: 'inline' })
+      expect(updated).toMatchObject({
+        enabled: false,
+        events: ['message'],
+        mediaMode: 'inline',
+        includeRaw: false
+      })
       expect(await webhooks.update(MISSING_UUID, { enabled: false })).toBeNull()
       expect(await webhooks.delete(id)).toBe(true)
       expect(await webhooks.delete(id)).toBe(false)
+    })
+
+    it('answers null for a session that does not exist', async () => {
+      const created = await webhooks.create({
+        sessionId: 'it-missing',
+        url: 'https://example.test/hook',
+        secret: 's'
+      })
+
+      expect(created).toBeNull()
     })
 
     it('lists by session and picks the enabled ones for an event source', async () => {
