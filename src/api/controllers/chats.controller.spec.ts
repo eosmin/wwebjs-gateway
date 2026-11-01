@@ -5,7 +5,10 @@ import { MessagesModule } from '../messages.module.js'
 // must not: the table pins the scope and the wwebjs symbols of every chats operation
 const EXPECTED: Record<string, { scope: string; wwebjs: string[] }> = {
   'chats.list': { scope: 'read', wwebjs: ['Client.getChats'] },
-  'chats.get': { scope: 'read', wwebjs: ['Client.getChatById', 'Contact.getChat'] },
+  'chats.get': {
+    scope: 'read',
+    wwebjs: ['Client.getChatById', 'Contact.getChat', 'Broadcast.getChat']
+  },
   'chats.messages': { scope: 'read', wwebjs: ['Chat.fetchMessages'] },
   'chats.pinnedMessages': {
     scope: 'read',

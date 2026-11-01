@@ -675,6 +675,33 @@ describe('calls', () => {
     })
   })
 
+  it('answers null for a user without statuses, which wwebjs builds without an id, and skips it in the list', async () => {
+    const h = harness()
+    const none = { totalCount: undefined, unreadCount: undefined, msgs: undefined }
+    const some = {
+      id: { _serialized: '5215500000001@c.us' },
+      timestamp: 1,
+      totalCount: 0,
+      unreadCount: 0,
+      msgs: []
+    }
+    stub(h.client, 'getBroadcastById').mockResolvedValueOnce(none).mockResolvedValueOnce(some)
+    stub(h.client, 'getContactById').mockResolvedValue({
+      getBroadcast: () => Promise.resolve(none)
+    })
+    stub(h.client, 'getBroadcasts').mockResolvedValue([none, some])
+    ready(h)
+
+    await expect(h.adapter.getBroadcastById('a@c.us')).resolves.toBeNull()
+    await expect(h.adapter.getBroadcastById('5215500000001@c.us')).resolves.toMatchObject({
+      id: '5215500000001@c.us'
+    })
+    await expect(h.adapter.getContactBroadcast('a@c.us')).resolves.toBeNull()
+    await expect(h.adapter.getBroadcasts()).resolves.toEqual([
+      { id: '5215500000001@c.us', timestamp: 1, totalCount: 0, unreadCount: 0, msgs: [] }
+    ])
+  })
+
   it('answers a chat the page does not have as not found, in the chat operations and the group ones', async () => {
     const h = harness()
     stub(h.client, 'getChatById').mockResolvedValue(undefined)

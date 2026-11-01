@@ -106,7 +106,7 @@ export class ContactsController {
       'One contact by its id (`@c.us` or `@lid`). A business account carries its `businessProfile`.',
     errors: ON_SESSION,
     examples: { request: null, response: CONTACT },
-    wwebjs: ['Client.getContactById']
+    wwebjs: ['Client.getContactById', 'Broadcast.getContact']
   })
   get(@Param() { sessionId, contactId }: SessionContactParamsDto): Promise<AnyContactDto> {
     return this.contacts.get(sessionId, contactId)
@@ -190,7 +190,7 @@ export class ContactsController {
     scope: 'read',
     summary: 'Read the broadcast (status) of a contact',
     description:
-      'The status updates the contact posted, as the broadcast WhatsApp Web keeps for it.',
+      'The status updates the contact posted, as the broadcast WhatsApp Web keeps for it. Answers 404 `NOT_FOUND` when it holds none.',
     errors: ON_SESSION,
     examples: {
       request: null,

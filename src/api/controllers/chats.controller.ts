@@ -85,7 +85,7 @@ export class ChatsController {
       'One chat by its id. Answers 404 `CHAT_NOT_FOUND` when the session has no such chat.',
     errors: ON_CHAT,
     examples: { request: null, response: CHAT },
-    wwebjs: ['Client.getChatById', 'Contact.getChat']
+    wwebjs: ['Client.getChatById', 'Contact.getChat', 'Broadcast.getChat']
   })
   get(@Param() { sessionId, chatId }: SessionChatParamsDto): Promise<AnyChatDto> {
     return this.chats.get(sessionId, chatId)

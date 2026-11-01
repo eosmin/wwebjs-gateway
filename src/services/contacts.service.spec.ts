@@ -1,4 +1,4 @@
-import { WhatsAppError } from '../common/errors.js'
+import { NotFoundError, WhatsAppError } from '../common/errors.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
 import type { WhatsAppClientPort } from '../whatsapp/whatsapp-client.port.js'
 
@@ -104,5 +104,20 @@ describe('ContactsService', () => {
     await service.deleteAddressbook('s', '5215500000001')
 
     expect(del).toHaveBeenCalledWith('5215500000001')
+  })
+})
+
+describe('ContactsService broadcast', () => {
+  it('reads the broadcast of a contact', async () => {
+    const broadcast = { id: 'a@c.us', timestamp: 1, totalCount: 0, unreadCount: 0, msgs: [] }
+    const { service } = build({ getContactBroadcast: ok(broadcast) })
+
+    await expect(service.broadcast('s', 'a@c.us')).resolves.toEqual(broadcast)
+  })
+
+  it('answers NOT_FOUND for a contact the page holds no statuses of', async () => {
+    const { service } = build({ getContactBroadcast: ok(null) })
+
+    await expect(service.broadcast('s', 'a@c.us')).rejects.toBeInstanceOf(NotFoundError)
   })
 })
