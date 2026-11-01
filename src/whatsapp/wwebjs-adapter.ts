@@ -127,6 +127,7 @@ export type WwebjsAdapterConfig = Pick<
   | 'BROWSER_NAME'
   | 'PROXY_URL'
   | 'WA_CALL_TIMEOUT_MS'
+  | 'CALL_CACHE_SIZE'
   | 'FFMPEG_PATH'
   | 'INCLUDE_RAW'
   | 'RAW_MAX_FIELD_BYTES'
@@ -181,7 +182,6 @@ const WORKS_WHEN_NOT_READY: ReadonlySet<string> = new Set([
   'cancelPairingCode'
 ])
 
-const MAX_REMEMBERED_CALLS = 100
 // The text of an auth failure is the library's, not ours
 const MAX_AUTH_FAILURE_LENGTH = 200
 
@@ -714,9 +714,12 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   private rememberCall(call: wwebjs.Call): void {
+    // A call that fires again (its state changed) moves to the newest slot instead of keeping an old one
+    this.calls.delete(call.id)
     this.calls.set(call.id, call)
     const oldest = this.calls.keys().next()
-    if (this.calls.size > MAX_REMEMBERED_CALLS && !oldest.done) this.calls.delete(oldest.value)
+    if (this.calls.size > this.config.CALL_CACHE_SIZE && !oldest.done)
+      this.calls.delete(oldest.value)
   }
 
   // ---- Lifecycle -------------------------------------------------------------------------------
@@ -1676,17 +1679,32 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     )
   }
 
+  // The library answers an empty string when the page could not make the link
   createCallLink(startTime: Date, callType: string): Promise<string> {
-    return this.run('createCallLink', () => this.client.createCallLink(startTime, callType))
+    return this.run('createCallLink', async () => {
+      const link = await this.client.createCallLink(startTime, callType)
+      if (typeof link !== 'string' || link === '')
+        throw new WaOperationError('createCallLink', 'No link was made')
+      return link
+    })
   }
 
-  // wwebjs only rejects through the `Call` it handed out with the `call` event
-  rejectCall(callId: string): Promise<void> {
+  // wwebjs only rejects through the `Call` it handed out with the `call` event: false when this
+  // adapter does not hold it (too old for the ring buffer, already rejected, or never seen)
+  rejectCall(callId: string): Promise<boolean> {
     return this.run('rejectCall', async () => {
       const call = this.calls.get(callId)
-      if (!call) throw new WaOperationError('rejectCall', 'Unknown call')
-      await call.reject()
+      if (!call) return false
+      // Taken out first so that a second request for the same call finds nothing while this one is in
+      // flight; put back when the page failed, so that the call can be rejected again
       this.calls.delete(callId)
+      try {
+        await call.reject()
+      } catch (error: unknown) {
+        if (!this.calls.has(callId)) this.calls.set(callId, call)
+        throw error
+      }
+      return true
     })
   }
 }

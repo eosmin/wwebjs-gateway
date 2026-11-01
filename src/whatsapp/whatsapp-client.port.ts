@@ -459,7 +459,8 @@ export interface WhatsAppClientPort {
   getBroadcasts(): Promise<BroadcastDto[]>
   getBroadcastById(contactId: string): Promise<BroadcastDto | null>
   createCallLink(startTime: Date, callType: string): Promise<string>
-  rejectCall(callId: string): Promise<void>
+  // false when the call is not one of the recent incoming ones the adapter holds
+  rejectCall(callId: string): Promise<boolean>
 }
 
 // ---- Factory -----------------------------------------------------------------------------------

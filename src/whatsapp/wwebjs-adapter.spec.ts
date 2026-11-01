@@ -761,10 +761,10 @@ describe('calls', () => {
       reject
     })
 
-    await expect(h.adapter.rejectCall('nope')).rejects.toBeInstanceOf(WaOperationError)
-    await expect(h.adapter.rejectCall('c1')).resolves.toBeUndefined()
+    await expect(h.adapter.rejectCall('nope')).resolves.toBe(false)
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe(true)
     expect(reject).toHaveBeenCalledTimes(1)
-    await expect(h.adapter.rejectCall('c1')).rejects.toBeInstanceOf(WaOperationError)
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe(false)
   })
 
   it('answers the client info only once WhatsApp Web gave it', async () => {
@@ -1356,11 +1356,11 @@ describe('boundaries', () => {
     expect(dto.id).toBe('b@c.us')
   })
 
-  it('keeps no more than 100 calls to reject', async () => {
-    const h = harness()
+  it('keeps no more calls to reject than CALL_CACHE_SIZE, dropping the oldest', async () => {
+    const h = harness({ CALL_CACHE_SIZE: '3' })
     ready(h)
     const reject = jest.fn().mockResolvedValue(undefined)
-    for (let index = 0; index < 101; index++) {
+    for (let index = 0; index < 4; index++) {
       h.client.emit('call', {
         id: `c${index}`,
         timestamp: 1,
@@ -1373,8 +1373,82 @@ describe('boundaries', () => {
       })
     }
 
-    await expect(h.adapter.rejectCall('c0')).rejects.toBeInstanceOf(WaOperationError)
-    await expect(h.adapter.rejectCall('c100')).resolves.toBeUndefined()
+    await expect(h.adapter.rejectCall('c0')).resolves.toBe(false)
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe(true)
+    await expect(h.adapter.rejectCall('c3')).resolves.toBe(true)
+  })
+
+  it('rejects a call once when two requests race, and lets a failed reject be retried', async () => {
+    const h = harness()
+    ready(h)
+    let finish: () => void = () => undefined
+    const reject = jest
+      .fn()
+      .mockImplementationOnce(() => new Promise<void>(resolve => (finish = resolve)))
+      .mockRejectedValueOnce(new Error('page'))
+      .mockResolvedValue(undefined)
+    const call = (id: string) => ({
+      id,
+      timestamp: 1,
+      isVideo: false,
+      isGroup: false,
+      fromMe: false,
+      canHandleLocally: false,
+      webClientShouldHandle: false,
+      reject
+    })
+    h.client.emit('call', call('c1'))
+    h.client.emit('call', call('c2'))
+
+    const first = h.adapter.rejectCall('c1')
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe(false)
+    finish()
+    await expect(first).resolves.toBe(true)
+    expect(reject).toHaveBeenCalledTimes(1)
+
+    await expect(h.adapter.rejectCall('c2')).rejects.toBeInstanceOf(WaOperationError)
+    await expect(h.adapter.rejectCall('c2')).resolves.toBe(true)
+  })
+
+  it('moves a call that fires again to the newest slot of the buffer', async () => {
+    const h = harness({ CALL_CACHE_SIZE: '2' })
+    ready(h)
+    const reject = jest.fn().mockResolvedValue(undefined)
+    for (const id of ['a', 'b', 'a', 'c']) {
+      h.client.emit('call', {
+        id,
+        timestamp: 1,
+        isVideo: false,
+        isGroup: false,
+        fromMe: false,
+        canHandleLocally: false,
+        webClientShouldHandle: false,
+        reject
+      })
+    }
+
+    await expect(h.adapter.rejectCall('b')).resolves.toBe(false)
+    await expect(h.adapter.rejectCall('a')).resolves.toBe(true)
+  })
+
+  it('fails a call link the page answered with nothing', async () => {
+    const h = harness()
+    stub(h.client, 'createCallLink').mockResolvedValue(undefined)
+    ready(h)
+
+    await expect(h.adapter.createCallLink(new Date(), 'voice')).rejects.toBeInstanceOf(
+      WaOperationError
+    )
+  })
+
+  it('fails a call link the page could not make instead of answering an empty one', async () => {
+    const h = harness()
+    stub(h.client, 'createCallLink').mockResolvedValue('')
+    ready(h)
+
+    await expect(h.adapter.createCallLink(new Date(), 'voice')).rejects.toBeInstanceOf(
+      WaOperationError
+    )
   })
 
   it('lets wwebjs pause between membership requests unless the caller says otherwise', async () => {
