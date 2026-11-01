@@ -23,7 +23,7 @@ The routes under `/v1/sessions/:sessionId/contacts` (TDD §6.11). Each one is a 
 - **`contacts.about`** answers `null` when WhatsApp gives no text, which is what it does when the account has no permission to read it. **`contacts.picture`** answers `null` when WhatsApp refuses the picture (the privacy settings of the contact do not allow it).
 - **`contacts.deviceCount`** is the number of devices WhatsApp lists for the contact, the phone included (a user with one linked WhatsApp Web session has 2); `0` when it lists none.
 - **`contacts.commonGroups`** lists the ids of the groups the account and the contact share; read a group with the groups routes (step 6.2).
-- **`contacts.broadcast`** is the status updates the contact posted, as WhatsApp Web keeps them.
+- **`contacts.broadcast`** is the status updates the contact posted, as WhatsApp Web keeps them (`404 NOT_FOUND` when it holds none; see [broadcasts](broadcasts.md)).
 
 ## Block and unblock
 

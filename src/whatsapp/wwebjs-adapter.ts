@@ -403,8 +403,15 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return contacts.map(contact => this.contactDto(contact))
   }
 
-  private broadcastDto(source: Parameters<typeof mapBroadcast>[0]): BroadcastDto {
-    return mapping(() => mapBroadcast(source, this.mapOptions()))
+  // wwebjs builds a `Broadcast` without `id` and `msgs` when WhatsApp Web holds no statuses of the user
+  private broadcastDto(
+    source: Omit<Parameters<typeof mapBroadcast>[0], 'id'> & {
+      id?: Parameters<typeof mapBroadcast>[0]['id']
+    }
+  ): BroadcastDto | null {
+    const { id } = source
+    if (id === undefined) return null
+    return mapping(() => mapBroadcast({ ...source, id }, this.mapOptions()))
   }
 
   private async media(media: OutboundMedia): Promise<InstanceType<typeof MessageMedia>> {
@@ -1265,7 +1272,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('getContactDeviceCount', () => this.client.getContactDeviceCount(userId))
   }
 
-  getContactBroadcast(contactId: string): Promise<BroadcastDto> {
+  getContactBroadcast(contactId: string): Promise<BroadcastDto | null> {
     return this.run('getContactBroadcast', async () =>
       this.broadcastDto(await (await this.client.getContactById(contactId)).getBroadcast())
     )
@@ -1659,11 +1666,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
 
   getBroadcasts(): Promise<BroadcastDto[]> {
     return this.run('getBroadcasts', async () =>
-      (await this.client.getBroadcasts()).map(broadcast => this.broadcastDto(broadcast))
+      (await this.client.getBroadcasts()).flatMap(broadcast => this.broadcastDto(broadcast) ?? [])
     )
   }
 
-  getBroadcastById(contactId: string): Promise<BroadcastDto> {
+  getBroadcastById(contactId: string): Promise<BroadcastDto | null> {
     return this.run('getBroadcastById', async () =>
       this.broadcastDto(await this.client.getBroadcastById(contactId))
     )

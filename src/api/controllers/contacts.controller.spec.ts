@@ -6,7 +6,7 @@ import { MessagesModule } from '../messages.module.js'
 const EXPECTED: Record<string, { scope: string; wwebjs: string[] }> = {
   'contacts.list': { scope: 'read', wwebjs: ['Client.getContacts'] },
   'contacts.blocked': { scope: 'read', wwebjs: ['Client.getBlockedContacts'] },
-  'contacts.get': { scope: 'read', wwebjs: ['Client.getContactById'] },
+  'contacts.get': { scope: 'read', wwebjs: ['Client.getContactById', 'Broadcast.getContact'] },
   'contacts.about': { scope: 'read', wwebjs: ['Contact.getAbout'] },
   'contacts.picture': {
     scope: 'read',

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { WhatsAppError } from '../common/errors.js'
+import { NotFoundError, WhatsAppError } from '../common/errors.js'
 import type { BroadcastDto } from '../types/dto.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
 import type { AnyContactDto } from '../whatsapp/whatsapp-client.port.js'
@@ -47,8 +47,13 @@ export class ContactsService {
     return this.sessions.requireReady(sessionId).getContactDeviceCount(contactId)
   }
 
-  broadcast(sessionId: string, contactId: string): Promise<BroadcastDto> {
-    return this.sessions.requireReady(sessionId).getContactBroadcast(contactId)
+  // A contact with no statuses has no broadcast on the page
+  async broadcast(sessionId: string, contactId: string): Promise<BroadcastDto> {
+    const broadcast = await this.sessions.requireReady(sessionId).getContactBroadcast(contactId)
+    if (broadcast === null) {
+      throw new NotFoundError('NOT_FOUND', `Contact ${contactId} has no statuses`)
+    }
+    return broadcast
   }
 
   // ---- Actions ---------------------------------------------------------------------------------

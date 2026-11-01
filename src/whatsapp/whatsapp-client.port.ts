@@ -365,7 +365,8 @@ export interface WhatsAppClientPort {
   getProfilePicUrl(contactId: string): Promise<string | null>
   getCommonGroups(contactId: string): Promise<string[]>
   getContactDeviceCount(userId: string): Promise<number>
-  getContactBroadcast(contactId: string): Promise<BroadcastDto>
+  // null: WhatsApp Web holds no statuses of the user
+  getContactBroadcast(contactId: string): Promise<BroadcastDto | null>
   getContactChat(contactId: string): Promise<AnyChatDto>
   getContactLidAndPhone(userIds: string[]): Promise<LidAndPhone[]>
   saveOrEditAddressbookContact(
@@ -456,7 +457,7 @@ export interface WhatsAppClientPort {
   getChatsByLabelId(labelId: string): Promise<AnyChatDto[]>
   addOrRemoveLabels(labelIds: (number | string)[], chatIds: string[]): Promise<void>
   getBroadcasts(): Promise<BroadcastDto[]>
-  getBroadcastById(contactId: string): Promise<BroadcastDto>
+  getBroadcastById(contactId: string): Promise<BroadcastDto | null>
   createCallLink(startTime: Date, callType: string): Promise<string>
   rejectCall(callId: string): Promise<void>
 }

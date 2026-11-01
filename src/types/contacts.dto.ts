@@ -13,7 +13,7 @@ import {
 import { SessionId } from './sessions.dto.js'
 
 // A user (`@c.us` or `@lid`); a group or a channel is a chat, not a contact
-const ContactId = z
+export const ContactId = z
   .string()
   .trim()
   .min(1)
