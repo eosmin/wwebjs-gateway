@@ -16,9 +16,10 @@ import { ApiOkResponse, ApiProduces } from '@nestjs/swagger'
 import { ZodResponse } from 'nestjs-zod'
 
 import { SessionsService } from '../../services/sessions.service.js'
-import { ClientInfoDto } from '../../types/dto.js'
 import {
   CreateSessionDto,
+  PairingCodeBodyDto,
+  PairingCodeResponseDto,
   SessionClientInfoDto,
   SessionDto,
   SessionIdParamsDto,
@@ -355,7 +356,8 @@ export class SessionsController {
     id: 'sessions.info',
     scope: 'read',
     summary: 'Read the account linked to a session',
-    description: 'The id, name and platform of the linked account. The session must be ready.',
+    description:
+      'The id, name and platform of the linked account, and the battery of the phone when WhatsApp Web can read it (a linked device often cannot, and `battery` is then absent). The session must be ready.',
     errors: [
       'VALIDATION_ERROR',
       'UNAUTHORIZED',
@@ -372,12 +374,85 @@ export class SessionsController {
         wid: '5215500000001@c.us',
         me: '5215500000001@c.us',
         platform: 'android',
-        pushname: 'Support'
+        pushname: 'Support',
+        battery: { battery: 80, plugged: false }
       }
     },
-    wwebjs: ['Client.info']
+    wwebjs: [
+      'Client.info',
+      'ClientInfo.getBatteryStatus',
+      'ClientInfo.wid',
+      'ClientInfo.me',
+      'ClientInfo.platform',
+      'ClientInfo.pushname',
+      'ClientInfo.phone',
+      'ClientInfoPhone.wa_version',
+      'ClientInfoPhone.os_version',
+      'ClientInfoPhone.device_manufacturer',
+      'ClientInfoPhone.device_model',
+      'ClientInfoPhone.os_build_number',
+      'BatteryInfo.battery',
+      'BatteryInfo.plugged'
+    ]
   })
-  info(@Param() { sessionId }: SessionIdParamsDto): Promise<ClientInfoDto> {
+  info(@Param() { sessionId }: SessionIdParamsDto): Promise<SessionClientInfoDto> {
     return this.sessions.info(sessionId)
+  }
+
+  @Post(':sessionId/pairing-code')
+  @HttpCode(HttpStatus.OK)
+  @ZodResponse({ type: PairingCodeResponseDto })
+  @WaOperation({
+    id: 'sessions.requestPairingCode',
+    scope: 'manage',
+    summary: 'Link by a pairing code instead of a QR code',
+    description:
+      'Asks WhatsApp for an 8-character code to type on the phone (Linked devices, then Link with phone number). The session must be waiting for a login (`qr` or `pairing_code`); a new request replaces the pending code. The code is also delivered as the `code` event. Cancel it with `DELETE` on the same path to go back to the QR code.',
+    errors: [
+      'VALIDATION_ERROR',
+      'UNAUTHORIZED',
+      'FORBIDDEN',
+      'INSUFFICIENT_SCOPE',
+      'NOT_FOUND',
+      'SESSION_NOT_READY',
+      'WHATSAPP_ERROR',
+      'WHATSAPP_TIMEOUT'
+    ],
+    examples: {
+      request: { phoneNumber: '5215500000001', showNotification: true },
+      response: { code: 'ABCD-1234' }
+    },
+    wwebjs: ['Client.requestPairingCode']
+  })
+  requestPairingCode(
+    @Param() { sessionId }: SessionIdParamsDto,
+    @Body() body: PairingCodeBodyDto
+  ): Promise<PairingCodeResponseDto> {
+    return this.sessions.requestPairingCode(sessionId, body)
+  }
+
+  @Delete(':sessionId/pairing-code')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @WaOperation({
+    id: 'sessions.cancelPairingCode',
+    scope: 'manage',
+    summary: 'Cancel a pairing code',
+    description:
+      'Drops the pending pairing code and goes back to the QR code. The session must be in `pairing_code`.',
+    errors: [
+      'VALIDATION_ERROR',
+      'UNAUTHORIZED',
+      'FORBIDDEN',
+      'INSUFFICIENT_SCOPE',
+      'NOT_FOUND',
+      'SESSION_NOT_READY',
+      'WHATSAPP_ERROR',
+      'WHATSAPP_TIMEOUT'
+    ],
+    examples: { request: null, response: null },
+    wwebjs: ['Client.cancelPairingCode']
+  })
+  cancelPairingCode(@Param() { sessionId }: SessionIdParamsDto): Promise<void> {
+    return this.sessions.cancelPairingCode(sessionId)
   }
 }

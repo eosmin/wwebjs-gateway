@@ -1,4 +1,4 @@
-import { NotFoundError } from '../common/errors.js'
+import { NotFoundError, WhatsAppError } from '../common/errors.js'
 import type { Session } from '../database/models.js'
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
@@ -64,7 +64,8 @@ describe('SessionsService', () => {
     resetState: jest.fn(),
     status: jest.fn(),
     qr: jest.fn(),
-    requireReady: jest.fn()
+    requireReady: jest.fn(),
+    requireLinking: jest.fn()
   }
   const service = new SessionsService(
     repository as unknown as SessionsRepository, // reason: only the methods above are called
@@ -249,7 +250,10 @@ describe('SessionsService', () => {
     const client = {
       getState: jest.fn(),
       getWWebVersion: jest.fn(),
-      getClientInfo: jest.fn()
+      getClientInfo: jest.fn(),
+      getBatteryStatus: jest.fn(),
+      requestPairingCode: jest.fn(),
+      cancelPairingCode: jest.fn()
     }
 
     beforeEach(() => {
@@ -268,10 +272,80 @@ describe('SessionsService', () => {
       expect(await service.webVersion('main')).toEqual({ version: '2.3000.1' })
     })
 
-    it('reads the account of a ready session', async () => {
+    it('reads the account of a ready session with the battery of the phone', async () => {
       client.getClientInfo.mockResolvedValue({ wid: 'w' })
+      client.getBatteryStatus.mockResolvedValue({ battery: 80, plugged: true })
+
+      expect(await service.info('main')).toEqual({
+        wid: 'w',
+        battery: { battery: 80, plugged: true }
+      })
+    })
+
+    it('leaves the battery out when WhatsApp Web cannot read it', async () => {
+      client.getClientInfo.mockResolvedValue({ wid: 'w' })
+      client.getBatteryStatus.mockRejectedValue(new WhatsAppError('WHATSAPP_ERROR', 'no battery'))
 
       expect(await service.info('main')).toEqual({ wid: 'w' })
+    })
+
+    it('leaves the battery out when the phone gives no values', async () => {
+      client.getClientInfo.mockResolvedValue({ wid: 'w' })
+      client.getBatteryStatus.mockResolvedValue({ battery: undefined, plugged: undefined })
+
+      expect(await service.info('main')).toEqual({ wid: 'w' })
+    })
+
+    it('does not hide a failure that is not WhatsApp refusing the battery', async () => {
+      const failure = new Error('bug')
+      client.getClientInfo.mockResolvedValue({ wid: 'w' })
+      client.getBatteryStatus.mockRejectedValue(failure)
+
+      await expect(service.info('main')).rejects.toBe(failure)
+    })
+
+    it('asks for a pairing code of a session that waits for a login', async () => {
+      manager.requireLinking.mockReturnValue(client)
+      client.requestPairingCode.mockResolvedValue('ABCD-1234')
+
+      await expect(
+        service.requestPairingCode('main', { phoneNumber: '5215500000001' })
+      ).resolves.toEqual({ code: 'ABCD-1234' })
+      expect(manager.requireLinking).toHaveBeenCalledWith('main', 'qr', 'pairing_code')
+      expect(client.requestPairingCode).toHaveBeenCalledWith({ phoneNumber: '5215500000001' })
+
+      await service.requestPairingCode('main', {
+        phoneNumber: '5215500000001',
+        showNotification: false
+      })
+      expect(client.requestPairingCode).toHaveBeenLastCalledWith({
+        phoneNumber: '5215500000001',
+        showNotification: false
+      })
+    })
+
+    it('cancels a pending pairing code, also before the code event moved the status', async () => {
+      manager.requireLinking.mockReturnValue(client)
+      client.cancelPairingCode.mockResolvedValue(undefined)
+
+      await service.cancelPairingCode('main')
+
+      expect(manager.requireLinking).toHaveBeenCalledWith('main', 'qr', 'pairing_code')
+      expect(client.cancelPairingCode).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not call the client when the session is not waiting for a login', async () => {
+      const refused = new Error('not linking')
+      manager.requireLinking.mockImplementation(() => {
+        throw refused
+      })
+
+      await expect(
+        service.requestPairingCode('main', { phoneNumber: '5215500000001' })
+      ).rejects.toBe(refused)
+      await expect(service.cancelPairingCode('main')).rejects.toBe(refused)
+      expect(client.requestPairingCode).not.toHaveBeenCalled()
+      expect(client.cancelPairingCode).not.toHaveBeenCalled()
     })
 
     it('refuses a session that is not ready, without calling the client', async () => {

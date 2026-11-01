@@ -798,6 +798,26 @@ describe('SessionManager commands', () => {
     expect(() => built.manager.requireReady('ghost')).toThrow(NotFoundError)
   })
 
+  it('hands out the client of a session that waits for a login, only in the statuses asked', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    const client = await startSession(built)
+    expect(() => built.manager.requireLinking(ID, 'qr', 'pairing_code')).toThrow(ConflictError)
+
+    client.emit({ event: 'qr', data: { qr: 'qr-text' } })
+    await flush()
+    expect(built.manager.requireLinking(ID, 'qr', 'pairing_code')).toBe(client)
+    expect(() => built.manager.requireLinking(ID, 'pairing_code')).toThrow(ConflictError)
+
+    client.emit({ event: 'code', data: { code: 'ABCD-1234' } })
+    await flush()
+    expect(built.manager.requireLinking(ID, 'pairing_code')).toBe(client)
+
+    await makeReady(built, client)
+    expect(() => built.manager.requireLinking(ID, 'qr', 'pairing_code')).toThrow(ConflictError)
+    expect(() => built.manager.requireLinking('ghost', 'qr')).toThrow(NotFoundError)
+  })
+
   it('runs the commands of one session one after the other', async () => {
     const built = build()
     built.sessions.seed({ id: ID })
