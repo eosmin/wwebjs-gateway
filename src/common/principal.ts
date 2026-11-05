@@ -48,3 +48,18 @@ export function assertSessionAccess(principal: Principal, sessionId: string): vo
     throw new ForbiddenError('FORBIDDEN', 'The API key is not allowed to use this session')
   }
 }
+
+// A session key reaches the webhooks of its own session. The ones that listen to every session
+// (`null`) are not its own: it could read the events of the sessions it cannot reach.
+export function assertWebhookAccess(principal: Principal, sessionId: string | null): void {
+  if (sessionId === null) {
+    if (principal.sessionId !== null) {
+      throw new ForbiddenError(
+        'FORBIDDEN',
+        'The API key is not allowed to use a webhook of every session'
+      )
+    }
+    return
+  }
+  assertSessionAccess(principal, sessionId)
+}
