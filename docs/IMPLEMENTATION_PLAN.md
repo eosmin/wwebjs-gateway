@@ -109,7 +109,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 ## Milestone 7 — Outbound webhooks (`feat/outbound-webhooks`) — TDD §6.9
 
 - [x] **7.1** `webhook.service.ts` (CRUD, secret generation and rotation, SSRF check of the URL, cached `forEvent` list that every write invalidates). Adds the nullable `webhooks.includeRaw` column the TDD names in §6.6 but §5 did not list. *Carried to 7.2:* the webhooks routes and `docs/webhooks.md` (including that rotating the secret takes effect at once, also for retries). *Carried to 7.3/7.4:* the dispatcher and processor read `forEvent`, `includeRaw` (null follows `INCLUDE_RAW`) and `mediaMode`.
-- [ ] **7.2** Webhooks controller (CRUD, rotate-secret, test, deliveries, retry, retry-failed).
+- [x] **7.2** Webhooks controller (CRUD, rotate-secret, test, deliveries, retry, retry-failed). Adds `DeliveryQueueService` (queue `webhook-deliveries`, the `deliver` job with the TDD §6.9 retry policy), `WebhookDeliveriesService`, `WebhooksModule`, the `CurrentPrincipal` decorator and `assertWebhookAccess` (a session key reaches only the webhooks of its session), and `docs/webhooks.md`. *Carried to 7.3:* the dispatcher creates its deliveries with `DeliveriesRepository.create` (the `payload` column holds the redacted **event envelope**, which a manual retry queues as it is) and queues them with `DeliveryQueueService.enqueue` (never with a `jobId`); it joins `WebhooksModule`. *Carried to 7.4:* the processor consumes `DELIVERY_QUEUE_NAME` in the same module and, for each attempt, reads the webhook (URL, secret, `enabled`) with `WebhookService.require`, so a rotation or a URL change applies to queued retries (documented in `docs/webhooks.md`); drops the job when the webhook or the delivery no longer exists (a delete cascades); writes the result with `recordAttempt` (a delivered row is final); leaves a `ping` out of every `seq` bookkeeping; and registers the queue in the Bull Board source. *Carried to 8.3:* the socket command dispatch must hand the operation the principal of the connection (`CurrentPrincipal` reads it from the HTTP request) for the `webhooks.*` operations. *Carried to 7.6:* the reference consumer that buffers by `seq` in `docs/webhooks.md` (TDD §6.9).
 - [ ] **7.3** `webhook-dispatcher.service.ts`.
 - [ ] **7.4** `delivery.processor.ts`. *Done when:* signature, retry and SSRF tests pass.
 - [ ] **7.5** `retention.service.ts`. *Carried over from 5.4:* it also calls `IdempotencyRepository.deleteOlderThan` with a 24 h cutoff.
@@ -267,7 +267,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 6.6 | done | `feat/6-6-calls` | 2026-11-01 |
 | 6.7 | done | `feat/6-7-client-ops` | 2026-11-01 |
 | 7.1 | done | `feat/7-1-webhook-service` | 2026-11-01 |
-| 7.2 | todo | - | - |
+| 7.2 | done | `feat/7-2-webhooks-controller` | 2026-11-05 |
 | 7.3 | todo | - | - |
 | 7.4 | todo | - | - |
 | 7.5 | todo | - | - |
