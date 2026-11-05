@@ -89,6 +89,15 @@ export class DeliveriesRepository {
     return count === 0 ? null : this.findById(id)
   }
 
+  // The job of a pending delivery could not be queued, so nothing will ever attempt it: it goes to
+  // the dead letters, where it can be retried, instead of staying pending for ever
+  async failUnqueued(id: string, error: string): Promise<void> {
+    await this.prisma.webhookDelivery.updateMany({
+      where: { id, status: 'pending' },
+      data: { status: 'failed', lastError: error }
+    })
+  }
+
   async deleteOlderThan(cutoff: Date): Promise<number> {
     const { count } = await this.prisma.webhookDelivery.deleteMany({
       where: { createdAt: { lt: cutoff } }

@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { NotFoundError } from '../common/errors.js'
 import { generateWebhookSecret } from '../common/lib/crypto.js'
 import { assertPublicHttpUrl } from '../common/lib/ssrf.js'
+import { type Principal, assertWebhookAccess } from '../common/principal.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { Webhook } from '../database/models.js'
@@ -59,6 +60,19 @@ export class WebhookService {
   async require(id: string): Promise<Webhook> {
     const row = await this.webhooks.findById(id)
     if (row === null) throw webhookNotFound(id)
+    return row
+  }
+
+  // What the key behind a request may see: an admin key every webhook, a session key its own
+  async listFor(principal: Principal): Promise<WebhookDto[]> {
+    return this.list(principal.sessionId ?? undefined)
+  }
+
+  // The webhook of an operation by id, once the key is known to be allowed to reach it. The one
+  // place the routes decide it, for the webhook and for everything under it (secret, deliveries).
+  async requireFor(principal: Principal, id: string): Promise<Webhook> {
+    const row = await this.require(id)
+    assertWebhookAccess(principal, row.sessionId)
     return row
   }
 
