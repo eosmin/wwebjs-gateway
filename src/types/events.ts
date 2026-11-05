@@ -268,7 +268,8 @@ export const WA_EVENTS = {
     payload: z.object({ chatId: z.string(), unreachable: z.boolean() })
   },
   ping: {
-    fires: 'A test delivery requested with POST /v1/webhooks/:id/test.',
+    fires:
+      'A test delivery requested with POST /v1/webhooks/:id/test. It is not part of the sequence of the session: its seq is 0.',
     payload: none
   }
 } as const satisfies Record<WaEventName, EventDefinition>
