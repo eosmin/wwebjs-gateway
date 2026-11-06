@@ -76,6 +76,7 @@ describe('the subclasses', () => {
     ['ForbiddenError', new ForbiddenError('INSUFFICIENT_SCOPE'), 'INSUFFICIENT_SCOPE', 403],
     ['NotFoundError', new NotFoundError('NOT_FOUND'), 'NOT_FOUND', 404],
     ['ConflictError', new ConflictError('MAX_SESSIONS_REACHED'), 'MAX_SESSIONS_REACHED', 409],
+    ['ConflictError', new ConflictError('MAX_WEBHOOKS_REACHED'), 'MAX_WEBHOOKS_REACHED', 409],
     [
       'UnprocessableError',
       new UnprocessableError('IDEMPOTENCY_KEY_REUSED'),

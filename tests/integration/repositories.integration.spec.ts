@@ -430,6 +430,21 @@ describe('repositories (integration)', () => {
       expect(created).toBeNull()
     })
 
+    it('counts the webhooks of a session, the disabled ones too, and those of every session apart', async () => {
+      const a = await newSession('wh-count-a')
+      const b = await newSession('wh-count-b')
+      const first = await newWebhook(a)
+      await newWebhook(a)
+      await newWebhook(b)
+      await webhooks.update(first, { enabled: false })
+      const globals = await webhooks.countFor(null)
+      await newWebhook(null)
+
+      expect(await webhooks.countFor(a)).toBe(2)
+      expect(await webhooks.countFor(b)).toBe(1)
+      expect(await webhooks.countFor(null)).toBe(globals + 1)
+    })
+
     it('lists by session and picks the enabled ones for an event source', async () => {
       const a = await newSession('wh-a')
       const b = await newSession('wh-b')

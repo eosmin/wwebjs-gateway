@@ -89,8 +89,8 @@ export class WebhooksController {
     scope: 'webhooks',
     summary: 'Create a webhook',
     description:
-      'Events are POSTed to `url`, signed with the secret that this answer carries and no other ever will (rotate it to get a new one). Without `sessionId` the webhook receives the events of every session, which only an admin key can ask for. The URL must be public unless the gateway allows private targets.',
-    errors: ON_WEBHOOK,
+      'Events are POSTed to `url`, signed with the secret that this answer carries and no other ever will (rotate it to get a new one). Without `sessionId` the webhook receives the events of every session, which only an admin key can ask for. The URL must be public unless the gateway allows private targets. A session can have `WEBHOOKS_MAX_PER_SESSION` webhooks (so can the group of those of every session); one more is refused with `MAX_WEBHOOKS_REACHED`.',
+    errors: [...ON_WEBHOOK, 'MAX_WEBHOOKS_REACHED'],
     examples: {
       request: {
         url: 'https://bot.example.com/hooks/whatsapp',

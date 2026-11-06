@@ -48,7 +48,7 @@ function setup(options: { includeRaw?: boolean } = {}) {
   const forEvent = jest.fn((_s: string, _e: string) => Promise.resolve<Webhook[]>([]))
   const create = jest.fn((data: { id?: string }) => Promise.resolve({ id: data.id }))
   const failUnqueued = jest.fn((_id: string, _error: string) => Promise.resolve())
-  const enqueue = jest.fn((_data: unknown) => Promise.resolve())
+  const enqueue = jest.fn((_data: unknown, _options?: unknown) => Promise.resolve())
   const fetchInline = jest.fn((_event: EventEnvelope) => Promise.resolve(new Map<string, string>()))
   const metrics = new MetricsService()
   const config = parseEnv({ ...TEST_ENV, INCLUDE_RAW: String(options.includeRaw ?? true) })
@@ -193,6 +193,26 @@ describe('WebhookDispatcherService', () => {
         reference: { mimetype: 'image/png', size: 4, downloadUrl: 'u' },
         none: undefined
       })
+    })
+
+    // The job of an inline webhook carries the file: its failed job is not kept a day
+    it('tells the queue which jobs carry the file', async () => {
+      const ctx = setup()
+      ctx.fetchInline.mockResolvedValue(new Map([['m1', 'AAAA']]))
+      ctx.forEvent.mockResolvedValue([
+        webhook('inline', { mediaMode: 'inline' }),
+        webhook('reference', { mediaMode: 'reference' })
+      ])
+
+      await dispatched(ctx, event('message', photo))
+
+      const options = Object.fromEntries(
+        ctx.enqueue.mock.calls.map(([data, option]) => [
+          (data as { webhookId: string }).webhookId,
+          option
+        ])
+      )
+      expect(options).toEqual({ inline: { inlineMedia: true }, reference: { inlineMedia: false } })
     })
 
     // A slow or stuck download must cost the webhooks that asked for the bytes, not the others

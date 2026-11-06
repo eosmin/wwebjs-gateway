@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common'
+
 import { ValidationError } from '../errors.js'
 
 import {
@@ -304,5 +306,141 @@ describe('isValidAllowlistEntry', () => {
     '1.2.3'
   ])('rejects %j', e => {
     expect(isValidAllowlistEntry(e)).toBe(false)
+  })
+})
+
+describe('the addresses no switch and no allowlist opens', () => {
+  // The security review of the webhooks: an allowlisted range must not open the other metadata services
+  it.each([
+    ['100.100.100.200', '100.64.0.0/10'],
+    ['::ffff:100.100.100.200', '100.64.0.0/10'],
+    ['fd00:ec2::254', 'fc00::/7']
+  ])('refuses %s even when the allowlist names %s', async (address, cidr) => {
+    const open = policy({ privateHostAllowlist: [cidr, 'meta'], resolve: resolveTo(address) })
+    await expect(assertPublicHttpUrl('http://meta/', open)).rejects.toBeInstanceOf(ValidationError)
+  })
+
+  it('still opens the rest of an allowlisted range', async () => {
+    await expect(
+      assertPublicHttpUrl(
+        'http://svc/',
+        policy({ privateHostAllowlist: ['100.64.0.0/10'], resolve: resolveTo('100.100.100.201') })
+      )
+    ).resolves.toHaveProperty('addresses')
+    await expect(
+      assertPublicHttpUrl(
+        'http://svc/',
+        policy({ privateHostAllowlist: ['fc00::/7'], resolve: resolveTo('fd00:ec2::255') })
+      )
+    ).resolves.toHaveProperty('addresses')
+  })
+
+  // On Linux 0.0.0.0 and :: connect to the machine itself, so the switch for development keeps them shut
+  it.each([
+    'http://0.0.0.0:3000/',
+    'http://0.1.2.3/',
+    'http://[::]:3000/',
+    'http://[::ffff:0.0.0.0]/',
+    'http://[::ffff:0:0]/',
+    'http://[::ffff:100.100.100.200]/',
+    'http://100.100.100.200/latest/meta-data'
+  ])('keeps %s closed when private targets are allowed', async url => {
+    await expect(assertPublicHttpUrl(url, policy({ allowPrivate: true }))).rejects.toBeInstanceOf(
+      ValidationError
+    )
+  })
+
+  it('refuses a name that resolves to them when private targets are allowed', async () => {
+    for (const address of ['0.0.0.0', '::', '::ffff:0.0.0.0']) {
+      await expect(
+        assertPublicHttpUrl(
+          'http://localhost/',
+          policy({ allowPrivate: true, resolve: resolveTo(address) })
+        )
+      ).rejects.toBeInstanceOf(ValidationError)
+    }
+  })
+
+  it('still lets loopback through when private targets are allowed', async () => {
+    await expect(
+      assertPublicHttpUrl('http://127.0.0.1:3000/', policy({ allowPrivate: true }))
+    ).resolves.toHaveProperty('addresses')
+  })
+})
+
+describe('what a refusal says about the address', () => {
+  const logged: string[] = []
+  beforeEach(() => {
+    logged.length = 0
+    for (const level of ['log', 'warn', 'debug', 'verbose', 'error'] as const) {
+      jest.spyOn(Logger.prototype, level).mockImplementation((...args: unknown[]) => {
+        logged.push(String(args[0]))
+      })
+    }
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  const refusal = async (url: string, p: SsrfPolicy): Promise<ValidationError> => {
+    try {
+      await assertPublicHttpUrl(url, p)
+    } catch (error: unknown) {
+      if (error instanceof ValidationError) return error
+    }
+    throw new Error('the URL was accepted')
+  }
+
+  // A key of a session reads this (a webhook it creates, the error of a delivery): telling "does not
+  // resolve" from "resolves to a private address" would let it map the internal DNS
+  it('is the same whether the name does not resolve or resolves to something closed', async () => {
+    const cases = await Promise.all([
+      refusal('https://nowhere.example.com/', policy({ resolve: resolveTo() })),
+      refusal(
+        'https://down.example.com/',
+        policy({ resolve: () => Promise.reject(new Error('x')) })
+      ),
+      refusal('https://internal.example.com/', policy({ resolve: resolveTo('10.0.0.5') })),
+      refusal('https://meta.example.com/', policy({ resolve: resolveTo('169.254.169.254') })),
+      refusal('http://10.0.0.5/', policy()),
+      refusal('http://169.254.169.254/', policy({ allowPrivate: true }))
+    ])
+
+    expect(new Set(cases.map(error => error.message)).size).toBe(1)
+    expect(new Set(cases.map(error => JSON.stringify(error.details))).size).toBe(1)
+    expect(cases[0]?.message).toBe(
+      'The URL is not allowed: the host does not resolve to a public address'
+    )
+  })
+
+  it('keeps the detailed reason in the log of the server, without the URL', async () => {
+    await refusal(
+      'https://secret-host.example.com/path-token',
+      policy({ resolve: resolveTo('10.0.0.5') })
+    )
+    await refusal('https://secret-host.example.com/path-token', policy({ resolve: resolveTo() }))
+
+    const log = logged.join('\n')
+    expect(log).toMatch(/private or reserved/)
+    expect(log).toMatch(/does not resolve/)
+    expect(log).not.toContain('secret-host')
+    expect(log).not.toContain('path-token')
+  })
+
+  it('still says why a URL that is not an address problem is refused', async () => {
+    expect((await refusal('ftp://example.com/', policy())).message).toContain('only http and https')
+    expect((await refusal('not a url', policy())).message).toContain('not a valid URL')
+  })
+})
+
+describe('an allowlist entry that is wrong', () => {
+  it('does not echo the entry of the operator in the refusal', async () => {
+    const error = await assertPublicHttpUrl(
+      'https://example.com/',
+      policy({ privateHostAllowlist: ['10.0.0.0/99 internal-secret'] })
+    ).catch((failure: unknown) => failure)
+
+    expect(error).toBeInstanceOf(ValidationError)
+    expect(JSON.stringify(error)).not.toContain('internal-secret')
+    expect((error as ValidationError).message).not.toContain('internal-secret')
+    expect(JSON.stringify((error as ValidationError).details)).not.toContain('internal-secret')
   })
 })

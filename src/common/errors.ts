@@ -13,6 +13,7 @@ export const ErrorCode = {
   CHAT_NOT_FOUND: 'CHAT_NOT_FOUND',
   SESSION_ALREADY_EXISTS: 'SESSION_ALREADY_EXISTS',
   MAX_SESSIONS_REACHED: 'MAX_SESSIONS_REACHED',
+  MAX_WEBHOOKS_REACHED: 'MAX_WEBHOOKS_REACHED',
   SESSION_NOT_READY: 'SESSION_NOT_READY',
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   RATE_LIMITED: 'RATE_LIMITED',
@@ -79,6 +80,11 @@ export const ERROR_DEFINITIONS = {
   MAX_SESSIONS_REACHED: {
     status: HttpStatus.CONFLICT,
     meaning: 'The number of running sessions has reached MAX_SESSIONS.'
+  },
+  MAX_WEBHOOKS_REACHED: {
+    status: HttpStatus.CONFLICT,
+    meaning:
+      'The session already has WEBHOOKS_MAX_PER_SESSION webhooks (the webhooks of every session have the same limit); delete one first.'
   },
   SESSION_NOT_READY: {
     status: HttpStatus.CONFLICT,

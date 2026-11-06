@@ -114,7 +114,10 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      await this.queue.enqueue({ deliveryId, webhookId: webhook.id, envelope })
+      await this.queue.enqueue(
+        { deliveryId, webhookId: webhook.id, envelope },
+        { inlineMedia: webhook.mediaMode === 'inline' }
+      )
     } catch (error: unknown) {
       results.inc({ result: 'not_queued' })
       this.fail(event, `Delivery to webhook ${webhook.id} could not be queued`, error)

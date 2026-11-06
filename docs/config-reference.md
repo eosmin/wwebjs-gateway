@@ -88,6 +88,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `HEALTH_COOLDOWN_MIN` | integer, 0 or more | no | `30` | Minutes a session stays paused after a bad window |
 | `HUMANIZE_MIN_REPLY_DELAY_MS` | integer, 0 or more | no | `1500` | Minimum milliseconds between an inbound message and the reply to it |
 | `EVENT_REPLAY_WINDOW_SECONDS` | integer, 0 or more | no | `300` | Seconds of past events a reconnecting socket may replay |
+| `WEBHOOKS_MAX_PER_SESSION` | integer, 1 or more | no | `20` | Webhooks a session can have, and as many for those of every session; creating one past it is refused |
 | `WEBHOOK_TIMEOUT_MS` | integer, 1 or more | no | `10000` | Milliseconds a webhook endpoint has to answer |
 | `WEBHOOK_MAX_ATTEMPTS` | integer, 1 or more | no | `10` | Delivery attempts per webhook event |
 | `WEBHOOK_BACKOFF_MS` | integer, 1 or more | no | `5000` | Milliseconds before the first webhook retry; later retries back off exponentially |

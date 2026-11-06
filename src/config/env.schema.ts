@@ -308,6 +308,9 @@ export const envSchema = z
     EVENT_REPLAY_WINDOW_SECONDS: count(300).describe(
       'Seconds of past events a reconnecting socket may replay'
     ),
+    WEBHOOKS_MAX_PER_SESSION: count(20, { min: 1 }).describe(
+      'Webhooks a session can have, and as many for those of every session; creating one past it is refused'
+    ),
     WEBHOOK_TIMEOUT_MS: count(10000, { min: 1 }).describe(
       'Milliseconds a webhook endpoint has to answer'
     ),

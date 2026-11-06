@@ -330,8 +330,8 @@ describe('DeliveryProcessor', () => {
 
       expect(received).toHaveLength(0)
       expect(attempts.map(attempt => attempt.error)).toEqual([
-        'The URL is not allowed: the host resolves to a private or reserved address',
-        'The URL is not allowed: the host resolves to a private or reserved address'
+        'The URL is not allowed: the host does not resolve to a public address',
+        'The URL is not allowed: the host does not resolve to a public address'
       ])
     })
 

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { NotFoundError, ValidationError } from '../common/errors.js'
+import { ConflictError, NotFoundError, ValidationError } from '../common/errors.js'
 import { generateWebhookSecret } from '../common/lib/crypto.js'
 import { assertPublicHttpUrl } from '../common/lib/ssrf.js'
 import { type Principal, assertWebhookAccess } from '../common/principal.js'
@@ -83,17 +83,23 @@ export class WebhookService {
     }
     await this.assertAllowedUrl(input.url)
     const secret = generateWebhookSecret()
-    const row = await this.write(() =>
-      this.webhooks.create({
-        sessionId: input.sessionId ?? null,
-        url: input.url,
-        secret,
-        events: input.events && normalizeEvents(input.events),
-        enabled: input.enabled,
-        mediaMode: input.mediaMode,
-        includeRaw: input.includeRaw
-      })
-    )
+    const bucket = input.sessionId ?? null
+    // The count and the insert are one step per session (this is one instance), so a burst of
+    // creations cannot pass the limit; the slow part, the address check, is outside the lock
+    const row = await this.exclusive(bucket, async () => {
+      await this.assertRoomFor(bucket)
+      return this.write(() =>
+        this.webhooks.create({
+          sessionId: bucket,
+          url: input.url,
+          secret,
+          events: input.events && normalizeEvents(input.events),
+          enabled: input.enabled,
+          mediaMode: input.mediaMode,
+          includeRaw: input.includeRaw
+        })
+      )
+    })
     // The session can be deleted between the check above and the insert; the foreign key says so
     if (row === null) throw sessionNotFound(input.sessionId ?? '')
     return { ...toWebhookDto(row), secret }
@@ -114,6 +120,18 @@ export class WebhookService {
     )
     if (row === null) throw webhookNotFound(id)
     return toWebhookDto(row)
+  }
+
+  // Every webhook a session has is one more job in Redis for each of its events, so the number is
+  // bounded. Called inside `exclusive`, so nothing is created between the count and the insert.
+  private async assertRoomFor(sessionId: string | null): Promise<void> {
+    const limit = this.config.WEBHOOKS_MAX_PER_SESSION
+    if ((await this.webhooks.countFor(sessionId)) >= limit) {
+      throw new ConflictError(
+        'MAX_WEBHOOKS_REACHED',
+        `The session already has ${limit} webhooks, the most it can have`
+      )
+    }
   }
 
   // With INCLUDE_RAW off the pipeline attaches no `raw` to any message, and a webhook can only keep
@@ -145,6 +163,21 @@ export class WebhookService {
   async forEvent(sessionId: string, event: string): Promise<Webhook[]> {
     const enabled = await this.enabledFor(sessionId)
     return enabled.filter(webhook => receivesEvent(webhook, event))
+  }
+
+  // The tail of the creations of each session (null = every session): the next one waits for it
+  private readonly creating = new Map<string | null, Promise<unknown>>()
+
+  private async exclusive<T>(bucket: string | null, task: () => Promise<T>): Promise<T> {
+    const previous = this.creating.get(bucket) ?? Promise.resolve()
+    const run = previous.then(task, task)
+    const tail = run.catch(() => undefined)
+    this.creating.set(bucket, tail)
+    try {
+      return await run
+    } finally {
+      if (this.creating.get(bucket) === tail) this.creating.delete(bucket)
+    }
   }
 
   private async enabledFor(sessionId: string): Promise<readonly Webhook[]> {
