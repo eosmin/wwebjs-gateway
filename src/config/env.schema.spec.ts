@@ -79,6 +79,7 @@ const DEFAULTS = {
   HEALTH_COOLDOWN_MIN: 30,
   HUMANIZE_MIN_REPLY_DELAY_MS: 1500,
   EVENT_REPLAY_WINDOW_SECONDS: 300,
+  WEBHOOKS_MAX_PER_SESSION: 20,
   WEBHOOK_TIMEOUT_MS: 10000,
   WEBHOOK_MAX_ATTEMPTS: 10,
   WEBHOOK_BACKOFF_MS: 5000,
@@ -268,7 +269,8 @@ describe('envSchema bounds and edges', () => {
     ['RATE_LIMIT_MAX', 1],
     ['MAX_SESSIONS', 1],
     ['SEND_MAX_WAIT_MS', 1],
-    ['WEBHOOK_MAX_ATTEMPTS', 1]
+    ['WEBHOOK_MAX_ATTEMPTS', 1],
+    ['WEBHOOKS_MAX_PER_SESSION', 1]
   ])('%s accepts its minimum %d and rejects one below', (key, min) => {
     expect(envSchema.safeParse({ ...valid, [key]: String(min) }).success).toBe(true)
     expect(envSchema.safeParse({ ...valid, [key]: String(min - 1) }).success).toBe(false)

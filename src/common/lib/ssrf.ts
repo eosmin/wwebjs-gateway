@@ -1,6 +1,8 @@
 import { lookup } from 'node:dns/promises'
 import { BlockList, isIP } from 'node:net'
 
+import { Logger } from '@nestjs/common'
+
 import { ValidationError } from '../errors.js'
 
 import { type Family, parseNetwork } from './cidr.js'
@@ -57,13 +59,24 @@ for (const [network, prefix, family] of BLOCKED_RANGES) {
   blockedRanges.addSubnet(network, prefix, family)
 }
 
+// The cloud metadata services and the link-local range: no allowlist and no switch opens them. One
+// list for both guards below, so an address added here closes in both.
+const METADATA_RANGES: readonly (readonly [string, number, Family])[] = [
+  // Includes the metadata address 169.254.169.254 of AWS, GCP and Azure
+  ['169.254.0.0', 16, 'ipv4'],
+  // The metadata service of Alibaba Cloud, inside the shared range 100.64.0.0/10
+  ['100.100.100.200', 32, 'ipv4'],
+  ['fe80::', 10, 'ipv6'],
+  // The IPv6 metadata address of AWS, inside the unique-local range fc00::/7
+  ['fd00:ec2::254', 128, 'ipv6']
+]
+
 // Never reachable, not even through the allowlist: the cloud metadata service lives here
 const neverAllowed = new BlockList()
 for (const [network, prefix, family] of [
   ['0.0.0.0', 8, 'ipv4'],
-  ['169.254.0.0', 16, 'ipv4'],
+  ...METADATA_RANGES,
   ['::', 96, 'ipv6'],
-  ['fe80::', 10, 'ipv6'],
   // IPv6 forms that embed an IPv4 address (NAT64, 6to4, Teredo) could smuggle in the ranges above
   ['64:ff9b::', 96, 'ipv6'],
   ['64:ff9b:1::', 48, 'ipv6'],
@@ -79,12 +92,11 @@ for (const [network, prefix, family] of [
 // embed their address. Loopback and private ranges are what the switch is for, so they are not here.
 const neverReachable = new BlockList()
 for (const [network, prefix, family] of [
-  ['169.254.0.0', 16, 'ipv4'],
-  // The metadata service of Alibaba Cloud
-  ['100.100.100.200', 32, 'ipv4'],
-  ['fe80::', 10, 'ipv6'],
-  // The IPv6 metadata address of AWS
-  ['fd00:ec2::254', 128, 'ipv6'],
+  // 0.0.0.0 and :: reach the machine itself on Linux, so they are not "private" targets but loopback
+  // by another name (::ffff:0.0.0.0 is matched by the IPv4 rule)
+  ['0.0.0.0', 8, 'ipv4'],
+  ['::', 128, 'ipv6'],
+  ...METADATA_RANGES,
   ['64:ff9b::', 96, 'ipv6'],
   ['64:ff9b:1::', 48, 'ipv6'],
   ['2002::', 16, 'ipv6'],
@@ -121,8 +133,8 @@ function parseAllowlist(entries: readonly string[]): Allowlist {
   const cidrs = new BlockList()
   for (const raw of entries) {
     const entry = raw.trim()
-    if (!isValidAllowlistEntry(entry))
-      throw reject(`invalid allowlist entry ${JSON.stringify(entry)}`)
+    // The entry is the operator's (a host of their network): it goes to the log, never to the caller
+    if (!isValidAllowlistEntry(entry)) throw rejectAddress('an entry of the allowlist is invalid')
     const parsed = parseNetwork(entry)
     if (parsed === null) hostnames.add(normalizeHostname(entry))
     else if (parsed.prefix === undefined) cidrs.addAddress(parsed.network, parsed.family)
@@ -133,6 +145,18 @@ function parseAllowlist(entries: readonly string[]): Allowlist {
 
 function reject(reason: string): ValidationError {
   return new ValidationError('VALIDATION_ERROR', `The URL is not allowed: ${reason}`, { reason })
+}
+
+const logger = new Logger('Ssrf')
+// One answer for every way an address can be refused. A key of a session sees it (when it creates a
+// webhook, in the error of a delivery), so telling a name that does not resolve from one that
+// resolves to a private address would let it map the internal DNS. The detail stays in the log, with
+// neither the URL nor the host.
+const NOT_PUBLIC = 'the host does not resolve to a public address'
+
+function rejectAddress(detail: string): ValidationError {
+  logger.log(`A webhook URL was refused: ${detail}`)
+  return reject(NOT_PUBLIC)
 }
 
 const DNS_TIMEOUT_MS = 5000
@@ -149,7 +173,7 @@ async function resolveOrReject(
   try {
     return await withTimeout(resolve(hostname), DNS_TIMEOUT_MS, 'dns lookup')
   } catch {
-    throw reject('the host does not resolve')
+    throw rejectAddress('the host does not resolve')
   }
 }
 
@@ -180,18 +204,18 @@ export async function assertPublicHttpUrl(rawUrl: string, policy: SsrfPolicy): P
     isIP(hostname) !== 0
       ? [hostname]
       : await resolveOrReject(hostname, policy.resolve ?? resolveAddresses)
-  if (addresses.length === 0) throw reject('the host does not resolve')
+  if (addresses.length === 0) throw rejectAddress('the host does not resolve')
 
   for (const address of addresses) {
     const family = isIP(address) === 4 ? 'ipv4' : 'ipv6'
     // Not even the switch for development opens these
     if (policy.allowPrivate && neverReachable.check(address, family)) {
-      throw reject('the host resolves to a metadata or link-local address')
+      throw rejectAddress('the host resolves to a metadata, link-local or unspecified address')
     }
     if (policy.allowPrivate || !isBlockedAddress(address)) continue
     const allowed = hostAllowed || allowlist.cidrs.check(address, family)
     if (allowed && !neverAllowed.check(address, family)) continue
-    throw reject('the host resolves to a private or reserved address')
+    throw rejectAddress('the host resolves to a private or reserved address')
   }
   return { url, addresses }
 }

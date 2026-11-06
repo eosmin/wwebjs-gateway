@@ -51,6 +51,11 @@ export class WebhooksRepository {
     })
   }
 
+  // How many webhooks a session has, the disabled ones too (null = those of every session)
+  countFor(sessionId: string | null): Promise<number> {
+    return this.prisma.webhook.count({ where: { sessionId } })
+  }
+
   // The enabled webhooks that receive the events of a session: its own and those of every session
   listEnabledFor(sessionId: string): Promise<Webhook[]> {
     return this.prisma.webhook.findMany({

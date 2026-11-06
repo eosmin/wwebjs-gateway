@@ -1,4 +1,4 @@
-import { ForbiddenError, NotFoundError, ValidationError } from '../common/errors.js'
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../common/errors.js'
 import { adminPrincipal, keyPrincipal } from '../common/principal.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { Webhook } from '../database/models.js'
@@ -35,7 +35,8 @@ function setup(config: Partial<AppConfig> = {}) {
       Promise.resolve(row(patch as Partial<Webhook>))
     ),
     delete: jest.fn<Promise<boolean>, [string]>(() => Promise.resolve(true)),
-    listEnabledFor: jest.fn<Promise<Webhook[]>, [string]>(() => Promise.resolve([row()]))
+    listEnabledFor: jest.fn<Promise<Webhook[]>, [string]>(() => Promise.resolve([row()])),
+    countFor: jest.fn<Promise<number>, [string | null]>(() => Promise.resolve(0))
   }
   const sessions = {
     findById: jest.fn(() => Promise.resolve({ id: 'main' }))
@@ -46,6 +47,7 @@ function setup(config: Partial<AppConfig> = {}) {
       WEBHOOK_PRIVATE_HOST_ALLOWLIST: [],
       ALLOW_PRIVATE_WEBHOOK_TARGETS: false,
       INCLUDE_RAW: true,
+      WEBHOOKS_MAX_PER_SESSION: 3,
       ...config
     } as AppConfig,
     webhooks as unknown as WebhooksRepository,
@@ -371,5 +373,102 @@ describe('WebhookService access by key', () => {
     expect(await service.requireFor(adminPrincipal('k'), ID)).toMatchObject({ sessionId: null })
     webhooks.findById.mockResolvedValueOnce(null)
     await expect(service.requireFor(sessionKey, ID)).rejects.toBeInstanceOf(NotFoundError)
+  })
+})
+
+// A webhook is a row and, for every event of its session, a job in Redis: the number of webhooks a
+// session can hold is what bounds that
+describe('the limit of webhooks per session', () => {
+  it('creates a webhook while the session is under the limit', async () => {
+    const { service, webhooks } = setup()
+    webhooks.countFor.mockResolvedValue(2)
+
+    await expect(service.create({ url: PUBLIC_URL, sessionId: 'main' })).resolves.toBeDefined()
+
+    expect(webhooks.countFor).toHaveBeenCalledWith('main')
+  })
+
+  it('refuses the one past the limit with its own code, and stores nothing', async () => {
+    const { service, webhooks } = setup()
+    webhooks.countFor.mockResolvedValue(3)
+
+    const error: unknown = await service
+      .create({ url: PUBLIC_URL, sessionId: 'main' })
+      .catch((failure: unknown) => failure)
+
+    expect(error).toBeInstanceOf(ConflictError)
+    expect(error).toMatchObject({ code: 'MAX_WEBHOOKS_REACHED', status: 409 })
+    expect(webhooks.create).not.toHaveBeenCalled()
+  })
+
+  it('counts the webhooks of every session as one more group, with the same limit', async () => {
+    const { service, webhooks } = setup()
+    webhooks.countFor.mockResolvedValue(3)
+
+    await expect(service.create({ url: PUBLIC_URL })).rejects.toMatchObject({
+      code: 'MAX_WEBHOOKS_REACHED'
+    })
+    expect(webhooks.countFor).toHaveBeenCalledWith(null)
+  })
+
+  // A session key can fire many creations at once: the count and the insert must not be apart
+  it('holds the limit when many creations arrive at the same time', async () => {
+    const { service, webhooks } = setup()
+    let stored = 0
+    webhooks.countFor.mockImplementation(async () => {
+      await new Promise(resolve => setImmediate(resolve))
+      return stored
+    })
+    webhooks.create.mockImplementation(async data => {
+      await new Promise(resolve => setImmediate(resolve))
+      stored += 1
+      return row(data)
+    })
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 10 }, () => service.create({ url: PUBLIC_URL, sessionId: 'main' }))
+    )
+
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(3)
+    expect(stored).toBe(3)
+    const refused = results.filter(result => result.status === 'rejected')
+    expect(refused).toHaveLength(7)
+    for (const result of refused) {
+      expect(result.reason).toMatchObject({ code: 'MAX_WEBHOOKS_REACHED' })
+    }
+  })
+
+  it('does not make a session wait for the creations of another', async () => {
+    const { service, webhooks } = setup()
+    let release: () => void = () => undefined
+    webhooks.create.mockImplementationOnce(
+      async data =>
+        new Promise<Webhook>(resolve => {
+          release = () => resolve(row(data))
+        })
+    )
+
+    const slow = service.create({ url: PUBLIC_URL, sessionId: 'main' })
+    await new Promise(resolve => setImmediate(resolve))
+    await expect(service.create({ url: PUBLIC_URL })).resolves.toBeDefined()
+    release()
+    await slow
+  })
+
+  it('answers 404 for a session that does not exist before it counts anything', async () => {
+    const { service, webhooks, sessions } = setup()
+    sessions.findById.mockResolvedValue(null as never)
+
+    await expect(service.create({ url: PUBLIC_URL, sessionId: 'nope' })).rejects.toBeInstanceOf(
+      NotFoundError
+    )
+    expect(webhooks.countFor).not.toHaveBeenCalled()
+  })
+
+  it('does not count a change to a webhook that already exists', async () => {
+    const { service, webhooks } = setup()
+    webhooks.countFor.mockResolvedValue(99)
+
+    await expect(service.update(ID, { enabled: false })).resolves.toBeDefined()
   })
 })

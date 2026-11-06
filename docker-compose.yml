@@ -23,8 +23,9 @@ services:
 
   redis:
     image: redis:8.10.1-alpine
-    # AOF on: the queues must survive a restart
-    command: ['redis-server', '--appendonly', 'yes']
+    # AOF on: the queues must survive a restart. noeviction: BullMQ keeps its queues here, and an
+    # eviction policy would delete jobs and locks without a word (set --maxmemory for your host)
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     ports:
       - '127.0.0.1:${REDIS_PORT:-6379}:6379'
     volumes:
