@@ -98,7 +98,7 @@ describe('downloadPublicFile', () => {
     expect(hosts).toEqual([])
   })
 
-  it('does not pin an address when the guard is switched off, and resolves the name itself', async () => {
+  it('connects to the address of a private target when private targets are allowed', async () => {
     handler = (_request, response) => response.end('ok')
 
     const file = await downloadPublicFile(

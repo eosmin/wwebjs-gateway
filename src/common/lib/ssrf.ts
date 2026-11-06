@@ -9,7 +9,8 @@ import { withTimeout } from './timeout.js'
 export interface SsrfPolicy {
   // Hostnames and CIDRs of private targets that are allowed on purpose (WEBHOOK_PRIVATE_HOST_ALLOWLIST)
   privateHostAllowlist: readonly string[]
-  // Disables the guard entirely (ALLOW_PRIVATE_WEBHOOK_TARGETS; dev and test only)
+  // Lets private and loopback targets through (ALLOW_PRIVATE_WEBHOOK_TARGETS; dev and test only; the
+  // configuration refuses it in production). The metadata and link-local addresses stay blocked.
   allowPrivate: boolean
   resolve?: (hostname: string) => Promise<readonly string[]>
 }
@@ -41,6 +42,8 @@ const BLOCKED_RANGES: readonly (readonly [string, number, Family])[] = [
   ['64:ff9b:1::', 48, 'ipv6'],
   ['2002::', 16, 'ipv6'],
   ['2001::', 32, 'ipv6'],
+  // IPv4-translated (SIIT): embeds an IPv4 address that could be private
+  ['::ffff:0:0:0', 96, 'ipv6'],
   ['2001:db8::', 32, 'ipv6'],
   ['fc00::', 7, 'ipv6'],
   ['fec0::', 10, 'ipv6'],
@@ -65,9 +68,30 @@ for (const [network, prefix, family] of [
   ['64:ff9b::', 96, 'ipv6'],
   ['64:ff9b:1::', 48, 'ipv6'],
   ['2002::', 16, 'ipv6'],
-  ['2001::', 32, 'ipv6']
+  ['2001::', 32, 'ipv6'],
+  ['::ffff:0:0:0', 96, 'ipv6']
 ] as const) {
   neverAllowed.addSubnet(network, prefix, family)
+}
+
+// What stays closed when the whole guard is switched off (ALLOW_PRIVATE_WEBHOOK_TARGETS, for
+// development): the cloud metadata services, which hand out credentials, and the IPv6 forms that can
+// embed their address. Loopback and private ranges are what the switch is for, so they are not here.
+const neverReachable = new BlockList()
+for (const [network, prefix, family] of [
+  ['169.254.0.0', 16, 'ipv4'],
+  // The metadata service of Alibaba Cloud
+  ['100.100.100.200', 32, 'ipv4'],
+  ['fe80::', 10, 'ipv6'],
+  // The IPv6 metadata address of AWS
+  ['fd00:ec2::254', 128, 'ipv6'],
+  ['64:ff9b::', 96, 'ipv6'],
+  ['64:ff9b:1::', 48, 'ipv6'],
+  ['2002::', 16, 'ipv6'],
+  ['2001::', 32, 'ipv6'],
+  ['::ffff:0:0:0', 96, 'ipv6']
+] as const) {
+  neverReachable.addSubnet(network, prefix, family)
 }
 
 export function isBlockedAddress(address: string): boolean {
@@ -137,7 +161,7 @@ export interface PublicUrl {
 }
 
 // Accepts only http(s) URLs whose host resolves exclusively to public addresses (or to an allowlisted
-// private one). Call it again before every request: a name can resolve somewhere else later.
+// private one, or any but the metadata ones when `allowPrivate` is on). Call it again before every request: a name can resolve somewhere else later.
 export async function assertPublicHttpUrl(rawUrl: string, policy: SsrfPolicy): Promise<PublicUrl> {
   let url: URL
   try {
@@ -149,8 +173,6 @@ export async function assertPublicHttpUrl(rawUrl: string, policy: SsrfPolicy): P
     throw reject('only http and https are supported')
   }
   if (url.username !== '' || url.password !== '') throw reject('it must not carry credentials')
-  if (policy.allowPrivate) return { url, addresses: [] }
-
   const hostname = normalizeHostname(url.hostname.replace(/^\[|\]$/g, ''))
   const allowlist = parseAllowlist(policy.privateHostAllowlist)
   const hostAllowed = allowlist.hostnames.has(hostname)
@@ -161,8 +183,12 @@ export async function assertPublicHttpUrl(rawUrl: string, policy: SsrfPolicy): P
   if (addresses.length === 0) throw reject('the host does not resolve')
 
   for (const address of addresses) {
-    if (!isBlockedAddress(address)) continue
     const family = isIP(address) === 4 ? 'ipv4' : 'ipv6'
+    // Not even the switch for development opens these
+    if (policy.allowPrivate && neverReachable.check(address, family)) {
+      throw reject('the host resolves to a metadata or link-local address')
+    }
+    if (policy.allowPrivate || !isBlockedAddress(address)) continue
     const allowed = hostAllowed || allowlist.cidrs.check(address, family)
     if (allowed && !neverAllowed.check(address, family)) continue
     throw reject('the host resolves to a private or reserved address')

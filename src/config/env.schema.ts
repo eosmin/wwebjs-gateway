@@ -325,7 +325,7 @@ export const envSchema = z
       })
       .describe('Comma-separated hosts exempt from the private-address check of webhook URLs'),
     ALLOW_PRIVATE_WEBHOOK_TARGETS: flag(false).describe(
-      'Allow webhook URLs that resolve to private addresses'
+      'Allow webhook URLs that resolve to private addresses; development only, refused in production'
     ),
     CALL_CACHE_SIZE: count(50, { min: 1 }).describe('Recent calls kept in memory to reject them'),
 
@@ -383,6 +383,13 @@ export const envSchema = z
       error: 'is still the placeholder of .env.example'
     }
   )
+  // The switch lifts the SSRF guard of every webhook delivery and media fetch (TDD §6.9). Production
+  // reaches its private targets through WEBHOOK_PRIVATE_HOST_ALLOWLIST, which names each one.
+  .refine(env => env.NODE_ENV !== 'production' || !env.ALLOW_PRIVATE_WEBHOOK_TARGETS, {
+    path: ['ALLOW_PRIVATE_WEBHOOK_TARGETS'],
+    error:
+      'must not be true in production: list the private targets in WEBHOOK_PRIVATE_HOST_ALLOWLIST'
+  })
   .refine(env => env.INBOUND_ORDER_MAX_HOLD_MS >= env.INBOUND_ORDER_WINDOW_MS, {
     path: ['INBOUND_ORDER_MAX_HOLD_MS'],
     error: 'must not be shorter than INBOUND_ORDER_WINDOW_MS'
