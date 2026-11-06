@@ -27,8 +27,8 @@ An admin key (the bootstrap key, or a database key without a session) reaches ev
 - `url`: `http` or `https` on a public host. The address check runs when the webhook is created or changed, and again before every delivery, so a name that later resolves to a private address stops working. Targets on a private network (such as `http://bot:3000`) need `WEBHOOK_PRIVATE_HOST_ALLOWLIST`. `ALLOW_PRIVATE_WEBHOOK_TARGETS` lets private and loopback targets through for development; the gateway refuses to start with it on when `NODE_ENV=production`, and the cloud metadata and link-local addresses (`169.254.0.0/16`, `fe80::/10`, Alibaba's `100.100.100.200`) stay blocked even when it is on; the name of the URL must still resolve ([config](config-reference.md)).
 - `events`: the event names delivered ([events](events.md)), or `["*"]` for every event. It defaults to `["*"]`; a `*` among other names replaces them.
 - `enabled`: a disabled webhook receives nothing. It defaults to `true`.
-- `mediaMode`: `none` (metadata only), `reference` (a download URL, the default) or `inline` (base64, up to `WEBHOOK_INLINE_MEDIA_MAX_BYTES`).
-- `includeRaw`: whether message events carry the sanitized raw data. `null`, the default, follows `INCLUDE_RAW`.
+- `mediaMode`: `none` (no `media` block), `reference` (the type, name, size and a download URL, the default) or `inline` (the same plus the bytes in base64, up to `WEBHOOK_INLINE_MEDIA_MAX_BYTES`). See *Media* below.
+- `includeRaw`: whether message events carry the sanitized raw data. `null`, the default, follows `INCLUDE_RAW`. `true` is refused with `400 VALIDATION_ERROR` while `INCLUDE_RAW` is off, because the gateway then attaches no raw data to any message and the webhook would never get it; `false` and `null` are always accepted. If `INCLUDE_RAW` is turned off later, a webhook that already has `true` simply receives no `raw`.
 
 Every change takes effect on the next event. The gateway keeps the list of enabled webhooks per session in memory and drops it on every write.
 
@@ -51,8 +51,8 @@ The secret (`whsec_…`) signs the deliveries. It is in the answer of `webhooks.
 Every event of every session goes through the dispatcher. For each **enabled** webhook of that session (or of every session) whose `events` has the event name or `*`, it stores one delivery (`pending`) and queues one job. A webhook that does not want the event costs nothing, and the `ping` of a test never passes here: it is created by the route.
 
 - **What each webhook receives.** The event is shaped per webhook, on a copy, so the Socket.IO stream and the other webhooks see their own:
-  - `raw` stays on a message only when `includeRaw` is `true`, or `null` and `INCLUDE_RAW` is on. A webhook cannot ask for more than the event has: with `INCLUDE_RAW` off the gateway attaches no `raw` at all, and `includeRaw: true` adds nothing.
-  - `mediaMode: none` removes `media`; `reference` keeps `media` without `base64`; `inline` keeps `base64` only when it decodes to at most `WEBHOOK_INLINE_MEDIA_MAX_BYTES`. The dispatcher only keeps or reduces: it never downloads media.
+  - `raw` stays on a message only when `includeRaw` is `true`, or `null` and `INCLUDE_RAW` is on. A webhook cannot ask for more than the event has: with `INCLUDE_RAW` off the gateway attaches no `raw` at all (which is why `includeRaw: true` is refused then).
+  - `mediaMode: none` removes `media`; `reference` keeps `media` without `base64`; `inline` adds the bytes (see *Media*).
   - These apply to the messages of `message`, `message_create`, `message_ack`, `message_edit`, `message_revoke_everyone`, `message_revoke_me`, `message_ciphertext`, `message_ciphertext_failed`, `media_uploaded`, `message_sent`, `contact_changed`, the `lastMessage` of the chat in `unread_count`, `chat_removed` and `chat_archived`, and every message of a `message_batch`.
 - **What is stored.** The job in Redis carries the event as the receiver gets it. The row in `webhook_deliveries` (what a manual retry sends again) carries a redacted copy: the text of a `qr` and the pairing `code` become `[Redacted]`, and inline `base64` is dropped. Because of that, **a delivery of a `qr` or a `code` cannot be retried by hand**: the stored copy has no credential left to send, and both expire within a minute anyway. `retry` answers `400 VALIDATION_ERROR` for them and `retry-failed` leaves them where they are. The automatic retries of a fresh delivery are not affected: the job carries the real value.
 - **Failures never lose an event silently, and never stop another webhook.**
@@ -60,6 +60,22 @@ Every event of every session goes through the dispatcher. For each **enabled** w
   - If the job cannot be queued (Redis is down), the row goes to `failed` with `lastError: "The delivery could not be queued"`, so it shows among the dead letters and `retry` / `retry-failed` send it from the stored copy. It is counted as `result="not_queued"`. If neither the row nor the job could be made, the event is lost for that webhook and only the error log (event, session and `seq`, never the payload) says so.
 - **A crash between the row and the job** (the process stops after the row is stored and before the job is queued) leaves a `pending` row with nothing to run it. The sweep described under *Retention and stale deliveries* sends it to `failed` within about 40 minutes, where `retry` can pick it up; `retry` only takes `failed` deliveries.
 - **Order.** Deliveries are stored and queued as the events arrive, but each retries on its own, so the receiver orders by `seq` (see above).
+
+## Media
+
+A message that carries a file has `data.media = { mimetype, filename?, size?, downloadUrl }`, taken from what WhatsApp Web holds of it, without downloading anything. `filename` and `size` are left out when WhatsApp Web does not know them. `downloadUrl` is the `messages.media` route of the gateway on `PUBLIC_BASE_URL`; it needs an API key with the `read` scope, as every route does. A message whose raw data names no type has no `media` block (its `hasMedia` still says there is a file). The block is on the message of every event that carries messages, and in the Socket.IO stream too.
+
+`mediaMode: inline` adds `media.base64` on the events that bring a **new** message (`message`, and every message of a `message_batch`). The gateway downloads the file once for the event, however many webhooks take it, and only when:
+
+- some webhook of the event is in `inline` mode;
+- the `size` on the message is known and at most `WEBHOOK_INLINE_MEDIA_MAX_BYTES`. A file of unknown size is not downloaded to find out, and a file that turns out larger than it said is not inlined either (a message without `size` therefore always goes by reference);
+- it is among the first 10 files of the event. A burst of large files must not fill the memory of the process, so a `message_batch` with more media than that sends the rest by reference.
+
+Only the webhooks in `inline` mode wait for the download; the others are delivered at once. The `downloadUrl` is built when the message arrives, from `PUBLIC_BASE_URL` at that moment: a message stored or retried after the address of the gateway changed keeps the old one.
+
+Every other case, a download that fails, a file WhatsApp no longer has, a session that is no longer ready, is not an error: the event is delivered with the `downloadUrl` and no `base64`. Acks, edits, revocations and the other events that repeat an old message never download anything.
+
+**A retry by hand of an `inline` delivery sends the stored copy, which has no `base64`** (the table never keeps the bytes). The receiver gets the `downloadUrl` and fetches the file from it. The automatic retries of a fresh delivery are not affected: the job carries the bytes. The gateway does not download the file again for a retry because the session may be gone, the file may no longer be there, and a retry made days later would then send a different answer than the event had.
 
 ## Deliveries and dead letters
 
@@ -127,6 +143,32 @@ Every attempt reads the webhook again, so what it finds is what applies:
 - **Delivery without a row** (it could not be stored, see above): sent all the same, and nothing records its attempts.
 - **Rotated secret / changed URL**: used as they are now (see *The secret*).
 
+### A reference receiver
+
+`tests/helpers/webhook-receiver.ts` is a receiver written from this page, not from the code of the gateway; the integration suite (`tests/integration/webhooks.integration.spec.ts`) proves that what the gateway sends is accepted by it. It does three things, and a receiver of your own should too:
+
+1. **Verify before trusting**: the signature over the raw bytes, compared in constant time, and a timestamp within 5 minutes of the clock (a captured request cannot be replayed later). Answer `401` otherwise.
+2. **Tolerate repeats**: remember the `X-Gateway-Delivery` of what it handled; a repeat is answered `200` again and not handled twice (answering an error would only make the gateway send it once more).
+3. **Order by `seq`, per session**, holding an event until the ones before it have arrived, because retries reach the receiver in no particular order:
+
+```js
+// `held`: Map<seq, event> of the session; `next`: the seq it waits for
+function accept(session, event) {
+  if (event.seq === 0) return [event]            // a ping is not part of the sequence
+  if (event.seq < session.next) return []        // already handed over
+  session.held.set(event.seq, event)
+  const ready = []
+  while (session.held.has(session.next)) {
+    ready.push(session.held.get(session.next))
+    session.held.delete(session.next)
+    session.next += 1
+  }
+  return ready
+}
+```
+
+Waiting for the event before only works when the webhook receives **every** event (`events: ["*"]`). With a filter the `seq` of the events it did not ask for never arrive, and a receiver that waited for them would wait for ever: such a receiver drops repeats and orders by `seq` over a short window of its own instead. The first `seq` of a receiver that is created while the session is running is the first one it receives.
+
 ### Repeats
 
 Delivery is **at least once**. If the gateway stops after your receiver answered and before it wrote the result, the delivery is sent again. Keep the `X-Gateway-Delivery` of what you already handled and ignore a repeat; order by `seq` as said above.
@@ -158,4 +200,4 @@ Each row the sweep sends to the dead letters counts as `gw_webhook_deliveries_to
 
 **The sweep never marks a delivery as delivered**, because it cannot be sure. It sends the row to the dead letters with the reason above, so `retry` and `retry-failed` can send it. **Sending one of those again by hand can repeat an event the receiver already has**; drop the repeat by `X-Gateway-Delivery`, which is the id of the delivery and does not change. If the job was only hidden from the sweep while it moved between states, nothing is lost: when it runs it records its result over the `failed` row.
 
-> **Status.** The routes, the queue, the dispatcher, the processor and the retention job are in place. Filling `data.media` on message events (`downloadUrl`, `base64`) lands in 7.6; until then `mediaMode` only reduces what an event carries.
+> **Status.** Milestone 7 is complete: the routes, the queue, the dispatcher, the processor, the retention job, the media block and the integration suite are in place.

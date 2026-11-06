@@ -54,7 +54,8 @@ import {
   mapReactionList,
   sanitizeRaw,
   type IdLike,
-  type MessageMapOptions
+  type MessageMapOptions,
+  mediaDownloadUrl
 } from './mappers.js'
 import { failedAfterDispatch, isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
 import {
@@ -132,6 +133,7 @@ export type WwebjsAdapterConfig = Pick<
   | 'FFMPEG_PATH'
   | 'INCLUDE_RAW'
   | 'RAW_MAX_FIELD_BYTES'
+  | 'PUBLIC_BASE_URL'
 >
 
 const CHROMIUM_ARGS = [
@@ -333,7 +335,9 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return {
       receivedAt: new Date(),
       includeRaw: this.config.INCLUDE_RAW,
-      rawMaxFieldBytes: this.config.RAW_MAX_FIELD_BYTES
+      rawMaxFieldBytes: this.config.RAW_MAX_FIELD_BYTES,
+      mediaUrl: messageId =>
+        mediaDownloadUrl(this.config.PUBLIC_BASE_URL, this.sessionId, messageId)
     }
   }
 

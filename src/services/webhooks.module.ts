@@ -6,6 +6,7 @@ import { DeliveryQueueService } from './delivery-queue.service.js'
 import { DeliveryProcessor } from './delivery.processor.js'
 import { WebhookDeliveriesService } from './webhook-deliveries.service.js'
 import { WebhookDispatcherService } from './webhook-dispatcher.service.js'
+import { WebhookMediaService } from './webhook-media.service.js'
 import { WebhookService } from './webhook.service.js'
 
 // Outbound webhooks: the webhooks, their deliveries, the queue the deliveries wait in, the
@@ -16,6 +17,7 @@ import { WebhookService } from './webhook.service.js'
     WebhookService,
     DeliveryQueueService,
     WebhookDeliveriesService,
+    WebhookMediaService,
     WebhookDispatcherService,
     DeliveryProcessor
   ],

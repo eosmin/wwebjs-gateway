@@ -4,7 +4,12 @@ import { REDACTED } from '../infra/logger/redaction.js'
 import { WA_EVENTS, type EventEnvelope } from '../types/events.js'
 
 import type { DeliveryEnvelope } from './delivery-queue.service.js'
-import { MESSAGE_CARRYING_EVENTS, redactForStorage, shapeForWebhook } from './webhook-payload.js'
+import {
+  MESSAGE_CARRYING_EVENTS,
+  inlineMediaCandidates,
+  redactForStorage,
+  shapeForWebhook
+} from './webhook-payload.js'
 
 const INLINE_MAX = 10
 
@@ -224,5 +229,106 @@ describe('the events that carry messages', () => {
     const stored = at(redactForStorage(delivery(event, data)).data, path)
     expect(stored).not.toHaveProperty('media.base64')
     expect(stored).toHaveProperty('raw')
+  })
+})
+
+const REFERENCE = { mimetype: 'image/png', size: 4, downloadUrl: 'https://gw/media' }
+const withReference = (id: string, media: Record<string, unknown> | null = REFERENCE) => ({
+  id,
+  hasMedia: media !== null,
+  ...(media !== null && { media })
+})
+
+describe('inlineMediaCandidates', () => {
+  it('names the messages of a message event whose file fits the limit', () => {
+    expect(inlineMediaCandidates(envelope('message', withReference('a')), INLINE_MAX)).toEqual([
+      'a'
+    ])
+  })
+
+  it('names the messages of a batch', () => {
+    const batch = envelope('message_batch', {
+      messages: [
+        withReference('a'),
+        withReference('b', { ...REFERENCE, size: 99 }),
+        withReference('c')
+      ]
+    })
+
+    expect(inlineMediaCandidates(batch, INLINE_MAX)).toEqual(['a', 'c'])
+  })
+
+  it('leaves out a message without media, with a file past the limit or of unknown size', () => {
+    const none = withReference('a', null)
+    const big = withReference('b', { ...REFERENCE, size: INLINE_MAX + 1 })
+    const unknown = withReference('c', { mimetype: 'image/png', downloadUrl: 'u' })
+
+    for (const message of [none, big, unknown]) {
+      expect(inlineMediaCandidates(envelope('message', message), INLINE_MAX)).toEqual([])
+    }
+  })
+
+  it('leaves out media that already carries its bytes', () => {
+    const message = withReference('a', { ...REFERENCE, base64: 'AAAA' })
+
+    expect(inlineMediaCandidates(envelope('message', message), INLINE_MAX)).toEqual([])
+  })
+
+  // An ack or an edit of a message would download the same file again and again
+  it.each(['message_ack', 'message_create', 'message_edit', 'media_uploaded', 'unread_count'])(
+    'does not name the messages of %s, which is not a new message',
+    name => {
+      const data = name === 'message_create' ? withReference('a') : { message: withReference('a') }
+
+      expect(inlineMediaCandidates(envelope(name, data), INLINE_MAX)).toEqual([])
+    }
+  )
+})
+
+describe('shapeForWebhook with downloaded media', () => {
+  const event = () => envelope('message', withReference('a'))
+
+  it('adds the bytes to the media of a webhook that takes them inline', () => {
+    const shaped = shapeForWebhook(event(), options(), new Map([['a', 'AAAAAA']]))
+
+    expect(shaped.data).toMatchObject({ media: { ...REFERENCE, base64: 'AAAAAA' } })
+  })
+
+  it('does not add them for a reference webhook, nor for one that wants no media', () => {
+    const bytes = new Map([['a', 'AAAAAA']])
+
+    expect(shapeForWebhook(event(), options({ mediaMode: 'reference' }), bytes).data).toMatchObject(
+      { media: REFERENCE }
+    )
+    expect(shapeForWebhook(event(), options({ mediaMode: 'none' }), bytes).data).not.toHaveProperty(
+      'media'
+    )
+  })
+
+  it('still holds back bytes that do not fit the limit', () => {
+    const shaped = shapeForWebhook(event(), options(), new Map([['a', 'A'.repeat(100)]]))
+
+    expect(shaped.data).toMatchObject({ media: REFERENCE })
+    expect(shaped.data).not.toHaveProperty('media.base64')
+  })
+
+  it('leaves the shared event as it was', () => {
+    const shared = event()
+
+    shapeForWebhook(shared, options(), new Map([['a', 'AAAAAA']]))
+
+    expect(shared.data).toEqual(withReference('a'))
+  })
+
+  it('puts the bytes of each message of a batch on its own message', () => {
+    const batch = envelope('message_batch', {
+      messages: [withReference('a'), withReference('b')]
+    })
+
+    const shaped = shapeForWebhook(batch, options(), new Map([['b', 'BBBBBB']]))
+
+    const { messages } = shaped.data as { messages: { media: { base64?: string } }[] }
+    expect(messages[0]?.media.base64).toBeUndefined()
+    expect(messages[1]?.media.base64).toBe('BBBBBB')
   })
 })

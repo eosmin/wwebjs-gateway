@@ -11,6 +11,7 @@ import type { EventEnvelope } from '../types/events.js'
 import { ALL_EVENTS, EventBusService } from '../whatsapp/event-bus.service.js'
 
 import { type DeliveryEnvelope, DeliveryQueueService } from './delivery-queue.service.js'
+import { WebhookMediaService } from './webhook-media.service.js'
 import { redactForStorage, shapeForWebhook } from './webhook-payload.js'
 import { WebhookService } from './webhook.service.js'
 
@@ -38,6 +39,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     @Inject(WebhookService) private readonly webhooks: WebhookService,
     @Inject(DeliveriesRepository) private readonly deliveries: DeliveriesRepository,
     @Inject(DeliveryQueueService) private readonly queue: DeliveryQueueService,
+    @Inject(WebhookMediaService) private readonly media: WebhookMediaService,
     @Inject(MetricsService) private readonly metrics: MetricsService
   ) {}
 
@@ -59,17 +61,34 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
       this.fail(event, 'The webhooks could not be read', error)
       return
     }
-    await Promise.all(targets.map(webhook => this.deliver(webhook, event)))
+    // The file is downloaded once, and only when a webhook takes it inline; never rejects. Only
+    // the webhooks that take it wait for it.
+    const download = targets.some(webhook => webhook.mediaMode === 'inline')
+      ? this.media.fetchInline(event)
+      : undefined
+    await Promise.all(
+      targets.map(async webhook =>
+        this.deliver(webhook, event, webhook.mediaMode === 'inline' ? await download : undefined)
+      )
+    )
   }
 
-  private async deliver(webhook: Webhook, event: EventEnvelope): Promise<void> {
+  private async deliver(
+    webhook: Webhook,
+    event: EventEnvelope,
+    inline: ReadonlyMap<string, string> | undefined
+  ): Promise<void> {
     let envelope: DeliveryEnvelope
     try {
-      envelope = shapeForWebhook(event, {
-        includeRaw: webhook.includeRaw ?? this.config.INCLUDE_RAW,
-        mediaMode: webhook.mediaMode,
-        inlineMediaMaxBytes: this.config.WEBHOOK_INLINE_MEDIA_MAX_BYTES
-      })
+      envelope = shapeForWebhook(
+        event,
+        {
+          includeRaw: webhook.includeRaw ?? this.config.INCLUDE_RAW,
+          mediaMode: webhook.mediaMode,
+          inlineMediaMaxBytes: this.config.WEBHOOK_INLINE_MEDIA_MAX_BYTES
+        },
+        inline
+      )
     } catch (error: unknown) {
       // An event nobody can read must not stop the other webhooks, nor reject: the bus has no one to tell
       this.fail(event, `Delivery to webhook ${webhook.id} could not be built`, error)

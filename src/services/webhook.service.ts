@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { NotFoundError } from '../common/errors.js'
+import { NotFoundError, ValidationError } from '../common/errors.js'
 import { generateWebhookSecret } from '../common/lib/crypto.js'
 import { assertPublicHttpUrl } from '../common/lib/ssrf.js'
 import { type Principal, assertWebhookAccess } from '../common/principal.js'
@@ -77,6 +77,7 @@ export class WebhookService {
   }
 
   async create(input: CreateWebhookDto): Promise<CreatedWebhookDto> {
+    this.assertRawAvailable(input.includeRaw)
     if (input.sessionId !== undefined && (await this.sessions.findById(input.sessionId)) === null) {
       throw sessionNotFound(input.sessionId)
     }
@@ -99,6 +100,7 @@ export class WebhookService {
   }
 
   async update(id: string, patch: UpdateWebhookDto): Promise<WebhookDto> {
+    this.assertRawAvailable(patch.includeRaw)
     if (patch.url !== undefined) {
       // A missing webhook answers 404 before the URL is resolved
       await this.require(id)
@@ -112,6 +114,17 @@ export class WebhookService {
     )
     if (row === null) throw webhookNotFound(id)
     return toWebhookDto(row)
+  }
+
+  // With INCLUDE_RAW off the pipeline attaches no `raw` to any message, and a webhook can only keep
+  // or drop what the event has. Saying so here beats a webhook that asks for it and never gets it.
+  private assertRawAvailable(includeRaw: boolean | null | undefined): void {
+    if (includeRaw === true && !this.config.INCLUDE_RAW) {
+      throw new ValidationError(
+        'VALIDATION_ERROR',
+        'includeRaw cannot be true while INCLUDE_RAW is off: the gateway attaches no raw data to messages'
+      )
+    }
   }
 
   // The old secret stops signing at once: deliveries still waiting to be retried are signed with
