@@ -7,10 +7,12 @@ import { NotFoundError, ValidationError } from '../common/errors.js'
 import { signWebhook } from '../common/lib/crypto.js'
 import { readPackageInfo } from '../common/lib/package-info.js'
 import { RequestFailedError, postToPublicUrl } from '../common/lib/public-post.js'
+import { retry } from '../common/lib/retry.js'
 import type { SsrfPolicy } from '../common/lib/ssrf.js'
 import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
+import { isTransientDbError } from '../database/db-errors.js'
 import type { Webhook, WebhookDelivery } from '../database/models.js'
 import {
   type DeliveryAttempt,
@@ -20,7 +22,11 @@ import { REDACTED } from '../infra/logger/redaction.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 
-import { DELIVERY_QUEUE_NAME, DeliveryJobData } from './delivery-queue.service.js'
+import {
+  DELIVERY_QUEUE_NAME,
+  DeliveryJobData,
+  type DeliveryOutcome
+} from './delivery-queue.service.js'
 import { REDACTED_EVENTS } from './webhook-payload.js'
 import { WebhookService } from './webhook.service.js'
 
@@ -42,6 +48,12 @@ const MIN_LOCK_MS = 30_000
 const LOCK_MARGIN_MS = 20_000
 const CLOSE_TIMEOUT_MS = 30_000
 const PING_EVENT = 'ping'
+// The write of an attempt is tried this many times in all, with a short, jittered pause between them
+// (up to 100 ms, then up to 200 ms; the 400 ms cap is never reached with three tries): the job
+// closes within about 300 ms of waiting at most
+const RECORD_ATTEMPTS = 3
+const RECORD_BACKOFF_MS = 100
+const RECORD_BACKOFF_MAX_MS = 400
 
 const DISABLED = 'The webhook is disabled'
 const NO_CREDENTIAL = 'The event is stored without its credential and cannot be sent again'
@@ -113,9 +125,11 @@ export class DeliveryProcessor implements OnModuleInit, OnModuleDestroy {
     )
   }
 
-  // One attempt. Resolves when there is nothing more to do for the job (delivered, or dropped on
-  // purpose) and throws to have BullMQ retry it.
-  async process(job: DeliveryJob): Promise<void> {
+  // One attempt. Resolves when there is nothing more to do for the job and throws to have BullMQ
+  // retry it. What it resolves with is kept by BullMQ as the result of the job and is how the sweep
+  // of stale rows learns, when the row could not be written, whether the receiver has the event:
+  // `delivered` (it answered 2xx) or `dropped` (the job ended without an attempt). Only that literal.
+  async process(job: DeliveryJob): Promise<DeliveryOutcome> {
     const parsed = DeliveryJobData.safeParse(job.data)
     // Retrying a job that is not a delivery would only fail again
     if (!parsed.success) throw new UnrecoverableError('The job is not a delivery')
@@ -124,26 +138,26 @@ export class DeliveryProcessor implements OnModuleInit, OnModuleDestroy {
     const webhook = await this.readWebhook(webhookId)
     if (webhook === undefined) {
       this.drop(deliveryId, 'its webhook no longer exists')
-      return
+      return 'dropped'
     }
     const row = await this.readDelivery(deliveryId)
     if (row !== undefined && row.webhookId !== webhookId) {
       this.drop(deliveryId, 'the delivery belongs to another webhook')
-      return
+      return 'dropped'
     }
     if (row?.status === 'success') {
       this.drop(deliveryId, 'it was already delivered')
-      return
+      return 'dropped'
     }
     // A disabled webhook receives nothing, but a ping: that is how a receiver is checked before it
     // is turned on. The delivery goes to the dead letters, so `retry-failed` sends it once enabled.
     if (!webhook.enabled && envelope.event !== PING_EVENT) {
       await this.giveUp(deliveryId, DISABLED)
-      return
+      return 'dropped'
     }
     if (carriesRedactedCredential(envelope.event, envelope.data)) {
       await this.giveUp(deliveryId, NO_CREDENTIAL)
-      return
+      return 'dropped'
     }
 
     const last = job.attemptsMade + 1 >= (job.opts.attempts ?? 1)
@@ -152,7 +166,7 @@ export class DeliveryProcessor implements OnModuleInit, OnModuleDestroy {
       // The receiver has it: a row that cannot be written must not make the job run again
       await this.record(deliveryId, { status: 'success', statusCode: outcome.statusCode })
       this.metrics.metrics.webhookDeliveries.inc({ result: 'success' })
-      return
+      return 'delivered'
     }
     await this.record(deliveryId, {
       status: last ? 'failed' : 'pending',
@@ -255,9 +269,17 @@ export class DeliveryProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  // Writes the result of an attempt, again after a failure of the database that waiting can cure.
+  // It never throws: the receiver has the event (or the attempt is already counted by the queue), so
+  // a row that cannot be written must not make the job run again.
   private async record(deliveryId: string, attempt: DeliveryAttempt): Promise<void> {
     try {
-      await this.deliveries.recordAttempt(deliveryId, attempt, new Date())
+      await retry(() => this.deliveries.recordAttempt(deliveryId, attempt, new Date()), {
+        attempts: RECORD_ATTEMPTS,
+        baseDelayMs: RECORD_BACKOFF_MS,
+        maxDelayMs: RECORD_BACKOFF_MAX_MS,
+        shouldRetry: isTransientDbError
+      })
     } catch (error: unknown) {
       this.logger.error(
         `The attempt of delivery ${deliveryId} could not be recorded: ${errorKind(error)}`

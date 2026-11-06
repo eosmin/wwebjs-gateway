@@ -102,6 +102,24 @@ export class DeliveriesRepository {
     return count > 0
   }
 
+  // The job of a pending delivery finished having sent it (the receiver answered 2xx) and its
+  // result could not be written. Only a pending row changes, so a dead letter or a delivered row is
+  // never overwritten; the status code is not known, and `deliveredAt` is when this was noticed.
+  // True when it changed the row.
+  async succeedUnrecorded(id: string, at: Date): Promise<boolean> {
+    const { count } = await this.prisma.webhookDelivery.updateMany({
+      where: { id, status: 'pending' },
+      data: {
+        status: 'success',
+        attempts: { increment: 1 },
+        lastStatusCode: null,
+        lastError: null,
+        deliveredAt: at
+      }
+    })
+    return count > 0
+  }
+
   // The oldest first, so a backlog is worked off in order, a page after another (`after` is the last
   // one of the page before). Only the keys: the payload is not needed.
   async listStalePending(

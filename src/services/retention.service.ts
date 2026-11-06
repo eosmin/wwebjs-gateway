@@ -64,6 +64,8 @@ export interface PurgeResult {
 export interface SweepResult {
   // Rows sent to the dead letters
   failed: number
+  // Rows marked delivered because their job finished saying the receiver answered 2xx
+  delivered: number
   // Rows older than the margin whose job is still going to run, left as they are
   alive: number
 }
@@ -195,10 +197,12 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
 
   // A `pending` delivery is one that a job will still try. Two things leave one behind with no job:
   // a crash between storing the row and queueing the job (the receiver never got the event), and a
-  // receiver that answered 2xx while the row could not be written (it did). The sweep tells them
-  // apart as far as the queue allows (a finished job is kept for an hour) but cannot be sure, so it
-  // never marks a row delivered: it sends it to the dead letters with a reason, where `retry` can
-  // send it again. A repeat is dropped by the receiver through `X-Gateway-Delivery`.
+  // receiver that answered 2xx while the row could not be written (it did). The queue tells them
+  // apart: a job that finishes keeps what the processor returned (`delivered` for a 2xx), for an
+  // hour. A row whose job finished `delivered` is marked delivered (only if it is still pending);
+  // any other row without a live job goes to the dead letters with a reason, where `retry` can send
+  // it again, and a repeat is dropped by the receiver through `X-Gateway-Delivery`. Once the job
+  // has aged out the two can no longer be told apart, and the row is treated as a lost job.
   //
   // A job that moves between states while the queue is read can be missed, and so can the job of a
   // manual retry queued a moment after the row went back to `pending`. Nothing is lost by it: the
@@ -206,7 +210,7 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
   async sweepPending(now: Date = new Date()): Promise<SweepResult> {
     const cutoff = new Date(now.getTime() - STALE_PENDING_MS)
     let after: DeliveryCursor | undefined
-    const result: SweepResult = { failed: 0, alive: 0 }
+    const result: SweepResult = { failed: 0, delivered: 0, alive: 0 }
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const stale = await this.deliveries.listStalePending(cutoff, PAGE_SIZE, after)
       if (stale.length === 0) break
@@ -219,10 +223,19 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
           result.alive += 1
           continue
         }
+        if (state === 'delivered') {
+          if (await this.deliveries.succeedUnrecorded(row.id, now)) result.delivered += 1
+          continue
+        }
         if (await this.deliveries.failUnqueued(row.id, reasonFor(state))) result.failed += 1
       }
       after = stale.at(-1)
       if (stale.length < PAGE_SIZE) break
+    }
+    if (result.delivered > 0) {
+      this.logger.warn(
+        `${result.delivered} pending deliveries were delivered but their result had not been written, and are now marked delivered`
+      )
     }
     if (result.failed > 0) {
       this.metrics.metrics.webhookDeliveries.inc({ result: 'swept' }, result.failed)
