@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
-import { Queue } from 'bullmq'
+import { type JobType, Queue } from 'bullmq'
 import { z } from 'zod'
 
 import { APP_CONFIG } from '../config/config.module.js'
@@ -39,6 +39,19 @@ const FAILED_KEPT_SECONDS = 86400
 // A QR or a pairing code in a finished job is a credential for about a minute: it is not kept for a day
 const CREDENTIAL_KEPT_SECONDS = 300
 
+// What the queue still holds of a delivery: a job that will run (or runs), one that finished
+// without an error, or one that gave up. A live job outranks the finished ones of the same
+// delivery, because a manual retry queues a new job while the failed one it follows is kept.
+export type DeliveryJobState = 'live' | 'completed' | 'failed'
+
+const LIVE_STATES: JobType[] = ['active', 'waiting', 'delayed', 'prioritized', 'waiting-children']
+const STATE_GROUPS: readonly (readonly [JobType[], DeliveryJobState])[] = [
+  [LIVE_STATES, 'live'],
+  [['completed'], 'completed'],
+  [['failed'], 'failed']
+]
+const PAGE_SIZE = 500
+
 // Where the deliveries wait for an attempt (TDD §6.9). The routes (test, retry) and the
 // dispatcher put jobs in; the processor takes them out.
 @Injectable()
@@ -62,6 +75,27 @@ export class DeliveryQueueService implements OnModuleDestroy {
       removeOnComplete: { age: credential ? CREDENTIAL_KEPT_SECONDS : COMPLETED_KEPT_SECONDS },
       removeOnFail: { age: credential ? CREDENTIAL_KEPT_SECONDS : FAILED_KEPT_SECONDS }
     })
+  }
+
+  // The state of the job of every delivery the queue holds, by delivery id. It reads all the jobs
+  // (a day of failed ones at most), so it is for the sweep of stale rows, not for a request.
+  async jobStates(): Promise<Map<string, DeliveryJobState>> {
+    const queue = this.open()
+    const states = new Map<string, DeliveryJobState>()
+    for (const [types, state] of STATE_GROUPS) {
+      for (let start = 0; ; start += PAGE_SIZE) {
+        const jobs = await queue.getJobs(types, start, start + PAGE_SIZE - 1)
+        for (const job of jobs) {
+          const parsed = DeliveryJobData.safeParse(job.data)
+          // The groups run from the strongest state down, so only a delivery not seen yet is added
+          if (parsed.success && !states.has(parsed.data.deliveryId)) {
+            states.set(parsed.data.deliveryId, state)
+          }
+        }
+        if (jobs.length < PAGE_SIZE) break
+      }
+    }
+    return states
   }
 
   // For the queue dashboard (Bull Board): the listener gets the queue once, as the send queue does

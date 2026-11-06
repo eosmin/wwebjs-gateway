@@ -100,6 +100,28 @@ export class DeliveriesRepository {
     })
   }
 
+  // The oldest first, so a backlog is worked off in order, a page after another (`after` is the last
+  // one of the page before). Only the keys: the payload is not needed.
+  async listStalePending(
+    cutoff: Date,
+    limit: number,
+    after?: DeliveryCursor
+  ): Promise<DeliveryCursor[]> {
+    return this.prisma.webhookDelivery.findMany({
+      where: {
+        status: 'pending',
+        createdAt: { lt: cutoff },
+        OR: after && [
+          { createdAt: { gt: after.createdAt } },
+          { createdAt: after.createdAt, id: { gt: after.id } }
+        ]
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+      select: { createdAt: true, id: true }
+    })
+  }
+
   async deleteOlderThan(cutoff: Date): Promise<number> {
     const { count } = await this.prisma.webhookDelivery.deleteMany({
       where: { createdAt: { lt: cutoff } }

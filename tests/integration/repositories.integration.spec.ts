@@ -676,6 +676,53 @@ describe('repositories (integration)', () => {
       expect(await deliveries.findById(created.id)).toBeNull()
     })
 
+    it('lists the ids of the pending deliveries older than the cutoff, oldest first', async () => {
+      const webhookId = await newWebhook(null)
+      const older = await make(webhookId, 1n, new Date(LONG_AGO.getTime() - 1000))
+      const old = await make(webhookId, 2n, LONG_AGO)
+      const fresh = await deliveries.create({
+        webhookId,
+        sessionId: 's',
+        event: 'message',
+        seq: 3n,
+        payload
+      })
+      const done = await make(webhookId, 4n, LONG_AGO)
+      await deliveries.recordAttempt(done.id, { status: 'success', statusCode: 200 }, at(1))
+      const dead = await make(webhookId, 5n, LONG_AGO)
+      await deliveries.failUnqueued(dead.id, 'gave up')
+
+      const stale = (await deliveries.listStalePending(CUTOFF, 1000)).map(row => row.id)
+
+      expect(stale).toEqual(expect.arrayContaining([older.id, old.id]))
+      expect(stale.indexOf(older.id)).toBeLessThan(stale.indexOf(old.id))
+      expect(stale).not.toContain(fresh.id)
+      expect(stale).not.toContain(done.id)
+      expect(stale).not.toContain(dead.id)
+    })
+
+    it('pages through the stale pending deliveries with the key of the last one', async () => {
+      const webhookId = await newWebhook(null)
+      // Three in the same millisecond: the id tells them apart
+      const same = new Date(LONG_AGO.getTime() - 5000)
+      const made = [
+        await make(webhookId, 1n, same),
+        await make(webhookId, 2n, same),
+        await make(webhookId, 3n, same)
+      ]
+      const keys = made.map(row => row.id).sort()
+
+      const first = await deliveries.listStalePending(CUTOFF, 1000)
+      const mine = first.filter(row => keys.includes(row.id))
+      expect(mine.map(row => row.id)).toEqual(keys)
+
+      const first2 = mine[0]
+      if (first2 === undefined) throw new Error('no page')
+      const rest = await deliveries.listStalePending(CUTOFF, 1000, first2)
+      expect(rest.filter(row => keys.includes(row.id)).map(row => row.id)).toEqual(keys.slice(1))
+      expect(await deliveries.listStalePending(CUTOFF, 1)).toHaveLength(1)
+    })
+
     it('purges only what is older than the cutoff', async () => {
       const webhookId = await newWebhook(null)
       const old = await make(webhookId, 1n, LONG_AGO)
