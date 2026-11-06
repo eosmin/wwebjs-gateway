@@ -4,6 +4,8 @@ import type { DeliveryStatus, JsonInput, WebhookDelivery } from '../models.js'
 import { PrismaService } from '../prisma.service.js'
 
 export interface NewDelivery {
+  // Chosen by the dispatcher, so the job can carry it even when this row could not be stored
+  id?: string
   webhookId: string
   sessionId: string
   event: string

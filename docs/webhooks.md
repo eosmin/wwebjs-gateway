@@ -46,6 +46,21 @@ The secret (`whsec_…`) signs the deliveries. It is in the answer of `webhooks.
 - The ping has `data: {}` and `seq: 0`. Real events start at `seq` 1, so a ping is never taken for one, and a receiver that drops what it has already seen does not drop a real event because of it. It is not part of the sequence of the session: do not use it to detect gaps.
 - A disabled webhook can be tested, so a receiver can be checked before it is turned on. The ping reaches the receiver only through the processor, as any delivery; the address check runs on it too.
 
+## From event to delivery
+
+Every event of every session goes through the dispatcher. For each **enabled** webhook of that session (or of every session) whose `events` has the event name or `*`, it stores one delivery (`pending`) and queues one job. A webhook that does not want the event costs nothing, and the `ping` of a test never passes here: it is created by the route.
+
+- **What each webhook receives.** The event is shaped per webhook, on a copy, so the Socket.IO stream and the other webhooks see their own:
+  - `raw` stays on a message only when `includeRaw` is `true`, or `null` and `INCLUDE_RAW` is on. A webhook cannot ask for more than the event has: with `INCLUDE_RAW` off the gateway attaches no `raw` at all, and `includeRaw: true` adds nothing.
+  - `mediaMode: none` removes `media`; `reference` keeps `media` without `base64`; `inline` keeps `base64` only when it decodes to at most `WEBHOOK_INLINE_MEDIA_MAX_BYTES`. The dispatcher only keeps or reduces: it never downloads media.
+  - These apply to the messages of `message`, `message_create`, `message_ack`, `message_edit`, `message_revoke_everyone`, `message_revoke_me`, `message_ciphertext`, `message_ciphertext_failed`, `media_uploaded`, `message_sent`, `contact_changed`, the `lastMessage` of the chat in `unread_count`, `chat_removed` and `chat_archived`, and every message of a `message_batch`.
+- **What is stored.** The job in Redis carries the event as the receiver gets it. The row in `webhook_deliveries` (what a manual retry sends again) carries a redacted copy: the text of a `qr` and the pairing `code` become `[Redacted]`, and inline `base64` is dropped. A retried `qr` or `code` therefore reaches the receiver redacted; both expire within a minute anyway.
+- **Failures never lose an event silently, and never stop another webhook.**
+  - If the row cannot be stored (the database is down), the job is queued all the same: a receiver must not miss an event because the log is down. That delivery has no row, so it is not in the list and nothing records its attempts. It is counted as `gw_webhook_deliveries_total{result="unlogged"}`.
+  - If the job cannot be queued (Redis is down), the row goes to `failed` with `lastError: "The delivery could not be queued"`, so it shows among the dead letters and `retry` / `retry-failed` send it from the stored copy. It is counted as `result="not_queued"`. If neither the row nor the job could be made, the event is lost for that webhook and only the error log (event, session and `seq`, never the payload) says so.
+- **A crash between the row and the job** (the process stops after the row is stored and before the job is queued) leaves a `pending` row with nothing to run it. Until the reconciliation of those rows lands (7.5) it stays pending; `retry` only takes `failed` deliveries.
+- **Order.** Deliveries are stored and queued as the events arrive, but each retries on its own, so the receiver orders by `seq` (see above).
+
 ## Deliveries and dead letters
 
 Every event sent to a webhook is a delivery: `{ id, webhookId, sessionId, event, seq, status, attempts, lastStatusCode, lastError, createdAt, deliveredAt }`. The event itself stays in the gateway and is not returned, because it can be a message.
@@ -69,4 +84,4 @@ Every event sent to a webhook is a delivery: `{ id, webhookId, sessionId, event,
 
 The envelope of [events](events.md) is the body of the POST. Per TDD §6.9 the request carries `Content-Type: application/json`, `User-Agent: wwebjs-gateway/<version>`, `X-Gateway-Event`, `X-Gateway-Delivery`, `X-Gateway-Seq`, `X-Gateway-Timestamp` (unix seconds) and `X-Gateway-Signature: sha256=<hex>`, the HMAC-SHA256 of `${timestamp}.${rawBody}` with the secret. A `2xx` is success; anything else is retried with exponential backoff (`WEBHOOK_BACKOFF_MS`) up to `WEBHOOK_MAX_ATTEMPTS`, and then the delivery is `failed`. Redirects are not followed.
 
-> **Status.** This step ships the routes and the queue. The dispatcher that turns events into deliveries (7.3) and the processor that sends them (7.4) come next, so until they land the jobs of `test` and `retry` wait in the queue (`webhook-deliveries`), which keeps them across restarts, and nothing sends them yet.
+> **Status.** The routes, the queue and the dispatcher (above) are in place. The processor that sends the jobs (7.4) comes next, so until it lands the jobs wait in the queue (`webhook-deliveries`), which keeps them across restarts, and nothing sends them yet.
