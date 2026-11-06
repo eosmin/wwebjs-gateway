@@ -68,7 +68,10 @@ A message that carries a file has `data.media = { mimetype, filename?, size?, do
 `mediaMode: inline` adds `media.base64` on the events that bring a **new** message (`message`, and every message of a `message_batch`). The gateway downloads the file once for the event, however many webhooks take it, and only when:
 
 - some webhook of the event is in `inline` mode;
-- the `size` on the message is known and at most `WEBHOOK_INLINE_MEDIA_MAX_BYTES`. A file of unknown size is not downloaded to find out, and a file that turns out larger than it said is not inlined either.
+- the `size` on the message is known and at most `WEBHOOK_INLINE_MEDIA_MAX_BYTES`. A file of unknown size is not downloaded to find out, and a file that turns out larger than it said is not inlined either (a message without `size` therefore always goes by reference);
+- it is among the first 10 files of the event. A burst of large files must not fill the memory of the process, so a `message_batch` with more media than that sends the rest by reference.
+
+Only the webhooks in `inline` mode wait for the download; the others are delivered at once. The `downloadUrl` is built when the message arrives, from `PUBLIC_BASE_URL` at that moment: a message stored or retried after the address of the gateway changed keeps the old one.
 
 Every other case, a download that fails, a file WhatsApp no longer has, a session that is no longer ready, is not an error: the event is delivered with the `downloadUrl` and no `base64`. Acks, edits, revocations and the other events that repeat an old message never download anything.
 
