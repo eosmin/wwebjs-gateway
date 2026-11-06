@@ -21,7 +21,8 @@ interface QueuedJob {
 
 // Step 7.3 over the whole application with real Postgres and Redis: an event published on the bus
 // becomes a row of `webhook_deliveries` and a job for each webhook that wants it. Nothing consumes
-// the queue yet (7.4), so the jobs stay where the dispatcher put them.
+// the queue (it is paused for the run; the processor has its own suite), so the jobs stay where the
+// dispatcher put them.
 describe('webhook dispatcher (integration)', () => {
   const factory = new FakeWhatsAppClientFactory()
   const suffix = randomUUID().slice(0, 8)
@@ -102,6 +103,8 @@ describe('webhook dispatcher (integration)', () => {
     webhooks = app.get(WebhooksRepository)
     deliveries = app.get(DeliveriesRepository)
     queue = new Queue(DELIVERY_QUEUE_NAME, { connection: app.get(RedisService).client })
+    // The processor of the application would send these jobs: no worker takes anything while paused
+    await queue.pause()
     for (const id of [mine, other]) {
       const response = await application().inject({
         method: 'POST',
@@ -126,6 +129,7 @@ describe('webhook dispatcher (integration)', () => {
       const sessions = application().get(SessionsRepository)
       for (const id of [mine, other]) await sessions.delete(id)
     } finally {
+      await queue?.resume()
       await queue?.close()
       await app?.close()
     }

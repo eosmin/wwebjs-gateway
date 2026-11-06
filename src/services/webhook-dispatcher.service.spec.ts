@@ -112,7 +112,9 @@ describe('WebhookDispatcherService', () => {
     expect(ctx.create).toHaveBeenCalledTimes(2)
     expect(ctx.enqueue).toHaveBeenCalledTimes(2)
     const rows = ctx.create.mock.calls.map(([row]) => row)
-    const jobs = ctx.enqueue.mock.calls.map(([job]) => job as { deliveryId: string })
+    const jobs = ctx.enqueue.mock.calls.map(
+      ([job]) => job as { deliveryId: string; webhookId: string }
+    )
     expect(rows[0]).toMatchObject({
       webhookId: 'w1',
       sessionId: 'main',
@@ -122,6 +124,8 @@ describe('WebhookDispatcherService', () => {
     })
     expect(new Set(rows.map(row => row.id)).size).toBe(2)
     expect(jobs.map(job => job.deliveryId)).toEqual(rows.map(row => row.id))
+    // The job names its webhook, so it can be delivered when its row could not be stored
+    expect(jobs.map(job => job.webhookId)).toEqual(['w1', 'w2'])
   })
 
   it('queues the full event and stores the redacted one', async () => {

@@ -19,6 +19,14 @@ const policy = (overrides: Partial<SsrfPolicy> = {}): SsrfPolicy => ({
   ...overrides
 })
 
+describe('isBlockedAddress translated forms', () => {
+  it('blocks the IPv4-translated (SIIT) range but not an IPv4-mapped public address', () => {
+    expect(isBlockedAddress('::ffff:0:a9fe:a9fe')).toBe(true)
+    expect(isBlockedAddress('::ffff:0:808:808')).toBe(true)
+    expect(isBlockedAddress('::ffff:8.8.8.8')).toBe(false)
+  })
+})
+
 describe('isBlockedAddress', () => {
   it.each([
     '0.0.0.0',
@@ -223,12 +231,49 @@ describe('assertPublicHttpUrl', () => {
     await expect(assertPublicHttpUrl('', policy())).rejects.toBeInstanceOf(ValidationError)
   })
 
-  it('skips the address check when private targets are allowed, keeping the scheme check', async () => {
-    const open = policy({ allowPrivate: true })
-    await expect(assertPublicHttpUrl('http://127.0.0.1:3000/', open)).resolves.toHaveProperty(
-      'addresses'
-    )
+  it('lets private targets through when they are allowed, keeping the scheme check', async () => {
+    const open = policy({ allowPrivate: true, resolve: () => Promise.resolve(['127.0.0.1']) })
+    await expect(assertPublicHttpUrl('http://127.0.0.1:3000/', open)).resolves.toMatchObject({
+      addresses: ['127.0.0.1']
+    })
+    await expect(assertPublicHttpUrl('http://localhost:3000/', open)).resolves.toMatchObject({
+      addresses: ['127.0.0.1']
+    })
+    await expect(
+      assertPublicHttpUrl('http://[::1]:3000/', policy({ allowPrivate: true }))
+    ).resolves.toMatchObject({ addresses: ['::1'] })
+    await expect(
+      assertPublicHttpUrl('http://10.0.0.5/', policy({ allowPrivate: true }))
+    ).resolves.toMatchObject({ addresses: ['10.0.0.5'] })
     await expect(assertPublicHttpUrl('file:///etc/passwd', open)).rejects.toBeInstanceOf(
+      ValidationError
+    )
+  })
+
+  // The security review of step 1.4: turning the guard off must not open the cloud metadata service
+  it.each([
+    'http://169.254.169.254/latest/meta-data',
+    'http://[::ffff:169.254.169.254]/',
+    'http://[fe80::1]/',
+    'http://[fd00:ec2::254]/',
+    'http://[64:ff9b::a9fe:a9fe]/',
+    'http://[2002:a9fe:a9fe::1]/',
+    // IPv4-translated (SIIT) form of the metadata address
+    'http://[::ffff:0:a9fe:a9fe]/',
+    // The metadata service of Alibaba Cloud
+    'http://100.100.100.200/'
+  ])(
+    'keeps the metadata addresses blocked even when private targets are allowed: %s',
+    async url => {
+      await expect(assertPublicHttpUrl(url, policy({ allowPrivate: true }))).rejects.toBeInstanceOf(
+        ValidationError
+      )
+    }
+  )
+
+  it('blocks a name that resolves to the metadata address when private targets are allowed', async () => {
+    const open = policy({ allowPrivate: true, resolve: () => Promise.resolve(['169.254.169.254']) })
+    await expect(assertPublicHttpUrl('http://meta.test/', open)).rejects.toBeInstanceOf(
       ValidationError
     )
   })

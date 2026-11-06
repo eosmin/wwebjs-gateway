@@ -39,6 +39,24 @@ export interface QueueSource {
   watchQueues: (listener: (queues: Queue[]) => void) => () => void
 }
 
+// One source out of several: the dashboard shows the queues of all of them, and follows each
+export function mergeQueueSources(...sources: readonly QueueSource[]): QueueSource {
+  return {
+    watchQueues: listener => {
+      const current = sources.map((): Queue[] => [])
+      const stops = sources.map((source, index) =>
+        source.watchQueues(queues => {
+          current[index] = queues
+          listener(current.flat())
+        })
+      )
+      return () => {
+        for (const stop of stops) stop()
+      }
+    }
+  }
+}
+
 function credentialsOf(request: FastifyRequest): { user: string; password: string } | undefined {
   const header = request.headers.authorization
   if (header === undefined || !/^basic /i.test(header)) return undefined

@@ -368,6 +368,11 @@ describe('envSchema bounds and edges', () => {
       'a METRICS_TOKEN placeholder in production',
       { NODE_ENV: 'production', METRICS_TOKEN: 'replace-this-token-with-a-random-one' },
       'METRICS_TOKEN'
+    ],
+    [
+      'private webhook targets allowed in production',
+      { NODE_ENV: 'production', ALLOW_PRIVATE_WEBHOOK_TARGETS: 'true' },
+      'ALLOW_PRIVATE_WEBHOOK_TARGETS'
     ]
   ])('reports %s on the variable at fault', (_label, override, path) => {
     const result = envSchema.safeParse({ ...valid, ...override })
@@ -389,6 +394,22 @@ describe('envSchema bounds and edges', () => {
         ...valid,
         ADMIN_API_KEY: `replace-this-${'a'.repeat(32)}`,
         METRICS_TOKEN: 'replace-this-token-with-a-random-one'
+      }).success
+    ).toBe(true)
+  })
+
+  it('accepts private webhook targets outside production, and an allowlist in production', () => {
+    for (const NODE_ENV of ['development', 'test']) {
+      expect(
+        envSchema.safeParse({ ...valid, NODE_ENV, ALLOW_PRIVATE_WEBHOOK_TARGETS: 'true' }).success
+      ).toBe(true)
+    }
+    expect(
+      envSchema.safeParse({
+        ...valid,
+        NODE_ENV: 'production',
+        ALLOW_PRIVATE_WEBHOOK_TARGETS: 'false',
+        WEBHOOK_PRIVATE_HOST_ALLOWLIST: 'bot,10.0.0.0/8'
       }).success
     ).toBe(true)
   })

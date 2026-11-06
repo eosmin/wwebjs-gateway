@@ -53,8 +53,7 @@ export async function downloadPublicFile(
       url,
       {
         method: 'GET',
-        // `addresses` is empty only when the guard is switched off for development
-        ...(addresses.length > 0 && { lookup: pinnedLookup(addresses) }),
+        lookup: pinnedLookup(addresses),
         headers: { accept: '*/*', 'accept-encoding': 'identity' }
       },
       response => {

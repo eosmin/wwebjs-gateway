@@ -2,7 +2,12 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import { Queue } from 'bullmq'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-import { BULL_BOARD_PATH, setupBullBoard, type QueueSource } from './bull-board.js'
+import {
+  BULL_BOARD_PATH,
+  mergeQueueSources,
+  setupBullBoard,
+  type QueueSource
+} from './bull-board.js'
 
 const ADMIN_KEY = 'k'.repeat(32)
 const basic = (user: string, password: string): string =>
@@ -213,5 +218,51 @@ describe('setupBullBoard', () => {
         jest.useRealTimers()
       }
     })
+  })
+})
+
+describe('mergeQueueSources', () => {
+  const queue = (name: string): Queue =>
+    Object.assign(Object.create(Queue.prototype) as Queue, { name, opts: {} })
+
+  function controllable() {
+    let notify: (queues: Queue[]) => void = () => undefined
+    const stop = jest.fn()
+    const source: QueueSource = {
+      watchQueues: listener => {
+        notify = listener
+        return stop
+      }
+    }
+    return { source, stop, notify: (queues: Queue[]) => notify(queues) }
+  }
+  const names = (listener: jest.Mock<void, [Queue[]]>): string[] =>
+    (listener.mock.lastCall?.[0] ?? []).map(item => item.name)
+
+  it('shows the queues of every source, and follows each one', () => {
+    const sends = controllable()
+    const deliveries = controllable()
+    const listener = jest.fn<void, [Queue[]]>()
+
+    mergeQueueSources(sends.source, deliveries.source).watchQueues(listener)
+    sends.notify([queue('send-a')])
+    deliveries.notify([queue('webhook-deliveries')])
+    expect(names(listener)).toEqual(['send-a', 'webhook-deliveries'])
+
+    sends.notify([queue('send-a'), queue('send-b')])
+    expect(names(listener)).toEqual(['send-a', 'send-b', 'webhook-deliveries'])
+    sends.notify([])
+    expect(names(listener)).toEqual(['webhook-deliveries'])
+  })
+
+  it('stops watching every source', () => {
+    const sends = controllable()
+    const deliveries = controllable()
+
+    const stop = mergeQueueSources(sends.source, deliveries.source).watchQueues(jest.fn())
+    stop()
+
+    expect(sends.stop).toHaveBeenCalledTimes(1)
+    expect(deliveries.stop).toHaveBeenCalledTimes(1)
   })
 })
