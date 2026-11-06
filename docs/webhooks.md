@@ -172,7 +172,7 @@ function accept(session, event) {
 }
 ```
 
-Waiting for the event before only works when the webhook receives **every** event (`events: ["*"]`). With a filter the `seq` of the events it did not ask for never arrive, and a receiver that waited for them would wait for ever: such a receiver drops repeats and orders by `seq` over a short window of its own instead. The first `seq` of a receiver that is created while the session is running is the first one it receives.
+Waiting for the event before only works when the webhook receives **every** event (`events: ["*"]`). With a filter the `seq` of the events it did not ask for never arrive, and a receiver that waited for them would wait for ever: such a receiver drops repeats and orders by `seq` over a short window of its own instead. A receiver created while the session is running has no exact first `seq` to start from: the deliveries of a burst reach it in any order, so the first to arrive can be the second, and the one before it would then be dropped as already handed over if the start were taken from it. Start from a `seq` you are sure of (for example the lowest one seen after a short wait) and expect an earlier event to arrive late; the repeats are told by `X-Gateway-Delivery`, not by the `seq`.
 
 ### Repeats
 

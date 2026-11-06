@@ -17,6 +17,8 @@ import { FakeWhatsAppClientFactory } from '../helpers/fake-whatsapp-client.js'
 
 const ADMIN = { 'x-api-key': TEST_ENV.ADMIN_API_KEY }
 const LOOPBACK = '127.0.0.1'
+// WEBHOOK_MAX_ATTEMPTS of the application under test
+const ATTEMPTS = 2
 const MINUTE = 60 * 1000
 const DAY = 24 * 60 * MINUTE
 
@@ -106,7 +108,7 @@ describe('retention (integration)', () => {
       REDIS_URL,
       RATE_LIMIT_MAX: '100000',
       WEBHOOK_PRIVATE_HOST_ALLOWLIST: LOOPBACK,
-      WEBHOOK_MAX_ATTEMPTS: '2',
+      WEBHOOK_MAX_ATTEMPTS: String(ATTEMPTS),
       WEBHOOK_BACKOFF_MS: '50',
       WEBHOOK_TIMEOUT_MS: '3000'
     })
@@ -338,15 +340,51 @@ describe('retention (integration)', () => {
       expect(received).toEqual([])
     })
 
+    // The receiver keeps failing, and the database refuses both the result of each attempt and the mark
+    // the worker puts on a delivery the queue gave up on: the row is left `pending` by itself, with a
+    // job in the `failed` set. (Writing the row back to `pending` by hand instead races with that
+    // mark: the worker writes it after the test has reset the row.)
     it('marks a row whose job gave up without recording it', async () => {
       answer = 500
       const row = await pendingRow(14, 45 * MINUTE)
-      await get(queueService).enqueue({ deliveryId: row.id, webhookId, envelope: envelope(14) })
-      await settled(row.id, 'failed')
-      await get(prisma).webhookDelivery.update({
-        where: { id: row.id },
-        data: { status: 'pending', lastError: null }
-      })
+      const recordAttempt = get(deliveries).recordAttempt.bind(get(deliveries))
+      const failUnqueued = get(deliveries).failUnqueued.bind(get(deliveries))
+      const refusedWrites = jest
+        .spyOn(get(deliveries), 'recordAttempt')
+        .mockImplementation((id, attempt, at) =>
+          id === row.id
+            ? Promise.reject(new Error('the result could not be written'))
+            : recordAttempt(id, attempt, at)
+        )
+      const refusedMarks = jest
+        .spyOn(get(deliveries), 'failUnqueued')
+        .mockImplementation((id, error) =>
+          id === row.id
+            ? Promise.reject(new Error('the delivery could not be marked'))
+            : failUnqueued(id, error)
+        )
+      try {
+        await get(queueService).enqueue({ deliveryId: row.id, webhookId, envelope: envelope(14) })
+        // The conditions themselves: the job is in the failed set and the worker has tried (and
+        // failed) to mark the row, which is the last thing it does with a job it gave up on
+        await until(
+          () => Promise.resolve(refusedMarks.mock.calls.length > 0 ? true : undefined),
+          'the worker to try to mark the delivery'
+        )
+        // ... and to have handled the refusal (it logs it and does nothing else)
+        const refusal = refusedMarks.mock.results[0]
+        if (refusal?.type === 'return')
+          await (refusal.value as Promise<unknown>).catch(() => undefined)
+        await until(async () => {
+          const states = await get(queueService).jobStates()
+          return states.get(row.id) === 'failed' ? true : undefined
+        }, 'the job to be in the failed set')
+      } finally {
+        refusedWrites.mockRestore()
+        refusedMarks.mockRestore()
+      }
+      expect(received).toHaveLength(ATTEMPTS)
+      expect((await statusOf(row.id))?.status).toBe('pending')
 
       await get(retention).sweepPending()
 

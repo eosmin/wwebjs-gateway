@@ -63,8 +63,9 @@ export interface ReceivedEvent {
 // Waiting for the event before is only possible when the webhook receives every event (`*`): with a
 // filter the `seq` of the events it does not want are missing, and a receiver that waited for them
 // would wait for ever. `ordered: false` is for those webhooks: it drops repeats and nothing else.
-// `firstSeq: 'first-seen'` starts the sequence at the first event that arrives, for a receiver
-// that is created while the session is already running.
+// `firstSeq: 'first-seen'` starts the sequence at the first event that arrives. Do not use it for a
+// burst: its deliveries reach the receiver in any order, and the ones below the first to arrive are
+// then dropped as already handed over. Give the real first `seq`, or use `ordered: false`.
 export class OrderedConsumer {
   private readonly seen = new Set<string>()
   private readonly next = new Map<string, number>()
