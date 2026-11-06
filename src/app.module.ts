@@ -18,6 +18,7 @@ import { LoggerModule } from './infra/logger/logger.module.js'
 import { MetricsModule } from './infra/metrics/metrics.module.js'
 import { RedisModule } from './infra/redis/redis.module.js'
 import { MessagingModule } from './services/messaging.module.js'
+import { RetentionModule } from './services/retention.module.js'
 import { WebhooksModule } from './services/webhooks.module.js'
 import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
 
@@ -33,6 +34,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
     WhatsAppModule,
     MessagingModule,
     WebhooksModule,
+    RetentionModule,
     SystemModule,
     ApiKeysModule,
     SessionsModule,

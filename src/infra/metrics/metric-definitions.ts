@@ -90,7 +90,7 @@ export const METRIC_DEFINITIONS = {
   webhookDeliveries: {
     name: 'gw_webhook_deliveries_total',
     type: 'counter',
-    help: "Webhook deliveries, by result: each attempt's outcome (`success`; `retry`, failed and will be tried again; `failed`, failed for the last time; `dropped`, the job ended without an attempt because its webhook is gone or disabled or the delivery was already made), `unlogged` (no row could be stored) and `not_queued` (the job could not be queued).",
+    help: "Webhook deliveries, by result: each attempt's outcome (`success`; `retry`, failed and will be tried again; `failed`, failed for the last time; `dropped`, the job ended without an attempt because its webhook is gone or disabled or the delivery was already made), `unlogged` (no row could be stored), `not_queued` (the job could not be queued) and `swept` (a pending row with no job to run it was sent to the dead letters by the retention sweep).",
     labels: ['result']
   },
   webhookDurationSeconds: {
