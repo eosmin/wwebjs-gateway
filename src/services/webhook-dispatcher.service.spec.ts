@@ -10,6 +10,7 @@ import { EventBusService } from '../whatsapp/event-bus.service.js'
 
 import type { DeliveryQueueService } from './delivery-queue.service.js'
 import { WebhookDispatcherService } from './webhook-dispatcher.service.js'
+import type { WebhookMediaService } from './webhook-media.service.js'
 import type { WebhookService } from './webhook.service.js'
 
 const webhook = (id: string, overrides: Partial<Webhook> = {}): Webhook => ({
@@ -48,6 +49,7 @@ function setup(options: { includeRaw?: boolean } = {}) {
   const create = jest.fn((data: { id?: string }) => Promise.resolve({ id: data.id }))
   const failUnqueued = jest.fn((_id: string, _error: string) => Promise.resolve())
   const enqueue = jest.fn((_data: unknown) => Promise.resolve())
+  const fetchInline = jest.fn((_event: EventEnvelope) => Promise.resolve(new Map<string, string>()))
   const metrics = new MetricsService()
   const config = parseEnv({ ...TEST_ENV, INCLUDE_RAW: String(options.includeRaw ?? true) })
   const service = new WebhookDispatcherService(
@@ -56,10 +58,11 @@ function setup(options: { includeRaw?: boolean } = {}) {
     { forEvent } as unknown as WebhookService,
     { create, failUnqueued } as unknown as DeliveriesRepository,
     { enqueue } as unknown as DeliveryQueueService,
+    { fetchInline } as unknown as WebhookMediaService,
     metrics
   )
   service.onModuleInit()
-  return { bus, service, forEvent, create, failUnqueued, enqueue, metrics }
+  return { bus, service, forEvent, create, failUnqueued, enqueue, metrics, fetchInline }
 }
 
 // The bus never awaits its subscribers, so the dispatcher is awaited through `dispatch`
@@ -157,6 +160,81 @@ describe('WebhookDispatcherService', () => {
     expect(sent['keeps']).toHaveProperty('media')
     expect(sent['no-raw']).not.toHaveProperty('raw')
     expect(sent['no-media']).not.toHaveProperty('media')
+  })
+
+  describe('media inline', () => {
+    const photo = {
+      id: 'm1',
+      body: '',
+      media: { mimetype: 'image/png', size: 4, downloadUrl: 'u' }
+    }
+    const sentTo = (ctx: ReturnType<typeof setup>) =>
+      Object.fromEntries(
+        ctx.create.mock.calls.map(([row], index) => [
+          (row as { webhookId: string }).webhookId,
+          (ctx.enqueue.mock.calls[index]?.[0] as { envelope: { data: { media?: object } } })
+            .envelope.data.media
+        ])
+      )
+
+    it('gives the downloaded bytes to the webhooks that take them inline and to no other', async () => {
+      const ctx = setup()
+      ctx.fetchInline.mockResolvedValue(new Map([['m1', 'AAAA']]))
+      ctx.forEvent.mockResolvedValue([
+        webhook('inline', { mediaMode: 'inline' }),
+        webhook('reference', { mediaMode: 'reference' }),
+        webhook('none', { mediaMode: 'none' })
+      ])
+
+      await dispatched(ctx, event('message', photo))
+
+      expect(sentTo(ctx)).toEqual({
+        inline: { mimetype: 'image/png', size: 4, downloadUrl: 'u', base64: 'AAAA' },
+        reference: { mimetype: 'image/png', size: 4, downloadUrl: 'u' },
+        none: undefined
+      })
+    })
+
+    it('downloads once for the event, however many webhooks take it inline', async () => {
+      const ctx = setup()
+      ctx.forEvent.mockResolvedValue([
+        webhook('one', { mediaMode: 'inline' }),
+        webhook('two', { mediaMode: 'inline' })
+      ])
+
+      await dispatched(ctx, event('message', photo))
+
+      expect(ctx.fetchInline).toHaveBeenCalledTimes(1)
+    })
+
+    it('downloads nothing when no webhook takes media inline', async () => {
+      const ctx = setup()
+      ctx.forEvent.mockResolvedValue([webhook('reference'), webhook('none', { mediaMode: 'none' })])
+
+      await dispatched(ctx, event('message', photo))
+
+      expect(ctx.fetchInline).not.toHaveBeenCalled()
+    })
+
+    it('still delivers the event, with the reference, when the download gave nothing', async () => {
+      const ctx = setup()
+      ctx.forEvent.mockResolvedValue([webhook('inline', { mediaMode: 'inline' })])
+
+      await dispatched(ctx, event('message', photo))
+
+      expect(sentTo(ctx)['inline']).toEqual({ mimetype: 'image/png', size: 4, downloadUrl: 'u' })
+    })
+
+    it('keeps the bytes out of the stored copy of the delivery', async () => {
+      const ctx = setup()
+      ctx.fetchInline.mockResolvedValue(new Map([['m1', 'AAAA']]))
+      ctx.forEvent.mockResolvedValue([webhook('inline', { mediaMode: 'inline' })])
+
+      await dispatched(ctx, event('message', photo))
+
+      const row = ctx.create.mock.calls[0]?.[0] as { payload: { data: { media: object } } }
+      expect(row.payload.data.media).not.toHaveProperty('base64')
+    })
   })
 
   it('follows INCLUDE_RAW when the webhook has no choice', async () => {

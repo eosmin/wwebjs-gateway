@@ -95,14 +95,53 @@ function shapeMedia(message: Dict, options: PayloadOptions): Dict {
   return keep ? message : { ...message, media: withoutKey(media, 'base64') }
 }
 
+// Only a message that arrives is worth downloading for a webhook: its acks, edits and revocations
+// carry the same message again, and each would fetch the same file once more
+const INLINE_MEDIA_EVENTS: readonly WaEventName[] = ['message', BATCH_EVENT]
+
+// The ids of the messages of `event` whose file a webhook with `mediaMode: inline` could receive:
+// they have a media block that does not carry the bytes yet and whose size is known and within the
+// limit. A file of unknown size is not downloaded to find out; the receiver has its `downloadUrl`.
+export function inlineMediaCandidates(event: EventEnvelope, maxBytes: number): string[] {
+  const ids: string[] = []
+  if (!INLINE_MEDIA_EVENTS.includes(event.event)) return ids
+  mapMessages(event.event, event.data, message => {
+    const { id, media } = message
+    if (
+      typeof id === 'string' &&
+      isDict(media) &&
+      media.base64 === undefined &&
+      typeof media.size === 'number' &&
+      media.size <= maxBytes
+    ) {
+      ids.push(id)
+    }
+    return message
+  })
+  return ids
+}
+
+// `inline` holds the bytes (base64) of the messages that were downloaded, by message id
+function withDownloadedBytes(message: Dict, inline: ReadonlyMap<string, string> | undefined): Dict {
+  const bytes = typeof message.id === 'string' ? inline?.get(message.id) : undefined
+  return bytes !== undefined && isDict(message.media)
+    ? { ...message, media: { ...message.media, base64: bytes } }
+    : message
+}
+
 // The data is a DTO, so it is JSON; the schema of the queue says so, the event types do not
 const asJson = (data: unknown): DeliveryEnvelope['data'] => data as DeliveryEnvelope['data']
 
 // The event as one webhook receives it: `raw` only when the webhook includes it, and the media as
-// its mode says. Media is never added here, only kept or reduced.
-export function shapeForWebhook(event: EventEnvelope, options: PayloadOptions): DeliveryEnvelope {
+// its mode says. This never downloads: the bytes that were fetched for the event come in `inline`,
+// and a webhook takes them only in `inline` mode and within its limit.
+export function shapeForWebhook(
+  event: EventEnvelope,
+  options: PayloadOptions,
+  inline?: ReadonlyMap<string, string>
+): DeliveryEnvelope {
   const data = mapMessages(event.event, event.data, message => {
-    const shaped = shapeMedia(message, options)
+    const shaped = shapeMedia(withDownloadedBytes(message, inline), options)
     return options.includeRaw ? shaped : withoutKey(shaped, 'raw')
   })
   return {

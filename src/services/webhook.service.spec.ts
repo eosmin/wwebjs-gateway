@@ -45,6 +45,7 @@ function setup(config: Partial<AppConfig> = {}) {
       // An address literal needs no DNS lookup
       WEBHOOK_PRIVATE_HOST_ALLOWLIST: [],
       ALLOW_PRIVATE_WEBHOOK_TARGETS: false,
+      INCLUDE_RAW: true,
       ...config
     } as AppConfig,
     webhooks as unknown as WebhooksRepository,
@@ -54,6 +55,48 @@ function setup(config: Partial<AppConfig> = {}) {
 }
 
 const PUBLIC_URL = 'https://8.8.8.8/hook'
+
+// The gateway attaches no `raw` to a message when INCLUDE_RAW is off, so a webhook that asks for it
+// would be created and then receive nothing, with no word about it
+describe('includeRaw while INCLUDE_RAW is off', () => {
+  const off = { INCLUDE_RAW: false }
+
+  it('refuses to create a webhook that asks for the raw data', async () => {
+    const { service, webhooks } = setup(off)
+
+    await expect(service.create({ url: PUBLIC_URL, includeRaw: true })).rejects.toBeInstanceOf(
+      ValidationError
+    )
+    expect(webhooks.create).not.toHaveBeenCalled()
+  })
+
+  it('refuses to change a webhook to ask for it', async () => {
+    const { service, webhooks } = setup(off)
+
+    await expect(service.update(ID, { includeRaw: true })).rejects.toBeInstanceOf(ValidationError)
+    expect(webhooks.update).not.toHaveBeenCalled()
+  })
+
+  it('says why', async () => {
+    const { service } = setup(off)
+
+    await expect(service.update(ID, { includeRaw: true })).rejects.toThrow(/INCLUDE_RAW/)
+  })
+
+  it('still takes a webhook that follows INCLUDE_RAW or turns the raw data off', async () => {
+    const { service } = setup(off)
+
+    await expect(service.create({ url: PUBLIC_URL })).resolves.toBeDefined()
+    await expect(service.create({ url: PUBLIC_URL, includeRaw: false })).resolves.toBeDefined()
+    await expect(service.update(ID, { includeRaw: null })).resolves.toBeDefined()
+  })
+
+  it('takes a webhook that asks for the raw data while INCLUDE_RAW is on', async () => {
+    const { service } = setup({ INCLUDE_RAW: true })
+
+    await expect(service.create({ url: PUBLIC_URL, includeRaw: true })).resolves.toBeDefined()
+  })
+})
 
 describe('toWebhookDto', () => {
   it('never carries the secret', () => {
