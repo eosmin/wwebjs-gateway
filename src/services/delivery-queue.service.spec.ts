@@ -34,7 +34,7 @@ const ENVELOPE = {
   data: {}
 }
 
-const JOB = { deliveryId: 'd1', envelope: ENVELOPE }
+const JOB = { deliveryId: 'd1', webhookId: 'w1', envelope: ENVELOPE }
 
 function setup() {
   queues.length = 0
@@ -86,6 +86,20 @@ describe('DeliveryQueueService', () => {
     })
   })
 
+  // The job carries the live QR or pairing code, which is good for about a minute; a day in Redis
+  // (and on the Bull Board) is not
+  it.each(['qr', 'code'])('keeps the finished jobs of a %s for minutes, not hours', async name => {
+    const { service } = setup()
+
+    await service.enqueue({ ...JOB, envelope: { ...ENVELOPE, event: name } })
+
+    expect(opened().add).toHaveBeenCalledWith(
+      'deliver',
+      expect.anything(),
+      expect.objectContaining({ removeOnComplete: { age: 300 }, removeOnFail: { age: 300 } })
+    )
+  })
+
   it('gives no job id, so a retry is never taken for a duplicate of the failed job it follows', async () => {
     const { service } = setup()
 
@@ -107,6 +121,18 @@ describe('DeliveryQueueService', () => {
     await service.enqueue(JOB)
 
     expect(opened().on).toHaveBeenCalledWith('error', expect.any(Function))
+  })
+
+  it('hands the queue to the dashboard, opening it once', () => {
+    const { service } = setup()
+    const listener = jest.fn()
+
+    service.watchQueues(listener)
+    service.watchQueues(listener)
+
+    expect(queues).toHaveLength(1)
+    expect(listener).toHaveBeenNthCalledWith(1, [opened()])
+    expect(listener).toHaveBeenNthCalledWith(2, [opened()])
   })
 
   it('closes the queue when the module is destroyed', async () => {

@@ -47,6 +47,14 @@ describe('signWebhook', () => {
     expect(() => signWebhook('', 1, 'x')).toThrow(RangeError)
   })
 
+  // Computed outside the code under test:
+  // printf '1767225600.{"id":"evt_1","seq":7}' | openssl dgst -sha256 -hmac whsec_vector
+  it('matches the vector of the TDD, which the receivers verify against', () => {
+    expect(signWebhook('whsec_vector', 1767225600, '{"id":"evt_1","seq":7}')).toBe(
+      'sha256=4e7cd92215110c8a5c9eaefa53663c809c974cb2a6ebebc753d9acc29a849b32'
+    )
+  })
+
   it('signs timestamp and body with HMAC-SHA256', () => {
     // openssl: printf '1700000000.{"a":1}' | openssl dgst -sha256 -hmac key
     expect(signWebhook('key', 1700000000, '{"a":1}')).toMatch(/^sha256=[0-9a-f]{64}$/)

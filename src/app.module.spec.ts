@@ -21,6 +21,7 @@ import { createFastifyAdapter } from './infra/logger/fastify-adapter.js'
 import { MetricsService } from './infra/metrics/metrics.service.js'
 import { RedisService } from './infra/redis/redis.service.js'
 import { AuthService } from './services/auth.service.js'
+import { DeliveryProcessor } from './services/delivery.processor.js'
 import { SendQueueService } from './services/send-queue.service.js'
 import { ReconcilerService } from './whatsapp/reconciler.service.js'
 import { SessionManager } from './whatsapp/session-manager.service.js'
@@ -129,6 +130,9 @@ describe('AppModule over HTTP', () => {
       // job has no Redis, and the stand-in above is not one
       .overrideProvider(SendQueueService)
       .useValue(sendQueue)
+      // Same for the worker of the webhook deliveries: it starts on init and needs a real connection
+      .overrideProvider(DeliveryProcessor)
+      .useValue({})
       .overrideProvider(ApiKeysRepository)
       .useValue(keys)
       .overrideProvider(SessionsRepository)
@@ -627,6 +631,7 @@ describe('AppModule wiring of the send queue', () => {
 
     expect(moduleRef.get(SendQueueService)).toBeInstanceOf(SendQueueService)
     expect(moduleRef.get(WatchdogService)).toBeInstanceOf(WatchdogService)
+    expect(moduleRef.get(DeliveryProcessor)).toBeInstanceOf(DeliveryProcessor)
     await moduleRef.close()
   })
 })

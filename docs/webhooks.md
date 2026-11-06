@@ -24,7 +24,7 @@ An admin key (the bootstrap key, or a database key without a session) reaches ev
 `{ id, sessionId, url, events, enabled, mediaMode, includeRaw, createdAt }`.
 
 - `sessionId`: the session whose events are delivered. `null` is the events of every session, which only an admin key can create. The session of a webhook never changes: delete it and create another.
-- `url`: `http` or `https` on a public host. The address check runs when the webhook is created or changed, and again before every delivery, so a name that later resolves to a private address stops working. Targets on a private network (such as `http://bot:3000`) need `WEBHOOK_PRIVATE_HOST_ALLOWLIST`; `ALLOW_PRIVATE_WEBHOOK_TARGETS` turns the check off for development ([config](config-reference.md)).
+- `url`: `http` or `https` on a public host. The address check runs when the webhook is created or changed, and again before every delivery, so a name that later resolves to a private address stops working. Targets on a private network (such as `http://bot:3000`) need `WEBHOOK_PRIVATE_HOST_ALLOWLIST`. `ALLOW_PRIVATE_WEBHOOK_TARGETS` lets private and loopback targets through for development; the gateway refuses to start with it on when `NODE_ENV=production`, and the cloud metadata and link-local addresses (`169.254.0.0/16`, `fe80::/10`, Alibaba's `100.100.100.200`) stay blocked even when it is on; the name of the URL must still resolve ([config](config-reference.md)).
 - `events`: the event names delivered ([events](events.md)), or `["*"]` for every event. It defaults to `["*"]`; a `*` among other names replaces them.
 - `enabled`: a disabled webhook receives nothing. It defaults to `true`.
 - `mediaMode`: `none` (metadata only), `reference` (a download URL, the default) or `inline` (base64, up to `WEBHOOK_INLINE_MEDIA_MAX_BYTES`).
@@ -54,7 +54,7 @@ Every event of every session goes through the dispatcher. For each **enabled** w
   - `raw` stays on a message only when `includeRaw` is `true`, or `null` and `INCLUDE_RAW` is on. A webhook cannot ask for more than the event has: with `INCLUDE_RAW` off the gateway attaches no `raw` at all, and `includeRaw: true` adds nothing.
   - `mediaMode: none` removes `media`; `reference` keeps `media` without `base64`; `inline` keeps `base64` only when it decodes to at most `WEBHOOK_INLINE_MEDIA_MAX_BYTES`. The dispatcher only keeps or reduces: it never downloads media.
   - These apply to the messages of `message`, `message_create`, `message_ack`, `message_edit`, `message_revoke_everyone`, `message_revoke_me`, `message_ciphertext`, `message_ciphertext_failed`, `media_uploaded`, `message_sent`, `contact_changed`, the `lastMessage` of the chat in `unread_count`, `chat_removed` and `chat_archived`, and every message of a `message_batch`.
-- **What is stored.** The job in Redis carries the event as the receiver gets it. The row in `webhook_deliveries` (what a manual retry sends again) carries a redacted copy: the text of a `qr` and the pairing `code` become `[Redacted]`, and inline `base64` is dropped. A retried `qr` or `code` therefore reaches the receiver redacted; both expire within a minute anyway.
+- **What is stored.** The job in Redis carries the event as the receiver gets it. The row in `webhook_deliveries` (what a manual retry sends again) carries a redacted copy: the text of a `qr` and the pairing `code` become `[Redacted]`, and inline `base64` is dropped. Because of that, **a delivery of a `qr` or a `code` cannot be retried by hand**: the stored copy has no credential left to send, and both expire within a minute anyway. `retry` answers `400 VALIDATION_ERROR` for them and `retry-failed` leaves them where they are. The automatic retries of a fresh delivery are not affected: the job carries the real value.
 - **Failures never lose an event silently, and never stop another webhook.**
   - If the row cannot be stored (the database is down), the job is queued all the same: a receiver must not miss an event because the log is down. That delivery has no row, so it is not in the list and nothing records its attempts. It is counted as `gw_webhook_deliveries_total{result="unlogged"}`.
   - If the job cannot be queued (Redis is down), the row goes to `failed` with `lastError: "The delivery could not be queued"`, so it shows among the dead letters and `retry` / `retry-failed` send it from the stored copy. It is counted as `result="not_queued"`. If neither the row nor the job could be made, the event is lost for that webhook and only the error log (event, session and `seq`, never the payload) says so.
@@ -75,13 +75,60 @@ Every event sent to a webhook is a delivery: `{ id, webhookId, sessionId, event,
 
 ### Retrying
 
-- `POST …/deliveries/:deliveryId/retry` puts one dead letter back in the queue and answers it as `pending`. **Only a `failed` delivery can be retried**: one that succeeded is never sent twice, and one that is still pending is already on its way. Both, and a delivery of another webhook, are `404 NOT_FOUND`. The attempts already made stay counted.
+- `POST …/deliveries/:deliveryId/retry` puts one dead letter back in the queue and answers it as `pending`. **Only a `failed` delivery can be retried**: one that succeeded is never sent twice, and one that is still pending is already on its way. Both, and a delivery of another webhook, are `404 NOT_FOUND`; a `qr` or `code` is `400` (see above). The attempts already made stay counted.
 - `POST …/deliveries/retry-failed` does it for the dead letters of the webhook, at most 500 per call. `retried` is how many went back and `more` tells there are others; call again to take them. A dead letter whose stored event cannot be read is skipped and logged. Two calls at the same time queue each delivery once.
 - A retry sends the stored copy of the event, with the current URL and secret. Retries reach the receiver in no particular order, so a late retry can arrive after a newer event: **the receiver orders by `seq`** (per session).
 - When the queue (Redis) cannot take the job, the call fails and the delivery goes to `failed` again, with `lastError` saying so, instead of staying `pending` with nothing to run it.
 
 ## What a delivery looks like
 
-The envelope of [events](events.md) is the body of the POST. Per TDD §6.9 the request carries `Content-Type: application/json`, `User-Agent: wwebjs-gateway/<version>`, `X-Gateway-Event`, `X-Gateway-Delivery`, `X-Gateway-Seq`, `X-Gateway-Timestamp` (unix seconds) and `X-Gateway-Signature: sha256=<hex>`, the HMAC-SHA256 of `${timestamp}.${rawBody}` with the secret. A `2xx` is success; anything else is retried with exponential backoff (`WEBHOOK_BACKOFF_MS`) up to `WEBHOOK_MAX_ATTEMPTS`, and then the delivery is `failed`. Redirects are not followed.
+The envelope of [events](events.md) is the body of the POST, as JSON. The request carries:
 
-> **Status.** The routes, the queue and the dispatcher (above) are in place. The processor that sends the jobs (7.4) comes next, so until it lands the jobs wait in the queue (`webhook-deliveries`), which keeps them across restarts, and nothing sends them yet.
+| Header | Value |
+| --- | --- |
+| `Content-Type` | `application/json` |
+| `User-Agent` | `wwebjs-gateway/<version>` |
+| `X-Gateway-Event` | The event name, such as `message` or `ping`. |
+| `X-Gateway-Delivery` | The id of the delivery. **The same on every attempt**, so it is the key to drop a repeat. |
+| `X-Gateway-Seq` | The `seq` of the event in its session (`0` for a `ping`). |
+| `X-Gateway-Timestamp` | Unix seconds when **this attempt** was made. |
+| `X-Gateway-Signature` | `sha256=<hex>`: the HMAC-SHA256, with the secret of the webhook, of `${timestamp}.${rawBody}`. |
+
+`rawBody` is the exact text of the request body, byte for byte. Verify before parsing, over the raw bytes, and compare in constant time:
+
+```js
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+function verify(secret, headers, rawBody, toleranceSeconds = 300) {
+  const timestamp = Number(headers['x-gateway-timestamp'])
+  if (!Number.isInteger(timestamp) || Math.abs(Date.now() / 1000 - timestamp) > toleranceSeconds) return false
+  const expected = createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest()
+  const given = Buffer.from((headers['x-gateway-signature'] ?? '').replace(/^sha256=/, ''), 'hex')
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+```
+
+Reference vector: secret `whsec_vector`, timestamp `1767225600` and body `{"id":"evt_1","seq":7}` give `sha256=4e7cd92215110c8a5c9eaefa53663c809c974cb2a6ebebc753d9acc29a849b32`.
+
+### What counts as delivered, and what is tried again
+
+- A **`2xx`** answer is a success and the delivery is final (`success`); the body of the answer is never read.
+- **Anything else is a failed attempt and is tried again**: another status (a `4xx` too, since a receiver that answers `404` while it is being deployed recovers by itself), a redirect (it is **not followed**: its status is the result), a timeout (`WEBHOOK_TIMEOUT_MS`, counted from the connection; resolving the name has its own limit of 5 s), a connection that fails, or an address the check refuses.
+- Attempts back off exponentially from `WEBHOOK_BACKOFF_MS`, up to `WEBHOOK_MAX_ATTEMPTS`. The last failure makes the delivery `failed`, a dead letter that `retry` / `retry-failed` can send again. Each attempt updates `attempts`, `lastStatusCode` (`null` when nothing answered) and `lastError`, which says only what kind of failure it was (`The receiver answered 503`, `The receiver did not answer in 10000 ms`, `The connection failed (ECONNREFUSED)`, `The URL is not allowed: …`), never the URL.
+- **The address check runs again on every attempt**, and the socket connects only to the addresses it approved: a name that resolves to a private address after the check (DNS rebinding) leads nowhere. The same goes for a `url` that was changed while the delivery waited.
+
+### Before each attempt
+
+Every attempt reads the webhook again, so what it finds is what applies:
+
+- **Deleted webhook**: the job is dropped as done (the deliveries go with the webhook).
+- **Disabled webhook**: an event is not sent. Its delivery goes to `failed` with `lastError: "The webhook is disabled"`, so `retry-failed` sends it after the webhook is enabled again. A `ping` is the exception, so a receiver can be checked before it is turned on.
+- **Delivery already `success`**: not sent a second time.
+- **Delivery without a row** (it could not be stored, see above): sent all the same, and nothing records its attempts.
+- **Rotated secret / changed URL**: used as they are now (see *The secret*).
+
+### Repeats
+
+Delivery is **at least once**. If the gateway stops after your receiver answered and before it wrote the result, the delivery is sent again. Keep the `X-Gateway-Delivery` of what you already handled and ignore a repeat; order by `seq` as said above.
+
+> **Status.** The routes, the queue, the dispatcher and the processor are in place. Filling `data.media` on message events (`downloadUrl`, `base64`) lands in 7.6; until then `mediaMode` only reduces what an event carries.

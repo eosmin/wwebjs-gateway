@@ -6,6 +6,8 @@ import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 
+import { REDACTED_EVENTS } from './webhook-payload.js'
+
 // One queue for every webhook: the retries of a delivery are BullMQ attempts of one job, and a
 // receiver that is down only slows its own deliveries down, not the sends (those have lanes of their own)
 export const DELIVERY_QUEUE_NAME = 'webhook-deliveries'
@@ -23,13 +25,19 @@ export const DeliveryEnvelope = z.object({
 })
 export type DeliveryEnvelope = z.infer<typeof DeliveryEnvelope>
 
-export interface DeliveryJobData {
-  deliveryId: string
+// The job names its webhook itself because the delivery row can be missing (the database was down
+// when the dispatcher stored it, TDD §6.9) and the job must still reach the right receiver
+export const DeliveryJobData = z.object({
+  deliveryId: z.string(),
+  webhookId: z.string(),
   envelope: DeliveryEnvelope
-}
+})
+export type DeliveryJobData = z.infer<typeof DeliveryJobData>
 
 const COMPLETED_KEPT_SECONDS = 3600
 const FAILED_KEPT_SECONDS = 86400
+// A QR or a pairing code in a finished job is a credential for about a minute: it is not kept for a day
+const CREDENTIAL_KEPT_SECONDS = 300
 
 // Where the deliveries wait for an attempt (TDD §6.9). The routes (test, retry) and the
 // dispatcher put jobs in; the processor takes them out.
@@ -47,12 +55,20 @@ export class DeliveryQueueService implements OnModuleDestroy {
   // Every enqueue is a new job on purpose: a manual retry of a delivery whose last job is still
   // kept (a failed one stays a day) must not be swallowed as a duplicate of it
   async enqueue(data: DeliveryJobData): Promise<void> {
+    const credential = REDACTED_EVENTS.includes(data.envelope.event)
     await this.open().add(DELIVER_JOB_NAME, data, {
       attempts: this.config.WEBHOOK_MAX_ATTEMPTS,
       backoff: { type: 'exponential', delay: this.config.WEBHOOK_BACKOFF_MS },
-      removeOnComplete: { age: COMPLETED_KEPT_SECONDS },
-      removeOnFail: { age: FAILED_KEPT_SECONDS }
+      removeOnComplete: { age: credential ? CREDENTIAL_KEPT_SECONDS : COMPLETED_KEPT_SECONDS },
+      removeOnFail: { age: credential ? CREDENTIAL_KEPT_SECONDS : FAILED_KEPT_SECONDS }
     })
+  }
+
+  // For the queue dashboard (Bull Board): the listener gets the queue once, as the send queue does
+  // when its lanes change. Opens the queue, so it is only called when the dashboard is enabled.
+  watchQueues(listener: (queues: Queue[]) => void): () => void {
+    listener([this.open()])
+    return () => undefined
   }
 
   // Before Redis closes

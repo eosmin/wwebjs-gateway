@@ -244,7 +244,11 @@ describe('WebhookDeliveriesService.retry', () => {
     const dto = await service.retry(WEBHOOK_ID, uuid(4))
 
     expect(dto).toMatchObject({ id: uuid(4), status: 'pending', attempts: 3 })
-    expect(queue.enqueue).toHaveBeenCalledWith({ deliveryId: uuid(4), envelope: envelope(4) })
+    expect(queue.enqueue).toHaveBeenCalledWith({
+      deliveryId: uuid(4),
+      webhookId: WEBHOOK_ID,
+      envelope: envelope(4)
+    })
   })
 
   it('answers 404 for a delivery that does not exist or belongs to another webhook', async () => {
@@ -265,6 +269,21 @@ describe('WebhookDeliveriesService.retry', () => {
     expect(await rejection(service.retry(WEBHOOK_ID, uuid(2)))).toBeInstanceOf(NotFoundError)
     expect(queue.enqueue).not.toHaveBeenCalled()
   })
+
+  // The stored copy of these two has the credential redacted (TDD §6.9): sending it would deliver
+  // "[Redacted]" as if it were a QR, and both expire within a minute anyway
+  it.each(['qr', 'code'])(
+    'refuses to retry a %s delivery, which is stored redacted',
+    async name => {
+      const { service, deliveries, queue, store, seed } = setup()
+      seed(delivery(4, { event: name, payload: { ...envelope(4), event: name } }))
+
+      expect(await rejection(service.retry(WEBHOOK_ID, uuid(4)))).toBeInstanceOf(ValidationError)
+      expect(deliveries.resetForRetry).not.toHaveBeenCalled()
+      expect(queue.enqueue).not.toHaveBeenCalled()
+      expect(store.get(uuid(4))?.status).toBe('failed')
+    }
+  )
 
   it('queues it once when two retries come at the same time', async () => {
     const { service, queue, seed } = setup()
@@ -314,6 +333,20 @@ describe('WebhookDeliveriesService.retryFailed', () => {
       uuid(1),
       uuid(3)
     ])
+  })
+
+  it('leaves the dead letters of qr and code as they are', async () => {
+    const { service, queue, store, seed } = setup()
+    seed(
+      delivery(1),
+      delivery(2, { event: 'qr', payload: { ...envelope(2), event: 'qr' } }),
+      delivery(3, { event: 'code', payload: { ...envelope(3), event: 'code' } })
+    )
+
+    expect(await service.retryFailed(WEBHOOK_ID)).toEqual({ retried: 1, more: false })
+    expect(queue.enqueue.mock.calls.map(([job]) => job.deliveryId)).toEqual([uuid(1)])
+    expect(store.get(uuid(2))?.status).toBe('failed')
+    expect(store.get(uuid(3))?.status).toBe('failed')
   })
 
   it('answers zero for a webhook without dead letters', async () => {

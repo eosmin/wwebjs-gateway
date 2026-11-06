@@ -30,7 +30,8 @@ interface DeliveryBody {
 
 // Step 7.2 over the whole application with real Postgres and Redis: the webhooks routes go through
 // the guards, the registry, the services, the table of deliveries and the queue the processor (7.4)
-// will read. Nothing consumes the queue yet, so the jobs stay where the routes put them.
+// reads. The queue is paused for the run, so the jobs stay where the routes put them and nothing is
+// sent (the processor has its own suite).
 describe('webhooks API (integration)', () => {
   const factory = new FakeWhatsAppClientFactory()
   const suffix = randomUUID().slice(0, 8)
@@ -139,6 +140,8 @@ describe('webhooks API (integration)', () => {
     webhooks = app.get(WebhooksRepository)
     deliveries = app.get(DeliveriesRepository)
     queue = new Queue(DELIVERY_QUEUE_NAME, { connection: app.get(RedisService).client })
+    // The processor of the application would send these jobs: no worker takes anything while paused
+    await queue.pause()
     for (const id of [mine, other]) {
       const response = await application().inject({
         method: 'POST',
@@ -168,6 +171,7 @@ describe('webhooks API (integration)', () => {
       const sessions = application().get(SessionsRepository)
       for (const id of [mine, other]) await sessions.delete(id)
     } finally {
+      await queue?.resume()
       await queue?.close()
       await app?.close()
     }

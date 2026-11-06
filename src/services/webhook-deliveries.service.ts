@@ -17,6 +17,7 @@ import type {
 } from '../types/webhooks.dto.js'
 
 import { DeliveryEnvelope, DeliveryQueueService } from './delivery-queue.service.js'
+import { REDACTED_EVENTS } from './webhook-payload.js'
 
 // Dead letters one retry-failed call puts back: a receiver that was down for a day can leave
 // thousands, and the call must not hold the request (and the queue) for all of them
@@ -127,6 +128,12 @@ export class WebhookDeliveriesService {
     if (delivery?.webhookId !== webhookId) {
       throw new NotFoundError('NOT_FOUND', `Delivery "${deliveryId}" does not exist`)
     }
+    if (REDACTED_EVENTS.includes(delivery.event)) {
+      throw new ValidationError(
+        'VALIDATION_ERROR',
+        `A "${delivery.event}" delivery cannot be retried: the gateway keeps it without its credential, which expires within a minute`
+      )
+    }
     const requeued = await this.requeue(delivery)
     if (requeued === null) {
       throw new NotFoundError(
@@ -153,6 +160,8 @@ export class WebhookDeliveriesService {
       if (last === undefined) return { retried, more: false }
       for (const delivery of page) {
         if (retried === RETRY_FAILED_LIMIT) return { retried, more: true }
+        // Nothing to send again: they stay dead letters until the retention removes them
+        if (REDACTED_EVENTS.includes(delivery.event)) continue
         if (!DeliveryEnvelope.safeParse(delivery.payload).success) {
           // One row nobody can read must not hold the rest back; it stays a dead letter
           this.logger.warn(`Delivery ${delivery.id} has an unreadable payload and was not retried`)
@@ -207,7 +216,7 @@ export class WebhookDeliveriesService {
   // A job that never reached the queue must not leave the delivery pending with nothing to run it
   private async enqueue(row: WebhookDelivery, envelope: DeliveryEnvelope): Promise<void> {
     try {
-      await this.queue.enqueue({ deliveryId: row.id, envelope })
+      await this.queue.enqueue({ deliveryId: row.id, webhookId: row.webhookId, envelope })
     } catch (error: unknown) {
       await this.deliveries.failUnqueued(row.id, NOT_QUEUED)
       throw error

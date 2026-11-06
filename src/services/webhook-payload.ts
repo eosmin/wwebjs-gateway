@@ -115,6 +115,11 @@ export function shapeForWebhook(event: EventEnvelope, options: PayloadOptions): 
   }
 }
 
+// The events whose stored copy has nothing left to send: the credential in it is `[Redacted]`. The
+// job in Redis carries the real one for the automatic retries; a manual retry starts from the
+// stored copy, so it is refused for these.
+export const REDACTED_EVENTS: readonly string[] = ['qr', 'code']
+
 // The copy kept in the database, which a manual retry starts from: a QR and a pairing code are
 // credentials of a login that is open for a minute, and inline media can weigh megabytes. Neither
 // belongs in a table that is kept for days; the job in Redis carries them.
