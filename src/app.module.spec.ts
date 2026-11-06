@@ -22,6 +22,7 @@ import { MetricsService } from './infra/metrics/metrics.service.js'
 import { RedisService } from './infra/redis/redis.service.js'
 import { AuthService } from './services/auth.service.js'
 import { DeliveryProcessor } from './services/delivery.processor.js'
+import { RetentionService } from './services/retention.service.js'
 import { SendQueueService } from './services/send-queue.service.js'
 import { ReconcilerService } from './whatsapp/reconciler.service.js'
 import { SessionManager } from './whatsapp/session-manager.service.js'
@@ -132,6 +133,9 @@ describe('AppModule over HTTP', () => {
       .useValue(sendQueue)
       // Same for the worker of the webhook deliveries: it starts on init and needs a real connection
       .overrideProvider(DeliveryProcessor)
+      .useValue({})
+      // And for the retention queue, which registers its schedules on init
+      .overrideProvider(RetentionService)
       .useValue({})
       .overrideProvider(ApiKeysRepository)
       .useValue(keys)

@@ -58,7 +58,7 @@ Every event of every session goes through the dispatcher. For each **enabled** w
 - **Failures never lose an event silently, and never stop another webhook.**
   - If the row cannot be stored (the database is down), the job is queued all the same: a receiver must not miss an event because the log is down. That delivery has no row, so it is not in the list and nothing records its attempts. It is counted as `gw_webhook_deliveries_total{result="unlogged"}`.
   - If the job cannot be queued (Redis is down), the row goes to `failed` with `lastError: "The delivery could not be queued"`, so it shows among the dead letters and `retry` / `retry-failed` send it from the stored copy. It is counted as `result="not_queued"`. If neither the row nor the job could be made, the event is lost for that webhook and only the error log (event, session and `seq`, never the payload) says so.
-- **A crash between the row and the job** (the process stops after the row is stored and before the job is queued) leaves a `pending` row with nothing to run it. Until the reconciliation of those rows lands (7.5) it stays pending; `retry` only takes `failed` deliveries.
+- **A crash between the row and the job** (the process stops after the row is stored and before the job is queued) leaves a `pending` row with nothing to run it. The sweep described under *Retention and stale deliveries* sends it to `failed` within about 40 minutes, where `retry` can pick it up; `retry` only takes `failed` deliveries.
 - **Order.** Deliveries are stored and queued as the events arrive, but each retries on its own, so the receiver orders by `seq` (see above).
 
 ## Deliveries and dead letters
@@ -131,4 +131,31 @@ Every attempt reads the webhook again, so what it finds is what applies:
 
 Delivery is **at least once**. If the gateway stops after your receiver answered and before it wrote the result, the delivery is sent again. Keep the `X-Gateway-Delivery` of what you already handled and ignore a repeat; order by `seq` as said above.
 
-> **Status.** The routes, the queue, the dispatcher and the processor are in place. Filling `data.media` on message events (`downloadUrl`, `base64`) lands in 7.6; until then `mediaMode` only reduces what an event carries.
+## Retention and stale deliveries
+
+The gateway deletes on a schedule (`RetentionService`, a BullMQ job scheduler, so a restart does not skip or double a run):
+
+| What | Deleted when | Schedule |
+| --- | --- | --- |
+| Webhook deliveries (the rows, not the receivers' copies) | older than `DELIVERY_RETENTION_DAYS` (14) | daily at 03:00, server time |
+| Stored messages | older than `MESSAGE_RETENTION_DAYS` (30); an incoming message never published is kept | same run |
+| Idempotency keys of sends | older than 24 hours | same run |
+
+Each purge runs even when another fails, and a failed run is tried again (3 attempts, a minute apart, growing).
+
+**Stale `pending` deliveries.** A delivery is `pending` while a job will still try it. A second job, every 10 minutes, looks at the `pending` rows older than 30 minutes and asks the queue about each one. Age alone never decides: a row whose job is waiting for its next retry is left alone however old it is.
+
+| What the queue holds for the row | What the sweep does |
+| --- | --- |
+| a job that will still run (waiting, active, delayed) | nothing |
+| no job at all | `failed`, `lastError: "The delivery has no job in the queue, so nothing will send it (it may never have been queued)"` |
+| a job that finished without an error | `failed`, `lastError: "The delivery job finished but its outcome was not recorded; the receiver may already have the event"` |
+| a job the queue gave up on | `failed`, `lastError: "The queue gave up on the delivery job and its outcome was not recorded; the receiver may already have the event"` |
+
+The first row is a crash between storing the row and queueing the job: the receiver never got the event. The second is what a crash looks like too, but also what is left when the receiver answered `2xx` and the row could not be written (the database was down): the job is kept for an hour after it finishes, which is how the sweep tells them apart. Once that hour has passed the two can no longer be told apart.
+
+Each row the sweep sends to the dead letters counts as `gw_webhook_deliveries_total{result="swept"}` and is logged as one warning per run, so an alert on that counter tells that deliveries are losing their jobs.
+
+**The sweep never marks a delivery as delivered**, because it cannot be sure. It sends the row to the dead letters with the reason above, so `retry` and `retry-failed` can send it. **Sending one of those again by hand can repeat an event the receiver already has**; drop the repeat by `X-Gateway-Delivery`, which is the id of the delivery and does not change. If the job was only hidden from the sweep while it moved between states, nothing is lost: when it runs it records its result over the `failed` row.
+
+> **Status.** The routes, the queue, the dispatcher, the processor and the retention job are in place. Filling `data.media` on message events (`downloadUrl`, `base64`) lands in 7.6; until then `mediaMode` only reduces what an event carries.
