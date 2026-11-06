@@ -61,11 +61,16 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
       this.fail(event, 'The webhooks could not be read', error)
       return
     }
-    // The file is downloaded once, and only when a webhook takes it inline; never rejects
-    const inline = targets.some(webhook => webhook.mediaMode === 'inline')
-      ? await this.media.fetchInline(event)
+    // The file is downloaded once, and only when a webhook takes it inline; never rejects. Only
+    // the webhooks that take it wait for it.
+    const download = targets.some(webhook => webhook.mediaMode === 'inline')
+      ? this.media.fetchInline(event)
       : undefined
-    await Promise.all(targets.map(webhook => this.deliver(webhook, event, inline)))
+    await Promise.all(
+      targets.map(async webhook =>
+        this.deliver(webhook, event, webhook.mediaMode === 'inline' ? await download : undefined)
+      )
+    )
   }
 
   private async deliver(

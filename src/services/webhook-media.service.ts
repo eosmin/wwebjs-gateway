@@ -5,13 +5,11 @@ import type { AppConfig } from '../config/env.schema.js'
 import type { EventEnvelope } from '../types/events.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
 
-import { inlineMediaCandidates } from './webhook-payload.js'
+import { base64Bytes, inlineMediaCandidates } from './webhook-payload.js'
 
-// Bytes a base64 text decodes to, without decoding it
-function base64Bytes(text: string): number {
-  const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0
-  return Math.floor((text.length * 3) / 4) - padding
-}
+// Files downloaded for one event: a burst of large files must not fill the memory of the process,
+// and every byte stays there until the last webhook has its copy. The rest go by `downloadUrl`.
+const MAX_FILES_PER_EVENT = 10
 
 // Downloads, once per event, the files that a webhook in `mediaMode: inline` may receive inside the
 // event (TDD §5.5: media is downloaded on demand and inlined only within
@@ -33,7 +31,7 @@ export class WebhookMediaService {
   async fetchInline(event: EventEnvelope): Promise<Map<string, string>> {
     const bytes = new Map<string, string>()
     const max = this.config.WEBHOOK_INLINE_MEDIA_MAX_BYTES
-    const ids = inlineMediaCandidates(event, max)
+    const ids = inlineMediaCandidates(event, max).slice(0, MAX_FILES_PER_EVENT)
     if (ids.length === 0) return bytes
     let client: ReturnType<SessionManager['requireReady']>
     try {
@@ -46,7 +44,13 @@ export class WebhookMediaService {
       try {
         const media = await client.downloadMedia(id)
         // The size on the message is what WhatsApp Web said; the file is what counts
-        if (media !== null && base64Bytes(media.data) <= max) bytes.set(id, media.data)
+        if (media === null) continue
+        if (base64Bytes(media.data) <= max) bytes.set(id, media.data)
+        else {
+          this.logger.warn(
+            `A file of ${event.event} (session ${event.sessionId}, seq ${event.seq}) is larger than the message said and goes by reference`
+          )
+        }
       } catch (error: unknown) {
         this.failed(event, error)
       }

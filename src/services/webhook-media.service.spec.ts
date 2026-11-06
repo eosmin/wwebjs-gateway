@@ -115,6 +115,28 @@ describe('WebhookMediaService', () => {
     expect(logged).not.toContain('"a"')
   })
 
+  it('downloads at most ten files for an event, the rest go by reference', async () => {
+    const messages = Array.from({ length: 12 }, (_, index) => message(`m${index}`))
+    const { service, downloadMedia } = setup(
+      Object.fromEntries(messages.map(item => [item.id, file('AAAA')]))
+    )
+
+    const bytes = await service.fetchInline(event('message_batch', { messages }))
+
+    expect(downloadMedia).toHaveBeenCalledTimes(10)
+    expect(bytes.size).toBe(10)
+  })
+
+  it('says when a file turns out larger than the limit, without naming it', async () => {
+    const { service } = setup({ a: file('A'.repeat(100)) })
+
+    await service.fetchInline(event('message', message('a', 4)))
+
+    const logged = warn.mock.calls.map(call => String(call[0])).join('\n')
+    expect(logged).toContain('larger')
+    expect(logged).not.toContain('"a"')
+  })
+
   it('goes on with the next file after one fails', async () => {
     const { service } = setup({ a: new Error('reset'), b: file('BBBB') })
 

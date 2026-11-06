@@ -195,6 +195,31 @@ describe('WebhookDispatcherService', () => {
       })
     })
 
+    // A slow or stuck download must cost the webhooks that asked for the bytes, not the others
+    it('delivers to the webhooks that do not take media inline without waiting for the download', async () => {
+      const ctx = setup()
+      let finish: (bytes: Map<string, string>) => void = () => undefined
+      ctx.fetchInline.mockReturnValue(
+        new Promise<Map<string, string>>(resolve => {
+          finish = resolve
+        })
+      )
+      ctx.forEvent.mockResolvedValue([
+        webhook('inline', { mediaMode: 'inline' }),
+        webhook('reference', { mediaMode: 'reference' })
+      ])
+
+      const done = dispatched(ctx, event('message', photo))
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(ctx.enqueue).toHaveBeenCalledTimes(1)
+      expect((ctx.enqueue.mock.calls[0]?.[0] as { webhookId: string }).webhookId).toBe('reference')
+
+      finish(new Map([['m1', 'AAAA']]))
+      await done
+      expect(ctx.enqueue).toHaveBeenCalledTimes(2)
+    })
+
     it('downloads once for the event, however many webhooks take it inline', async () => {
       const ctx = setup()
       ctx.forEvent.mockResolvedValue([

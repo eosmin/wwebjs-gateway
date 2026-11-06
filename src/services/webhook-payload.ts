@@ -77,7 +77,7 @@ function withoutKey(source: Dict, key: string): Dict {
 }
 
 // Bytes a base64 text decodes to, without decoding it
-function base64Bytes(text: string): number {
+export function base64Bytes(text: string): number {
   const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0
   return Math.floor((text.length * 3) / 4) - padding
 }
