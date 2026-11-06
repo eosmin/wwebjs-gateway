@@ -46,6 +46,8 @@ describe('outbound webhooks (integration)', () => {
   const webhookIds: string[] = []
   const sessionIds: string[] = []
   let counter = 0
+  // The seq the next event of a session will get (the pipeline INCRs `seq:<session>`)
+  let nextSeqOf: ((session: string) => Promise<number>) | undefined
 
   const get = <T>(value: T | undefined): T => {
     if (value === undefined) throw new Error('the application did not boot')
@@ -83,16 +85,20 @@ describe('outbound webhooks (integration)', () => {
 
   // A receiver and a webhook that points at it. A receiver of a webhook with a filter cannot wait
   // for the events before the one it got (their `seq` are not for it), so it only drops repeats;
-  // one that takes every event (`*`) orders by `seq` from the first event it sees.
+  // one that takes every event (`*`) orders by `seq` from the first `seq` the session will assign.
+  // It is not "the first event that arrives": the deliveries of a burst reach the receiver in any
+  // order, and a receiver that began at the one that came first would drop the ones before it.
   async function hook(
     session: string,
-    body: Record<string, unknown> = {}
+    body: Record<string, unknown> = {},
+    // A test of what a webhook gets, not of how a receiver orders it, takes the events as they come
+    options: { ordered?: boolean } = {}
   ): Promise<{ id: string; receiver: WebhookReceiver }> {
     const everything = (body['events'] as string[] | undefined)?.includes('*') ?? false
     const receiver = new WebhookReceiver({
       secret: 'pending',
-      ordered: everything,
-      firstSeq: 'first-seen'
+      ordered: everything && options.ordered !== false,
+      firstSeq: everything && options.ordered !== false ? await get(nextSeqOf)(session) : 1
     })
     receivers.push(receiver)
     const address = await receiver.start()
@@ -170,6 +176,7 @@ describe('outbound webhooks (integration)', () => {
     await app.init()
     await app.getHttpAdapter().getInstance().ready()
     const redis = app.get(RedisService)
+    nextSeqOf = async session => Number((await redis.client.get(`seq:${session}`)) ?? 0) + 1
     deliveries = app.get(DeliveriesRepository)
     prisma = app.get(PrismaService)
     // Another suite may have left the queue paused
@@ -368,7 +375,9 @@ describe('outbound webhooks (integration)', () => {
       const { id: session, client } = await newSession()
       const messages = await hook(session, { events: ['message'] })
       const batches = await hook(session, { events: ['message_batch'] })
-      const all = await hook(session, { events: ['*'] })
+      // The three deliveries of the burst reach any receiver in any order: this one keeps them as they
+      // come and the test puts them in the order of the gateway (`seq`)
+      const all = await hook(session, { events: ['*'] }, { ordered: false })
 
       client.emit({
         event: 'message',
@@ -382,7 +391,9 @@ describe('outbound webhooks (integration)', () => {
       await until(() => (all.receiver.handled.length >= 3 ? true : undefined), 'three events')
       expect(names(messages.receiver)).toEqual(['message', 'message'])
       expect(names(batches.receiver)).toEqual(['message_batch'])
-      expect(names(all.receiver)).toEqual(['message', 'message', 'message_batch'])
+      const bySeq = [...all.receiver.handled].sort((x, y) => x.seq - y.seq)
+      expect(bySeq.map(item => item.event)).toEqual(['message', 'message', 'message_batch'])
+      expect(new Set(bySeq.map(item => item.seq)).size).toBe(3)
     })
 
     it('delivers the message_batch that the gateway synthesizes, with the messages in conversation order', async () => {
