@@ -6,6 +6,10 @@ FROM node:24.20.0-bookworm-slim AS base
 # applied here. OpenSSL is installed because the Prisma engines are picked by the OpenSSL they find,
 # in the stage that downloads them and in the one that loads them. procps provides `ps`, which the
 # memory guard of the watchdog uses to measure the browsers (the slim image has none).
+# APT_CACHE_BUST: CI caches the layers (type=gha), and the text of the RUN below never changes, so
+# its layer would stay cached and never receive a Debian fix. CI passes the ISO year-week, so the
+# layer is rebuilt once a week. It is declared right before the RUN and used nowhere else.
+ARG APT_CACHE_BUST=dev
 RUN apt-get update \
   && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends openssl procps \
