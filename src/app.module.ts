@@ -8,6 +8,7 @@ import { MessagesModule } from './api/messages.module.js'
 import { RateLimitModule } from './api/rate-limit.module.js'
 import { SessionsModule } from './api/sessions.module.js'
 import { SystemModule } from './api/system.module.js'
+import { WebhooksApiModule } from './api/webhooks.module.js'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js'
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor.js'
 import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor.js'
@@ -17,6 +18,7 @@ import { LoggerModule } from './infra/logger/logger.module.js'
 import { MetricsModule } from './infra/metrics/metrics.module.js'
 import { RedisModule } from './infra/redis/redis.module.js'
 import { MessagingModule } from './services/messaging.module.js'
+import { WebhooksModule } from './services/webhooks.module.js'
 import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
 
 @Module({
@@ -30,10 +32,12 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
     ApiModule,
     WhatsAppModule,
     MessagingModule,
+    WebhooksModule,
     SystemModule,
     ApiKeysModule,
     SessionsModule,
-    MessagesModule
+    MessagesModule,
+    WebhooksApiModule
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

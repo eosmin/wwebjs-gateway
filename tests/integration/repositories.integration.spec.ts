@@ -629,6 +629,38 @@ describe('repositories (integration)', () => {
       expect((await deliveries.findById(delivered.id))?.status).toBe('success')
     })
 
+    it('sends a delivery that could not be queued to the dead letters, never a delivered one', async () => {
+      const webhookId = await newWebhook(null)
+      const pending = await deliveries.create({
+        webhookId,
+        sessionId: 's',
+        event: 'message',
+        seq: 1n,
+        payload
+      })
+      const delivered = await deliveries.create({
+        webhookId,
+        sessionId: 's',
+        event: 'message',
+        seq: 2n,
+        payload
+      })
+      await deliveries.recordAttempt(delivered.id, { status: 'success', statusCode: 200 }, at(1))
+
+      await deliveries.failUnqueued(pending.id, 'could not be queued')
+      await deliveries.failUnqueued(delivered.id, 'could not be queued')
+
+      expect(await deliveries.findById(pending.id)).toMatchObject({
+        status: 'failed',
+        attempts: 0,
+        lastError: 'could not be queued'
+      })
+      expect(await deliveries.findById(delivered.id)).toMatchObject({
+        status: 'success',
+        lastError: null
+      })
+    })
+
     it('goes away with its webhook', async () => {
       const webhookId = await newWebhook(null)
       const created = await deliveries.create({

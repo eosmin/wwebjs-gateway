@@ -1,4 +1,5 @@
-import { NotFoundError, ValidationError } from '../common/errors.js'
+import { ForbiddenError, NotFoundError, ValidationError } from '../common/errors.js'
+import { adminPrincipal, keyPrincipal } from '../common/principal.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { Webhook } from '../database/models.js'
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
@@ -290,5 +291,42 @@ describe('WebhookService.forEvent', () => {
     webhooks.listEnabledFor.mockResolvedValueOnce([row({ id: 'fresh' })])
 
     expect((await service.forEvent('main', 'message')).map(w => w.id)).toEqual(['fresh'])
+  })
+})
+
+describe('WebhookService access by key', () => {
+  const sessionKey = keyPrincipal('k', 'main', ['webhooks'])
+
+  it('lists every webhook for an admin and those of its session for a session key', async () => {
+    const { service, webhooks } = setup()
+
+    await service.listFor(adminPrincipal('k'))
+    await service.listFor(sessionKey)
+
+    expect(webhooks.list.mock.calls).toEqual([[undefined], ['main']])
+  })
+
+  it('gives a session key the webhook of its own session', async () => {
+    const { service } = setup()
+
+    expect(await service.requireFor(sessionKey, ID)).toMatchObject({ id: ID })
+  })
+
+  it('refuses a session key the webhook of another session and the ones of every session', async () => {
+    const { service, webhooks } = setup()
+
+    webhooks.findById.mockResolvedValueOnce(row({ sessionId: 'other' }))
+    await expect(service.requireFor(sessionKey, ID)).rejects.toBeInstanceOf(ForbiddenError)
+    webhooks.findById.mockResolvedValueOnce(row({ sessionId: null }))
+    await expect(service.requireFor(sessionKey, ID)).rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  it('gives an admin any webhook, and answers 404 for one that does not exist', async () => {
+    const { service, webhooks } = setup()
+
+    webhooks.findById.mockResolvedValueOnce(row({ sessionId: null }))
+    expect(await service.requireFor(adminPrincipal('k'), ID)).toMatchObject({ sessionId: null })
+    webhooks.findById.mockResolvedValueOnce(null)
+    await expect(service.requireFor(sessionKey, ID)).rejects.toBeInstanceOf(NotFoundError)
   })
 })

@@ -525,7 +525,7 @@ The unreachable flag of a chat was set or cleared.
 
 ### `ping`
 
-A test delivery requested with POST /v1/webhooks/:id/test.
+A test delivery requested with POST /v1/webhooks/:id/test. It is not part of the sequence of the session: its seq is 0.
 
 `data` is an empty object.
 
