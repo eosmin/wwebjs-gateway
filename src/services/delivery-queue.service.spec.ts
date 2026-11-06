@@ -140,7 +140,10 @@ describe('DeliveryQueueService', () => {
   })
 
   describe('jobStates', () => {
-    const job = (deliveryId: string) => ({ data: { ...JOB, deliveryId } })
+    const job = (deliveryId: string, returnvalue?: unknown) => ({
+      data: { ...JOB, deliveryId },
+      returnvalue
+    })
     // What the queue answers for each group of states, page by page
     const answer = (pages: Record<string, { data: unknown }[][]>) => {
       const seen: Record<string, number> = {}
@@ -185,6 +188,58 @@ describe('DeliveryQueueService', () => {
 
       expect(states.get('a')).toBe('live')
       expect(states.get('b')).toBe('completed')
+    })
+
+    // What the processor returns is the only record of a 2xx whose row could not be written
+    it('tells a finished job that delivered from one that was dropped or says nothing', async () => {
+      const { service } = setup()
+      await service.enqueue(JOB)
+      answer({
+        completed: [
+          [
+            job('sent', 'delivered'),
+            job('dropped', 'dropped'),
+            job('none', undefined),
+            job('odd', { url: 'https://secret.example/token' }),
+            job('text', 'something else')
+          ]
+        ]
+      })
+
+      const states = await service.jobStates()
+
+      expect(states.get('sent')).toBe('delivered')
+      expect(states.get('dropped')).toBe('completed')
+      expect(states.get('none')).toBe('completed')
+      expect(states.get('odd')).toBe('completed')
+      expect(states.get('text')).toBe('completed')
+    })
+
+    it('lets a job that delivered outrank a finished one that was dropped, in any order', async () => {
+      const { service } = setup()
+      await service.enqueue(JOB)
+      answer({
+        completed: [
+          [job('a', 'dropped'), job('a', 'delivered'), job('b', 'delivered'), job('b', 'dropped')]
+        ],
+        failed: [[job('a'), job('b')]]
+      })
+
+      const states = await service.jobStates()
+
+      expect(states.get('a')).toBe('delivered')
+      expect(states.get('b')).toBe('delivered')
+    })
+
+    it('lets a live job outrank one that delivered', async () => {
+      const { service } = setup()
+      await service.enqueue(JOB)
+      answer({
+        'active,waiting,delayed,prioritized,waiting-children': [[job('a')]],
+        completed: [[job('a', 'delivered')]]
+      })
+
+      expect((await service.jobStates()).get('a')).toBe('live')
     })
 
     it('reads every page of a long queue', async () => {

@@ -1,5 +1,6 @@
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { performance } from 'node:perf_hooks'
 
 import { Logger } from '@nestjs/common'
 import { UnrecoverableError } from 'bullmq'
@@ -31,6 +32,12 @@ const workers: {
   handlers: Map<string, unknown>
 }[] = []
 const workerClose = jest.fn((_force?: boolean) => Promise.resolve())
+
+// The classification of database errors has its own spec; here only what the processor does with it
+jest.mock('../database/db-errors.js', () => ({
+  isTransientDbError: (error: unknown) =>
+    error instanceof Error && error.name === 'TransientDatabaseError'
+}))
 
 jest.mock('bullmq', () => ({
   ...jest.requireActual<object>('bullmq'),
@@ -221,7 +228,7 @@ describe('DeliveryProcessor', () => {
     it('counts the success and times the attempt', async () => {
       const { processor, metrics } = setup()
 
-      await processor.process(job())
+      await expect(processor.process(job())).resolves.toBe('delivered')
 
       expect(await results(metrics)).toEqual({ success: 1 })
       expect((await metrics.metrics.webhookDurationSeconds.get()).values.length).toBeGreaterThan(0)
@@ -377,7 +384,7 @@ describe('DeliveryProcessor', () => {
     it('drops the job of a webhook that was deleted, as done', async () => {
       const { processor, attempts, recordAttempt, metrics } = setup({ webhooks: [undefined] })
 
-      await expect(processor.process(job())).resolves.toBeUndefined()
+      await expect(processor.process(job())).resolves.toBe('dropped')
 
       expect(received).toHaveLength(0)
       expect(recordAttempt).not.toHaveBeenCalled()
@@ -400,7 +407,7 @@ describe('DeliveryProcessor', () => {
         webhooks: [webhook({ enabled: false })]
       })
 
-      await expect(processor.process(job())).resolves.toBeUndefined()
+      await expect(processor.process(job())).resolves.toBe('dropped')
 
       expect(received).toHaveLength(0)
       expect(recordAttempt).not.toHaveBeenCalled()
@@ -412,7 +419,9 @@ describe('DeliveryProcessor', () => {
       const { processor } = setup({ webhooks: [webhook({ enabled: false })] })
       const ping = envelope({ event: 'ping', seq: 0, data: {} })
 
-      await processor.process(job({ data: { deliveryId: 'd1', webhookId: 'w1', envelope: ping } }))
+      await expect(
+        processor.process(job({ data: { deliveryId: 'd1', webhookId: 'w1', envelope: ping } }))
+      ).resolves.toBe('delivered')
 
       expect(received).toHaveLength(1)
       expect(received[0]?.headers['x-gateway-event']).toBe('ping')
@@ -425,7 +434,7 @@ describe('DeliveryProcessor', () => {
       const { processor, row, recordAttempt, metrics } = setup()
       row.current = null
 
-      await expect(processor.process(job())).resolves.toBeUndefined()
+      await expect(processor.process(job())).resolves.toBe('delivered')
 
       expect(received).toHaveLength(1)
       expect(recordAttempt).toHaveBeenCalledTimes(1)
@@ -444,7 +453,7 @@ describe('DeliveryProcessor', () => {
       const { processor, row, recordAttempt } = setup()
       row.current = { id: 'd1', webhookId: 'w1', status: 'success' }
 
-      await expect(processor.process(job())).resolves.toBeUndefined()
+      await expect(processor.process(job())).resolves.toBe('dropped')
 
       expect(received).toHaveLength(0)
       expect(recordAttempt).not.toHaveBeenCalled()
@@ -456,7 +465,7 @@ describe('DeliveryProcessor', () => {
       const { processor, row, recordAttempt } = setup()
       row.current = { id: 'd1', webhookId: 'other', status: 'pending' }
 
-      await expect(processor.process(job())).resolves.toBeUndefined()
+      await expect(processor.process(job())).resolves.toBe('dropped')
 
       expect(received).toHaveLength(0)
       expect(recordAttempt).not.toHaveBeenCalled()
@@ -466,10 +475,81 @@ describe('DeliveryProcessor', () => {
       const { processor, recordAttempt } = setup()
       recordAttempt.mockRejectedValueOnce(new Error('database down'))
 
-      await expect(processor.process(job())).resolves.toBeUndefined()
+      await expect(processor.process(job())).resolves.toBe('delivered')
 
       expect(received).toHaveLength(1)
       expect(logged.join('\n')).toContain('could not be recorded')
+    })
+
+    describe('writing the result', () => {
+      const transient = (): Error => {
+        const error = new Error('connection lost')
+        error.name = 'TransientDatabaseError'
+        return error
+      }
+
+      // Full jitter picks a delay in [0, ceiling]: zero keeps the suite fast without faking timers
+      beforeEach(() => {
+        jest.spyOn(Math, 'random').mockReturnValue(0)
+      })
+
+      it('writes again when the first write fails with a transient error, and the job ends well', async () => {
+        const { processor, recordAttempt } = setup()
+        recordAttempt.mockRejectedValueOnce(transient())
+
+        await expect(processor.process(job())).resolves.toBe('delivered')
+
+        expect(recordAttempt).toHaveBeenCalledTimes(2)
+        expect(logged.join('\n')).not.toContain('could not be recorded')
+      })
+
+      it('tries three times in all, then gives up without throwing and says only the kind of error', async () => {
+        const { processor, recordAttempt } = setup()
+        recordAttempt.mockRejectedValue(transient())
+
+        await expect(processor.process(job())).resolves.toBe('delivered')
+
+        expect(recordAttempt).toHaveBeenCalledTimes(3)
+        const log = logged.filter(line => line.includes('could not be recorded'))
+        expect(log).toHaveLength(1)
+        expect(log[0]).toContain('TransientDatabaseError')
+        expect(log[0]).not.toContain('connection lost')
+      })
+
+      it('does not write again after an error that waiting cannot cure', async () => {
+        const { processor, recordAttempt } = setup()
+        recordAttempt.mockRejectedValue(new Error('invalid input'))
+
+        await expect(processor.process(job())).resolves.toBe('delivered')
+
+        expect(recordAttempt).toHaveBeenCalledTimes(1)
+      })
+
+      it('writes the failure of an attempt again too, and still has BullMQ retry the job', async () => {
+        answer = () => ({ status: 500 })
+        const { processor, recordAttempt } = setup()
+        recordAttempt.mockRejectedValueOnce(transient())
+
+        await expect(processor.process(job())).rejects.toBeInstanceOf(DeliveryAttemptFailed)
+
+        expect(recordAttempt).toHaveBeenCalledTimes(2)
+      })
+
+      it('waits less than a second in all, even with the longest pauses', async () => {
+        jest.spyOn(Math, 'random').mockReturnValue(0.999999)
+        const { processor, recordAttempt } = setup()
+        recordAttempt.mockRejectedValue(transient())
+        const writes: number[] = []
+        recordAttempt.mockImplementation(() => {
+          writes.push(performance.now())
+          return Promise.reject(transient())
+        })
+
+        await processor.process(job())
+
+        expect(writes).toHaveLength(3)
+        expect((writes.at(-1) as number) - (writes[0] as number)).toBeLessThan(1000)
+      })
     })
 
     it('reports the failure even when the row cannot be written', async () => {
@@ -504,7 +584,7 @@ describe('DeliveryProcessor', () => {
             data: { deliveryId: 'd1', webhookId: 'w1', envelope: envelope({ event: name, data }) }
           })
         )
-      ).resolves.toBeUndefined()
+      ).resolves.toBe('dropped')
 
       expect(received).toHaveLength(0)
       expect(failUnqueued).toHaveBeenCalledWith('d1', expect.stringContaining('credential'))

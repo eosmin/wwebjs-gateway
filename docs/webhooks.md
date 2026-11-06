@@ -171,7 +171,7 @@ Waiting for the event before only works when the webhook receives **every** even
 
 ### Repeats
 
-Delivery is **at least once**. If the gateway stops after your receiver answered and before it wrote the result, the delivery is sent again. Keep the `X-Gateway-Delivery` of what you already handled and ignore a repeat; order by `seq` as said above.
+Delivery is **at least once**. If the gateway stops after your receiver answered and before it wrote the result, the delivery is sent again. A result that cannot be written while the gateway keeps running does not repeat it (see *Stale `pending` deliveries*), unless the job has aged out of the queue before the sweep reads it. Keep the `X-Gateway-Delivery` of what you already handled and ignore a repeat; order by `seq` as said above.
 
 ## Retention and stale deliveries
 
@@ -187,17 +187,22 @@ Each purge runs even when another fails, and a failed run is tried again (3 atte
 
 **Stale `pending` deliveries.** A delivery is `pending` while a job will still try it. A second job, every 10 minutes, looks at the `pending` rows older than 30 minutes and asks the queue about each one. Age alone never decides: a row whose job is waiting for its next retry is left alone however old it is.
 
+When an attempt ends the job, the processor returns one word, which BullMQ keeps with the finished job: `delivered` (the receiver answered `2xx`) or `dropped` (the job ended without an attempt: the webhook was deleted or belongs to another, the delivery was already `success`, the webhook is disabled, or the event was stored without its credential). It is only that word: never the URL, the secret, the signature or the payload.
+
 | What the queue holds for the row | What the sweep does |
 | --- | --- |
 | a job that will still run (waiting, active, delayed) | nothing |
-| no job at all | `failed`, `lastError: "The delivery has no job in the queue, so nothing will send it (it may never have been queued)"` |
-| a job that finished without an error | `failed`, `lastError: "The delivery job finished but its outcome was not recorded; the receiver may already have the event"` |
+| a job that finished and returned `delivered` | `success` (the status code is not known, so `lastStatusCode` is `null`; `deliveredAt` is when the sweep noticed; the attempt is counted) |
+| a job that finished and returned `dropped`, or whose result cannot be read | `failed`, `lastError: "The delivery job finished but its outcome was not recorded; the receiver may already have the event"` |
 | a job the queue gave up on | `failed`, `lastError: "The queue gave up on the delivery job and its outcome was not recorded; the receiver may already have the event"` |
+| no job at all | `failed`, `lastError: "The delivery has no job in the queue, so nothing will send it (it may never have been queued)"` |
 
-The first row is a crash between storing the row and queueing the job: the receiver never got the event. The second is what a crash looks like too, but also what is left when the receiver answered `2xx` and the row could not be written (the database was down): the job is kept for an hour after it finishes, which is how the sweep tells them apart. Once that hour has passed the two can no longer be told apart.
+Only a row that is still `pending` changes: the sweep never overwrites a `failed` or a `success` row.
 
-Each row the sweep sends to the dead letters counts as `gw_webhook_deliveries_total{result="swept"}` and is logged as one warning per run, so an alert on that counter tells that deliveries are losing their jobs.
+A row is left `pending` with its event delivered when the receiver answered `2xx` and the row could not be written. The processor writes the result up to 3 times in all, pausing up to 100 ms and then up to 200 ms between them, only after an error of the database that waiting can cure (the connection dropped, the pool timed out); a write that fails all three times does not make the job run again, because the receiver already has the event. If a write reached the database but its answer was lost, the repeat counts the attempt twice: `attempts` can be one too high, never the status. That is the case the sweep then settles with the word the job kept. A row with no job at all is a crash between storing the row and queueing the job: the receiver never got the event.
 
-**The sweep never marks a delivery as delivered**, because it cannot be sure. It sends the row to the dead letters with the reason above, so `retry` and `retry-failed` can send it. **Sending one of those again by hand can repeat an event the receiver already has**; drop the repeat by `X-Gateway-Delivery`, which is the id of the delivery and does not change. If the job was only hidden from the sweep while it moved between states, nothing is lost: when it runs it records its result over the `failed` row.
+**The limit.** BullMQ keeps a finished job (and the word it returned) for an hour, and five minutes for a `qr` or `code` event, so the recovery rarely applies to those (they cannot be sent again anyway). Once that hour has passed a row that is still `pending` cannot be told from a lost job and goes to `failed` with the "no job" reason, so **sending it again by hand (`retry`, `retry-failed`) can repeat an event the receiver already has**. Drop the repeat by `X-Gateway-Delivery`, which is the id of the delivery and does not change. The sweep runs every 10 minutes and looks at rows older than 30 minutes, so a delivered job is normally read well inside its hour; it is missed when the application was down for the better part of an hour.
+
+Each row the sweep sends to the dead letters counts as `gw_webhook_deliveries_total{result="swept"}` and is logged as one warning per run, so an alert on that counter tells that deliveries are losing their jobs. A row it marks delivered is logged as a warning of its own (it means the database refused writes for a while), and is not counted as swept. If the job was only hidden from the sweep while it moved between states, nothing is lost: when it runs it records its result over the `failed` row.
 
 > **Status.** Milestone 7 is complete: the routes, the queue, the dispatcher, the processor, the retention job, the media block and the integration suite are in place.

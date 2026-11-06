@@ -629,6 +629,45 @@ describe('repositories (integration)', () => {
       expect((await deliveries.findById(delivered.id))?.status).toBe('success')
     })
 
+    it('marks delivered only a pending row, whose result was lost, and counts the attempt', async () => {
+      const webhookId = await newWebhook(null)
+      const row = (seq: bigint) =>
+        deliveries.create({ webhookId, sessionId: 's', event: 'message', seq, payload })
+      const lost = await row(1n)
+      await deliveries.recordAttempt(
+        lost.id,
+        { status: 'pending', error: 'The receiver answered 503' },
+        at(1)
+      )
+      const dead = await row(2n)
+      await deliveries.recordAttempt(
+        dead.id,
+        { status: 'failed', statusCode: 500, error: 'x' },
+        at(1)
+      )
+      const done = await row(3n)
+      await deliveries.recordAttempt(done.id, { status: 'success', statusCode: 200 }, at(1))
+
+      expect(await deliveries.succeedUnrecorded(lost.id, at(9))).toBe(true)
+      expect(await deliveries.succeedUnrecorded(dead.id, at(9))).toBe(false)
+      expect(await deliveries.succeedUnrecorded(done.id, at(9))).toBe(false)
+      expect(await deliveries.succeedUnrecorded(MISSING_UUID, at(9))).toBe(false)
+
+      expect(await deliveries.findById(lost.id)).toMatchObject({
+        status: 'success',
+        attempts: 2,
+        lastStatusCode: null,
+        lastError: null,
+        deliveredAt: at(9)
+      })
+      expect(await deliveries.findById(dead.id)).toMatchObject({ status: 'failed', attempts: 1 })
+      expect(await deliveries.findById(done.id)).toMatchObject({
+        status: 'success',
+        lastStatusCode: 200,
+        deliveredAt: at(1)
+      })
+    })
+
     it('sends a delivery that could not be queued to the dead letters, never a delivered one', async () => {
       const webhookId = await newWebhook(null)
       const pending = await deliveries.create({

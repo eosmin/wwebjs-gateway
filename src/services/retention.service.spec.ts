@@ -79,7 +79,8 @@ function setup(
   const deliveries = {
     deleteOlderThan: jest.fn(() => Promise.resolve(3)),
     listStalePending: jest.fn(() => Promise.resolve(pages.shift() ?? [])),
-    failUnqueued: jest.fn(() => Promise.resolve(true))
+    failUnqueued: jest.fn(() => Promise.resolve(true)),
+    succeedUnrecorded: jest.fn(() => Promise.resolve(true))
   }
   const idempotency = { deleteOlderThan: jest.fn(() => Promise.resolve(5)) }
   const messages = { purgeExpired: jest.fn(() => Promise.resolve(7)) }
@@ -135,7 +136,7 @@ describe('RetentionService.sweepPending', () => {
       undefined
     )
     expect(queue.jobStates).not.toHaveBeenCalled()
-    expect(result).toEqual({ failed: 0, alive: 0 })
+    expect(result).toEqual({ failed: 0, delivered: 0, alive: 0 })
   })
 
   it('leaves alone a row whose job is still going to run', async () => {
@@ -147,7 +148,7 @@ describe('RetentionService.sweepPending', () => {
     const result = await service.sweepPending(NOW)
 
     expect(deliveries.failUnqueued).not.toHaveBeenCalled()
-    expect(result).toEqual({ failed: 0, alive: 1 })
+    expect(result).toEqual({ failed: 0, delivered: 0, alive: 1 })
   })
 
   // A crash between storing the row and queueing the job leaves exactly this: nothing will ever run it
@@ -160,7 +161,7 @@ describe('RetentionService.sweepPending', () => {
       'd1',
       expect.stringContaining('no job in the queue')
     )
-    expect(result).toEqual({ failed: 1, alive: 0 })
+    expect(result).toEqual({ failed: 1, delivered: 0, alive: 0 })
   })
 
   // The receiver may have answered 2xx while the database was down: the row says pending, the event
@@ -208,6 +209,59 @@ describe('RetentionService.sweepPending', () => {
     expect(reasons.get('dead')).toMatch(/gave up.*not recorded/)
     expect(reasons.get('gone')).toMatch(/no job in the queue/)
     expect(new Set(reasons.values()).size).toBe(3)
+  })
+
+  describe('a job that finished and said it delivered', () => {
+    it('marks the row delivered, and never sends it to the dead letters', async () => {
+      const { service, deliveries } = setup({
+        stale: [[key('d1', 90)]],
+        states: { d1: 'delivered' }
+      })
+
+      const result = await service.sweepPending(NOW)
+
+      expect(deliveries.succeedUnrecorded).toHaveBeenCalledWith('d1', NOW)
+      expect(deliveries.failUnqueued).not.toHaveBeenCalled()
+      expect(result).toEqual({ failed: 0, delivered: 1, alive: 0 })
+    })
+
+    it('counts only the rows that really changed', async () => {
+      const { service, deliveries } = setup({
+        stale: [[key('a', 90), key('b', 80)]],
+        states: { a: 'delivered', b: 'delivered' }
+      })
+      deliveries.succeedUnrecorded.mockResolvedValueOnce(false)
+
+      const result = await service.sweepPending(NOW)
+
+      expect(result.delivered).toBe(1)
+    })
+
+    it('does not count it as a dead letter', async () => {
+      const { service, inc } = setup({
+        stale: [[key('a', 90)]],
+        states: { a: 'delivered' }
+      })
+
+      await service.sweepPending(NOW)
+
+      expect(inc).not.toHaveBeenCalled()
+    })
+
+    it('keeps sending to the dead letters a job that finished by dropping the delivery', async () => {
+      const { service, deliveries } = setup({
+        stale: [[key('done', 90)]],
+        states: { done: 'completed' }
+      })
+
+      await service.sweepPending(NOW)
+
+      expect(deliveries.succeedUnrecorded).not.toHaveBeenCalled()
+      expect(deliveries.failUnqueued).toHaveBeenCalledWith(
+        'done',
+        expect.stringContaining('finished')
+      )
+    })
   })
 
   it('works a backlog page by page from the key of the last row, reading the queue again for each page', async () => {

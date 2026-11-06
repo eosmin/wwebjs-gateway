@@ -282,21 +282,60 @@ describe('retention (integration)', () => {
     })
 
     // The receiver answered 2xx and the row could not be written: the event is delivered and the
-    // row says pending. The sweep says what it does not know instead of claiming a state.
-    it('marks a row whose job finished with a reason that says the receiver may have the event', async () => {
+    // row says pending. The job finished with 'delivered', which is how the sweep knows.
+    it('marks delivered a row whose 2xx could not be written, and a retry is not needed', async () => {
       const row = await pendingRow(13, 45 * MINUTE)
-      await get(queueService).enqueue({ deliveryId: row.id, webhookId, envelope: envelope(13) })
-      await settled(row.id, 'success')
-      await get(prisma).webhookDelivery.update({
-        where: { id: row.id },
-        data: { status: 'pending', deliveredAt: null }
+      // A failure that waiting does not cure, so the write is not repeated and the row stays pending
+      const write = jest
+        .spyOn(get(deliveries), 'recordAttempt')
+        .mockRejectedValueOnce(new Error('the row could not be written'))
+      try {
+        await get(queueService).enqueue({ deliveryId: row.id, webhookId, envelope: envelope(13) })
+        await until(
+          () =>
+            Promise.resolve(
+              received.includes(row.id) && write.mock.calls.length > 0 ? true : undefined
+            ),
+          'the receiver to get the event and the write to fail'
+        )
+      } finally {
+        write.mockRestore()
+      }
+      // The job has to be finished, with its result kept, before the sweep reads it
+      await until(async () => {
+        const states = await get(queueService).jobStates()
+        return states.get(row.id) === 'delivered' ? true : undefined
+      }, 'the job to finish as delivered')
+      expect((await statusOf(row.id))?.status).toBe('pending')
+
+      const result = await get(retention).sweepPending()
+
+      expect(result.delivered).toBeGreaterThanOrEqual(1)
+      const swept = await statusOf(row.id)
+      expect(swept).toMatchObject({ status: 'success', lastError: null, lastStatusCode: null })
+      expect(swept?.deliveredAt).not.toBeNull()
+      expect(received.filter(id => id === row.id)).toHaveLength(1)
+    })
+
+    // A job that ended without an attempt says nothing of the receiver: the sweep cannot claim delivery
+    it('still sends to the dead letters a row whose job finished without sending', async () => {
+      const row = await pendingRow(15, 45 * MINUTE)
+      await get(queueService).enqueue({
+        deliveryId: row.id,
+        webhookId: randomUUID(),
+        envelope: envelope(15)
       })
+      await until(async () => {
+        const states = await get(queueService).jobStates()
+        return states.get(row.id) === 'completed' ? true : undefined
+      }, 'the job to finish as dropped')
 
       await get(retention).sweepPending()
 
       const swept = await statusOf(row.id)
       expect(swept?.status).toBe('failed')
       expect(swept?.lastError).toMatch(/finished.*not recorded.*may already have/)
+      expect(received).toEqual([])
     })
 
     it('marks a row whose job gave up without recording it', async () => {
