@@ -19,7 +19,7 @@ an admin key is also accepted, and when `METRICS_TOKEN` is unset only an admin k
 | `gw_send_total` | counter | `result` | Outbound sends, by result. |
 | `gw_send_duration_seconds` | histogram | - | Seconds from taking a send job to its outcome. |
 | `gw_send_queue_depth` | gauge | `session` | Send jobs waiting in the queue of each session. |
-| `gw_webhook_deliveries_total` | counter | `result` | Webhook delivery attempts, by result. |
+| `gw_webhook_deliveries_total` | counter | `result` | Webhook deliveries, by result: each attempt's outcome, `unlogged` (no row could be stored) and `not_queued` (the job could not be queued). |
 | `gw_webhook_duration_seconds` | histogram | - | Seconds a webhook delivery attempt took. |
 | `gw_wa_call_duration_seconds` | histogram | `op` | Seconds a call into whatsapp-web.js took, by operation. |
 | `gw_wa_call_errors_total` | counter | `op`, `type` | Failed calls into whatsapp-web.js, by operation and error type. |

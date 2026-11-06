@@ -90,7 +90,7 @@ export const METRIC_DEFINITIONS = {
   webhookDeliveries: {
     name: 'gw_webhook_deliveries_total',
     type: 'counter',
-    help: 'Webhook delivery attempts, by result.',
+    help: "Webhook deliveries, by result: each attempt's outcome, `unlogged` (no row could be stored) and `not_queued` (the job could not be queued).",
     labels: ['result']
   },
   webhookDurationSeconds: {
