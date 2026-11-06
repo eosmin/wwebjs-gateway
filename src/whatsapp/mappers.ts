@@ -15,6 +15,7 @@ import type {
   MembershipRequestDto,
   MessageDto,
   MessageInfoDto,
+  MessageMediaDto,
   OrderDto,
   OriginDto,
   PaymentDto,
@@ -303,6 +304,9 @@ export interface MessageMapOptions {
   receivedAt: Date
   includeRaw: boolean
   rawMaxFieldBytes: number
+  // Where a message's media can be downloaded from the gateway. Without it a message gets no
+  // `media` block: the mapper does not guess a URL.
+  mediaUrl?: (messageId: string) => string
 }
 
 const MESSAGE_FIELDS = [
@@ -360,6 +364,34 @@ const INVITE_V4_FIELDS = [
   'toId'
 ] as const satisfies readonly (keyof InviteV4Dto)[]
 
+// The route of `messages.media` on the public address of the gateway, which may sit under a path
+// prefix behind a reverse proxy
+export function mediaDownloadUrl(baseUrl: string, sessionId: string, messageId: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  return `${base}/v1/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/media`
+}
+
+// What WhatsApp Web holds of the file of a message (TDD §5.5): its type, name and size, read from
+// the raw data without downloading anything. The type is required by the DTO, so a message whose
+// raw data does not name one gets no block (its `hasMedia` still says there is a file).
+function extractMedia(
+  source: MessageSource,
+  messageId: string,
+  mediaUrl: MessageMapOptions['mediaUrl']
+): MessageMediaDto | undefined {
+  if (!source.hasMedia || mediaUrl === undefined || !isRecord(source.rawData)) return undefined
+  const mimetype = textField(source.rawData, 'mimetype')
+  if (mimetype === undefined) return undefined
+  const filename = textField(source.rawData, 'filename')
+  const size = source.rawData['size']
+  return {
+    mimetype,
+    ...(filename !== undefined && { filename }),
+    ...(typeof size === 'number' && Number.isInteger(size) && size >= 0 && { size }),
+    downloadUrl: mediaUrl(messageId)
+  }
+}
+
 export function mapMessage(source: MessageSource, options: MessageMapOptions): MessageDto {
   const message: MessageDto = {
     ...(pick(source, MESSAGE_FIELDS) as MessageDto), // required fields are filled by wwebjs
@@ -402,6 +434,8 @@ export function mapMessage(source: MessageSource, options: MessageMapOptions): M
 
   const origin = extractOrigin(source.rawData)
   if (origin) message.origin = origin
+  const media = extractMedia(source, message.id, options.mediaUrl)
+  if (media) message.media = media
   if (options.includeRaw) {
     const raw = sanitizeRaw(source.rawData, options.rawMaxFieldBytes)
     if (raw) message.raw = raw

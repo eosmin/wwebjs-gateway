@@ -32,6 +32,7 @@ import {
   mapLabel,
   mapMembershipRequest,
   mapMessage,
+  mediaDownloadUrl,
   mapMessageInfo,
   mapOrder,
   mapPayment,
@@ -165,6 +166,77 @@ describe('serializeId', () => {
     for (const key of broken) {
       expect(() => serializeId(key as never)).toThrow('Cannot serialize a WhatsApp id')
     }
+  })
+})
+
+describe('mediaDownloadUrl', () => {
+  it('points at the media route of the session, with the ids escaped', () => {
+    expect(mediaDownloadUrl('https://gw.example', 'main', 'false_5215@c.us_3EB0')).toBe(
+      'https://gw.example/v1/sessions/main/messages/false_5215%40c.us_3EB0/media'
+    )
+  })
+
+  it('keeps the path prefix of a gateway behind a reverse proxy', () => {
+    expect(mediaDownloadUrl('https://example.com/gw/', 'main', 'm1')).toBe(
+      'https://example.com/gw/v1/sessions/main/messages/m1/media'
+    )
+  })
+})
+
+describe('mapMessage media', () => {
+  const mediaUrl = (messageId: string): string => `https://gw.example/media/${messageId}`
+  const withMedia = (rawData: unknown, overrides: Partial<MessageSource> = {}) =>
+    message({ hasMedia: true, type: 'image', rawData, ...overrides })
+
+  it('describes the media of a message from what WhatsApp Web holds, with the link to download it', () => {
+    const dto = mapMessage(
+      withMedia({ mimetype: 'image/jpeg', filename: 'photo.jpg', size: 2048 }),
+      { ...OPTIONS, mediaUrl }
+    )
+
+    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dto.media).toEqual({
+      mimetype: 'image/jpeg',
+      filename: 'photo.jpg',
+      size: 2048,
+      downloadUrl: 'https://gw.example/media/false_5215500000001@c.us_3EB0AAAA'
+    })
+  })
+
+  it('leaves out the name and the size that WhatsApp Web does not know', () => {
+    const dto = mapMessage(withMedia({ mimetype: 'audio/ogg', filename: null, size: 'big' }), {
+      ...OPTIONS,
+      mediaUrl
+    })
+
+    expect(dto.media).toEqual({
+      mimetype: 'audio/ogg',
+      downloadUrl: 'https://gw.example/media/false_5215500000001@c.us_3EB0AAAA'
+    })
+  })
+
+  it('does not depend on the raw copy', () => {
+    const dto = mapMessage(withMedia({ mimetype: 'image/png' }), {
+      ...OPTIONS,
+      includeRaw: false,
+      mediaUrl
+    })
+
+    expect(dto.raw).toBeUndefined()
+    expect(dto.media?.mimetype).toBe('image/png')
+  })
+
+  it.each([
+    ['a message without media', message({ rawData: { mimetype: 'image/png' } })],
+    ['media whose type is unknown', withMedia({ size: 10 })],
+    ['media whose type is not text', withMedia({ mimetype: 42 })],
+    ['a message without raw data', withMedia(undefined)]
+  ])('describes no media for %s', (_name, source) => {
+    expect(mapMessage(source, { ...OPTIONS, mediaUrl }).media).toBeUndefined()
+  })
+
+  it('describes no media when the mapper is not told where to download it', () => {
+    expect(mapMessage(withMedia({ mimetype: 'image/png' }), OPTIONS).media).toBeUndefined()
   })
 })
 
