@@ -93,11 +93,13 @@ export class DeliveriesRepository {
 
   // The job of a pending delivery could not be queued, so nothing will ever attempt it: it goes to
   // the dead letters, where it can be retried, instead of staying pending for ever
-  async failUnqueued(id: string, error: string): Promise<void> {
-    await this.prisma.webhookDelivery.updateMany({
+  // True when it changed the row: a delivery that finished in the meantime is left as it is
+  async failUnqueued(id: string, error: string): Promise<boolean> {
+    const { count } = await this.prisma.webhookDelivery.updateMany({
       where: { id, status: 'pending' },
       data: { status: 'failed', lastError: error }
     })
+    return count > 0
   }
 
   // The oldest first, so a backlog is worked off in order, a page after another (`after` is the last

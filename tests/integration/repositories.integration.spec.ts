@@ -647,8 +647,8 @@ describe('repositories (integration)', () => {
       })
       await deliveries.recordAttempt(delivered.id, { status: 'success', statusCode: 200 }, at(1))
 
-      await deliveries.failUnqueued(pending.id, 'could not be queued')
-      await deliveries.failUnqueued(delivered.id, 'could not be queued')
+      expect(await deliveries.failUnqueued(pending.id, 'could not be queued')).toBe(true)
+      expect(await deliveries.failUnqueued(delivered.id, 'could not be queued')).toBe(false)
 
       expect(await deliveries.findById(pending.id)).toMatchObject({
         status: 'failed',

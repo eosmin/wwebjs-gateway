@@ -105,6 +105,12 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
     worker.on('error', error => {
       this.logger.error(`Retention worker error: ${error.message}`)
     })
+    // A run BullMQ gave up on (the purge after its attempts, a sweep that met an outage) would only
+    // sit in the failed set otherwise
+    worker.on('failed', (job, error) => {
+      if (job === undefined || job.attemptsMade < (job.opts.attempts ?? 1)) return
+      this.logger.error(`The retention job ${job.name} failed: ${errorKind(error)}`)
+    })
     this.worker = worker
     // Upserts: the same scheduler id on every start replaces the schedule instead of adding one
     await queue.upsertJobScheduler(
@@ -194,26 +200,26 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
   // never marks a row delivered: it sends it to the dead letters with a reason, where `retry` can
   // send it again. A repeat is dropped by the receiver through `X-Gateway-Delivery`.
   //
-  // A job that moves between states while the queue is read can be missed. Nothing is lost by it:
-  // when the job runs it records its result over the failed row.
+  // A job that moves between states while the queue is read can be missed, and so can the job of a
+  // manual retry queued a moment after the row went back to `pending`. Nothing is lost by it: the
+  // delivery is still sent, and its result is recorded over the `failed` row.
   async sweepPending(now: Date = new Date()): Promise<SweepResult> {
     const cutoff = new Date(now.getTime() - STALE_PENDING_MS)
-    let states: Map<string, DeliveryJobState> | undefined
     let after: DeliveryCursor | undefined
     const result: SweepResult = { failed: 0, alive: 0 }
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const stale = await this.deliveries.listStalePending(cutoff, PAGE_SIZE, after)
       if (stale.length === 0) break
-      // The queue is read once per run, and only when there is something to ask it about
-      states ??= await this.deliveryQueue.jobStates()
+      // Read again for each page, so a job queued while an earlier page was worked on (a manual
+      // retry) is in sight, and only when there is something to ask the queue about
+      const states = await this.deliveryQueue.jobStates()
       for (const row of stale) {
         const state = states.get(row.id)
         if (state === 'live') {
           result.alive += 1
           continue
         }
-        await this.deliveries.failUnqueued(row.id, reasonFor(state))
-        result.failed += 1
+        if (await this.deliveries.failUnqueued(row.id, reasonFor(state))) result.failed += 1
       }
       after = stale.at(-1)
       if (stale.length < PAGE_SIZE) break

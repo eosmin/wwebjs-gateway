@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common'
+
 import type { AppConfig } from '../config/env.schema.js'
 import type { DeliveriesRepository } from '../database/repositories/deliveries.repository.js'
 import type { IdempotencyRepository } from '../database/repositories/idempotency.repository.js'
@@ -77,7 +79,7 @@ function setup(
   const deliveries = {
     deleteOlderThan: jest.fn(() => Promise.resolve(3)),
     listStalePending: jest.fn(() => Promise.resolve(pages.shift() ?? [])),
-    failUnqueued: jest.fn(() => Promise.resolve())
+    failUnqueued: jest.fn(() => Promise.resolve(true))
   }
   const idempotency = { deleteOlderThan: jest.fn(() => Promise.resolve(5)) }
   const messages = { purgeExpired: jest.fn(() => Promise.resolve(7)) }
@@ -174,6 +176,17 @@ describe('RetentionService.sweepPending', () => {
     expect(inc).toHaveBeenCalledWith({ result: 'swept' }, 2)
   })
 
+  // The processor can finish the delivery between the list and the update
+  it('counts only the rows that really changed', async () => {
+    const { service, deliveries, inc } = setup({ stale: [[key('a', 90), key('b', 80)]] })
+    deliveries.failUnqueued.mockResolvedValueOnce(false)
+
+    const result = await service.sweepPending(NOW)
+
+    expect(result.failed).toBe(1)
+    expect(inc).toHaveBeenCalledWith({ result: 'swept' }, 1)
+  })
+
   it('counts nothing when it sweeps nothing', async () => {
     const { service, inc } = setup()
 
@@ -197,7 +210,7 @@ describe('RetentionService.sweepPending', () => {
     expect(new Set(reasons.values()).size).toBe(3)
   })
 
-  it('works a backlog page by page from the key of the last row, reading the queue once', async () => {
+  it('works a backlog page by page from the key of the last row, reading the queue again for each page', async () => {
     const full = Array.from({ length: 500 }, (_, index) => key(`a${index}`, 100 + index))
     const last = key('z', 40)
     const { service, deliveries, queue } = setup({ stale: [full, [last]] })
@@ -210,7 +223,7 @@ describe('RetentionService.sweepPending', () => {
       500,
       full[499]
     )
-    expect(queue.jobStates).toHaveBeenCalledTimes(1)
+    expect(queue.jobStates).toHaveBeenCalledTimes(2)
     expect(result.failed).toBe(501)
   })
 
@@ -290,6 +303,28 @@ describe('RetentionService scheduling', () => {
     expect(workers[0]?.options).toMatchObject({ connection: client, concurrency: 1 })
     expect(workers[0]?.on).toHaveBeenCalledWith('error', expect.any(Function))
     expect(queues[0]?.on).toHaveBeenCalledWith('error', expect.any(Function))
+  })
+
+  it('logs a run that failed for good, so a retention that stopped working is seen', async () => {
+    const { service } = setup()
+    await service.onModuleInit()
+
+    const failed = (workers[0]?.on.mock.calls as [string, unknown][] | undefined)?.find(
+      call => call[0] === 'failed'
+    )?.[1] as
+      | ((
+          job: { name: string; attemptsMade: number; opts: { attempts?: number } },
+          error: Error
+        ) => void)
+      | undefined
+    expect(failed).toBeDefined()
+    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    failed?.({ name: 'purge', attemptsMade: 3, opts: { attempts: 3 } }, new Error('database down'))
+    failed?.({ name: 'purge', attemptsMade: 1, opts: { attempts: 3 } }, new Error('database down'))
+
+    expect(logged).toHaveBeenCalledTimes(1)
+    expect(String(logged.mock.calls[0]?.[0])).toContain('purge')
+    logged.mockRestore()
   })
 
   it('closes the worker and then the queue before Redis closes', async () => {
