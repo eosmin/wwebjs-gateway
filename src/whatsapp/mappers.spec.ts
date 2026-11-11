@@ -431,6 +431,30 @@ describe('a message with the fields WhatsApp omits', () => {
     expect(mapMessage(message({ timestamp: null }), OPTIONS).timestamp).toBeNull()
   })
 
+  it.each([NaN, Infinity, -Infinity, 1e20, -1e20, 253_402_300_800, -1])(
+    'keeps a message whose timestamp is %s, dated by its arrival, and reports it',
+    timestamp => {
+      const onInvalidTimestamp = jest.fn()
+
+      const dto = mapMessage(message({ timestamp }), { ...OPTIONS, onInvalidTimestamp })
+
+      expect(MessageDto.parse(dto)).toEqual(dto)
+      expect(dto.timestamp).toBeNull()
+      expect(dto.sentAt).toBe(dto.receivedAt)
+      expect(onInvalidTimestamp).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('does not report a valid, a zero or a missing timestamp', () => {
+    const onInvalidTimestamp = jest.fn()
+
+    mapMessage(message({ timestamp: 0 }), { ...OPTIONS, onInvalidTimestamp })
+    mapMessage(message({ timestamp: null }), { ...OPTIONS, onInvalidTimestamp })
+    mapMessage(message({ timestamp: 1_761_577_446 }), { ...OPTIONS, onInvalidTimestamp })
+
+    expect(onInvalidTimestamp).not.toHaveBeenCalled()
+  })
+
   it('maps a message without a timestamp, dated by its arrival', () => {
     const source: Record<string, unknown> = { ...message() }
     delete source['timestamp']
@@ -440,6 +464,27 @@ describe('a message with the fields WhatsApp omits', () => {
     expect(MessageDto.parse(dto)).toEqual(dto)
     expect(dto.timestamp).toBeNull()
     expect(dto.sentAt).toBe(dto.receivedAt)
+  })
+})
+
+describe('a message with NUL characters', () => {
+  it('maps to what Postgres can keep: no NUL in any text field, key or the raw copy', () => {
+    const dto = mapMessage(
+      message({
+        body: 'a\u0000b',
+        from: '5215500000001\u0000@c.us',
+        author: 'x\u0000',
+        pollOptions: ['o\u0000k'],
+        rawData: { 'k\u0000ey': 'v\u0000al', nested: ['\u0000x'] }
+      }),
+      OPTIONS
+    )
+
+    expect(JSON.stringify(dto)).not.toContain('\\u0000')
+    expect(dto.body).toBe('ab')
+    expect(dto.pollOptions).toEqual(['ok'])
+    expect(dto.raw).toMatchObject({ key: 'val', nested: ['x'] })
+    expect(MessageDto.parse(dto)).toEqual(dto)
   })
 })
 

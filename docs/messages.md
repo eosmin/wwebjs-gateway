@@ -69,3 +69,10 @@ A send that was accepted with `wait=true` and ended while the caller waited does
 ## Not covered by a code check on purpose
 
 There is no `extra` field. TDD §6.8 listed it among the options (the `extra` of `MessageSendOptions` is passed as it is to WhatsApp Web), but wwebjs spreads it into the message after everything the gateway validated (the chat, the text and caption, the media, the quoted message, the mentions), so a caller could change any of them after the send policy and the SSRF guard approved something else; a list of forbidden keys cannot be complete. The bodies of a send, a reply and an edit refuse it like any unknown field (`400 VALIDATION_ERROR`). It can come back as an allowlist of primitive keys if a real need appears. A look-up that the policy would only delay is refused with `POLICY_BLOCKED` instead, the one place where pacing is an error: the caller is waiting for the recipient, and a delayed look-up would hold the request for the length of the delay. A cache hit of a phone number skips the look-up budget, because it costs nothing; it tells a session whether a number is registered only when another session asked about it in the last minutes (a "no") or hour (a "yes").
+
+## NUL characters (U+0000)
+
+Postgres cannot store U+0000 in text or JSON, so the gateway never lets one through to it:
+
+- **Incoming messages:** every NUL in the text, in a key or in the `raw` copy is removed when the message is mapped, before it is stored and before it is published. What is stored is what is published (`a\u0000b` arrives as `ab`); the message is neither lost nor split between the two.
+- **API requests:** a NUL anywhere in the body, the query string or the path parameters is answered `400 VALIDATION_ERROR` with the message `The request contains a NUL (U+0000) character, which is not allowed`, for every route, instead of a `500` from the database.

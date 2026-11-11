@@ -334,6 +334,10 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   private mapOptions(): MessageMapOptions {
     return {
       receivedAt: new Date(),
+      onInvalidTimestamp: () =>
+        this.logger.warn(
+          'A message came with a timestamp that is not a date; dated by its arrival'
+        ),
       includeRaw: this.config.INCLUDE_RAW,
       rawMaxFieldBytes: this.config.RAW_MAX_FIELD_BYTES,
       mediaUrl: messageId =>
