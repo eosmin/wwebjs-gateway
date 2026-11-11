@@ -111,6 +111,9 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   private shuttingDown = false
   private restoreTimer: NodeJS.Timeout | undefined
   private wakeRestore: (() => void) | undefined
+  // The read of every session row into `statuses`, shared by the boot and `whenLoaded`; cleared on a
+  // failure so the next caller reads again
+  private loading: Promise<Session[]> | undefined
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -241,6 +244,30 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   }
 
   // ---- Reads -----------------------------------------------------------------------------------
+
+  // Resolves once the status of every session is loaded (it loads them itself when the boot has not
+  // yet). Before that `status` answers NOT_FOUND for a session that exists, so whoever acts on a stored
+  // session at boot (the send workers draining the jobs of the last run) waits for this first. Rejects
+  // when the rows cannot be read; the next call reads again.
+  async whenLoaded(): Promise<void> {
+    await this.loadRows()
+  }
+
+  private loadRows(): Promise<Session[]> {
+    this.loading ??= this.sessions
+      .list()
+      .then(rows => {
+        for (const row of rows)
+          if (!this.statuses.has(row.id)) this.statuses.set(row.id, row.status)
+        this.refreshGauge()
+        return rows
+      })
+      .catch((error: unknown) => {
+        this.loading = undefined
+        throw error
+      })
+    return this.loading
+  }
 
   status(id: string): SessionStatus {
     const status = this.statuses.get(id)
@@ -588,9 +615,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   // Loads every status, then starts, one after another, the sessions that were linked and meant to
   // run. The gap between starts keeps the browsers from launching together.
   private async restore(): Promise<void> {
-    const rows = await this.sessions.list()
-    for (const row of rows) if (!this.statuses.has(row.id)) this.statuses.set(row.id, row.status)
-    this.refreshGauge()
+    const rows = await this.loadRows()
     const toStart = rows.filter(row => row.autoStart && row.linkedAt)
     await this.settleStaleStatuses(rows.filter(row => !toStart.includes(row)))
     for (const [index, row] of toStart.entries()) {

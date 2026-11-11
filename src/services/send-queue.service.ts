@@ -4,6 +4,7 @@ import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } f
 import { DelayedError, Queue, Worker, type Job } from 'bullmq'
 
 import { NotFoundError } from '../common/errors.js'
+import { abortableSleep } from '../common/lib/abortable-sleep.js'
 import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
@@ -270,11 +271,34 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     }
     this.settledLanes.set(sessionId, lane)
     this.notifyQueuesChanged()
-    void worker.run().catch((error: unknown) => {
-      this.logger.error(`[${sessionId}] Send worker stopped: ${toErrorBody(error).message}`)
-    })
+    void this.startWorkerWhenLoaded(lane)
     await this.refreshDepth(lane)
     return lane
+  }
+
+  // The worker takes no job until the boot has loaded the sessions: a job picked before that finds its
+  // session NOT_FOUND, a final failure for a message that was accepted and is still owed. When the
+  // rows cannot be read it tries again, since a lane that never starts would hold its jobs for good.
+  private async startWorkerWhenLoaded(lane: Lane): Promise<void> {
+    for (;;) {
+      if (this.closing || lane.abort.signal.aborted) return
+      try {
+        await this.sessions.whenLoaded()
+      } catch (error: unknown) {
+        this.logger.error(
+          `[${lane.sessionId}] Send worker waits: the sessions could not be loaded (${toErrorBody(error).code})`
+        )
+        await abortableSleep(this.config.SEND_NOT_READY_RETRY_MS, lane.abort.signal)
+        continue
+      }
+      if (this.closing || lane.abort.signal.aborted) return
+      try {
+        await lane.worker.run()
+      } catch (error: unknown) {
+        this.logger.error(`[${lane.sessionId}] Send worker stopped: ${toErrorBody(error).message}`)
+      }
+      return
+    }
   }
 
   private async closeLane(lane: Lane): Promise<void> {
