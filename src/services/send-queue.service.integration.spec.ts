@@ -49,6 +49,9 @@ describe('send queue (integration)', () => {
   let client: FakeWhatsAppClient
   let ready: boolean
   let exists: boolean
+  // What `whenLoaded` of the fake SessionManager returns: the boot has read the rows or not yet
+  let loaded: Promise<void>
+  let whenLoaded: () => Promise<void>
   let published: Published[]
   let removed: ((id: string) => Promise<void>) | undefined
   let policy: {
@@ -81,11 +84,14 @@ describe('send queue (integration)', () => {
     const settings = config(env)
     const redis = new RedisService(settings)
     const sessions = {
+      whenLoaded: () => whenLoaded(),
       status: () => {
         if (!exists) throw new NotFoundError('NOT_FOUND', 'no session')
         return 'ready'
       },
       requireReady: () => {
+        // As the real one: the status is read first, so an unknown session is NOT_FOUND
+        if (!exists) throw new NotFoundError('NOT_FOUND', 'no session')
         if (!ready) throw new ConflictError('SESSION_NOT_READY', 'not ready')
         return client
       },
@@ -146,6 +152,8 @@ describe('send queue (integration)', () => {
     client = new FakeWhatsAppClient(sessionId)
     ready = true
     exists = true
+    loaded = Promise.resolve()
+    whenLoaded = () => loaded
     published = []
     idempotency = {
       complete: jest.fn<Promise<boolean>, []>().mockResolvedValue(true),
@@ -323,6 +331,51 @@ describe('send queue (integration)', () => {
       await until(() => sentBodies().length === 1)
       await until(async () => (await second.status(sessionId, jobId)).status === 'sent')
       expect(sentBodies()).toEqual(['sobrevivo'])
+    })
+
+    it('takes no job before the boot has loaded the sessions, then sends it once', async () => {
+      const first = await boot()
+      ready = false
+      const { jobId } = await first.submit(text('espero al arranque'))
+      await shutdown(first)
+
+      // The restarted process: the queue is open, the session rows are not read yet
+      let finishLoading!: () => void
+      loaded = new Promise<void>(resolve => {
+        finishLoading = resolve
+      })
+      exists = false
+      ready = false
+      const second = await boot()
+      await new Promise(resolve => setTimeout(resolve, 500))
+      // Not consumed as a failure, not sent: the job is still owed
+      expect(sentBodies()).toEqual([])
+      expect(published.filter(item => item.event === 'message_failed')).toEqual([])
+
+      exists = true
+      ready = true
+      finishLoading()
+      await until(() => sentBodies().length === 1)
+      await until(async () => (await second.status(sessionId, jobId)).status === 'sent')
+      expect(sentBodies()).toEqual(['espero al arranque'])
+    })
+
+    it('starts the worker once the sessions load, after a boot read that failed', async () => {
+      const first = await boot()
+      ready = false
+      await first.submit(text('tras el fallo'))
+      await shutdown(first)
+
+      let attempts = 0
+      loaded = Promise.resolve()
+      const failing = jest.fn(() =>
+        ++attempts < 3 ? Promise.reject(new Error('db down')) : loaded
+      )
+      whenLoaded = failing
+      ready = true
+      await boot()
+      await until(() => sentBodies().length === 1)
+      expect(attempts).toBeGreaterThanOrEqual(3)
     })
 
     it('carries the time already waited across the restart that interrupted the wait', async () => {

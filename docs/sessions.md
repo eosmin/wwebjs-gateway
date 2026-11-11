@@ -126,7 +126,7 @@ The pairing code is a credential like the QR code, so its routes need `manage`, 
 
 When the gateway boots it does not wait for the sessions. In the background it:
 
-1. loads the status of every session;
+1. loads the status of every session, and then lets the send workers start (`whenLoaded()`): until then a session that exists would be answered `NOT_FOUND`;
 2. marks as `stopped` the sessions that say they are running (`starting`, `qr`, `ready`, ...) but will not start now: a crash left that status behind and nothing runs for them;
 3. starts, one after another, every session with `autoStart` on that was linked before (`linkedAt` set). `SESSION_START_STAGGER_MS` is the wait between two starts, so the browsers do not launch together. A session that cannot start is logged and the next one goes on; one that would pass `MAX_SESSIONS` is skipped.
 

@@ -905,6 +905,35 @@ describe('SessionManager boot and shutdown', () => {
     expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('Restoring the sessions failed'))
   })
 
+  it('settles whenLoaded with the statuses read, before any session has started', async () => {
+    const built = build({ SESSION_START_STAGGER_MS: '5000' })
+    built.sessions.seed({ id: 'a', ...linked })
+    expect(() => built.manager.status('a')).toThrow(/does not exist/)
+
+    let startedWhenLoaded = -1
+    const waiting = built.manager.whenLoaded().then(() => {
+      startedWhenLoaded = built.factory.clients.length
+      return built.manager.status('a')
+    })
+    built.manager.onApplicationBootstrap()
+    await flush()
+
+    await expect(waiting).resolves.toBeDefined()
+    // The workers may run now, and the session is still to be started: that is a not-ready wait
+    expect(startedWhenLoaded).toBe(0)
+    expect(built.sessions.list).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects whenLoaded when the rows cannot be read and reads again on the next call', async () => {
+    const built = build()
+    built.sessions.seed({ id: 'a', ...linked })
+    built.sessions.list.mockRejectedValueOnce(new Error('db down'))
+
+    await expect(built.manager.whenLoaded()).rejects.toThrow('db down')
+    await expect(built.manager.whenLoaded()).resolves.toBeUndefined()
+    expect(built.manager.status('a')).toBeDefined()
+  })
+
   it('destroys every client at shutdown without logging out and stops the restore', async () => {
     const built = build({ SESSION_START_STAGGER_MS: '5000' })
     built.sessions.seed({ id: 'a', ...linked })
