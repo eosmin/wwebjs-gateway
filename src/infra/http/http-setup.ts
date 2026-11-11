@@ -1,6 +1,10 @@
 import helmet from '@fastify/helmet'
+import { HttpStatus } from '@nestjs/common'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
+import type { FastifyInstance } from 'fastify'
 
+import { ErrorCode } from '../../common/errors.js'
+import { hasNul } from '../../common/lib/nul.js'
 import type { AppConfig } from '../../config/env.schema.js'
 import { REQUEST_ID_HEADER } from '../logger/logger.config.js'
 
@@ -19,6 +23,7 @@ export async function setupHttp(
   app: NestFastifyApplication,
   config: Pick<AppConfig, 'CORS_ORIGINS' | 'ENABLE_DOCS'>
 ): Promise<void> {
+  rejectNul(app.getHttpAdapter().getInstance())
   await app.register(helmet, config.ENABLE_DOCS ? { contentSecurityPolicy: DOCS_CSP } : {})
   // No origin listed: the browser same-origin policy applies, which is what a server-to-server API wants
   if (config.CORS_ORIGINS.length > 0) {
@@ -27,4 +32,21 @@ export async function setupHttp(
       exposedHeaders: [REQUEST_ID_HEADER, 'retry-after']
     })
   }
+}
+
+// Postgres cannot store U+0000, so a request that carries one in its body, query or params would
+// fail deep in a repository as a 500. It is answered 400 here, after the body is parsed and before
+// any controller or pipe sees it.
+function rejectNul(instance: FastifyInstance): void {
+  instance.addHook('preValidation', async (request, reply) => {
+    if (!hasNul(request.body) && !hasNul(request.query) && !hasNul(request.params)) return
+    void reply.header(REQUEST_ID_HEADER, request.id)
+    return reply.status(HttpStatus.BAD_REQUEST).send({
+      error: {
+        code: ErrorCode.VALIDATION_ERROR,
+        message: 'The request contains a NUL (U+0000) character, which is not allowed',
+        requestId: request.id
+      }
+    })
+  })
 }

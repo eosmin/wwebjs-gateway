@@ -1,3 +1,4 @@
+import { stripNul } from '../common/lib/nul.js'
 import type {
   BatteryInfoDto,
   BroadcastDto,
@@ -85,6 +86,11 @@ const optionalId = (id: IdLike | null | undefined): string | undefined =>
 
 const toIso = (value: Date | number): string => new Date(value).toISOString()
 const unixToIso = (seconds: number): string => toIso(seconds * 1000)
+
+// The ISO string must stay a 4-digit year (RFC 3339, the DTO schema and Postgres): 0 to 9999-12-31
+const MAX_UNIX_SECONDS = 253_402_300_799
+const isUsableUnixTime = (seconds: number): boolean =>
+  Number.isFinite(seconds) && seconds >= 0 && seconds <= MAX_UNIX_SECONDS
 
 // Copies the listed keys, leaving out the ones that are undefined or null so that a field WhatsApp
 // did not fill is absent from the DTO instead of failing its schema
@@ -307,6 +313,9 @@ export interface MessageMapOptions {
   // Where a message's media can be downloaded from the gateway. Without it a message gets no
   // `media` block: the mapper does not guess a URL.
   mediaUrl?: (messageId: string) => string
+  // Called when a message carries a timestamp that is not a date (NaN, Infinity, out of range): it
+  // is kept, dated by its arrival, instead of being lost
+  onInvalidTimestamp?: () => void
 }
 
 const MESSAGE_FIELDS = [
@@ -392,7 +401,24 @@ function extractMedia(
   }
 }
 
+function usableTimestamp(
+  value: number | null | undefined,
+  options: MessageMapOptions
+): number | null {
+  if (value === undefined || value === null) return null
+  if (isUsableUnixTime(value)) return value
+  options.onInvalidTimestamp?.()
+  return null
+}
+
+// Postgres cannot store U+0000, and what is stored must be what is published, so the DTO leaves the
+// mapper without any: the single place every message (live, reconciled, fetched) is built.
 export function mapMessage(source: MessageSource, options: MessageMapOptions): MessageDto {
+  return stripNul(mapMessageFields(source, options))
+}
+
+function mapMessageFields(source: MessageSource, options: MessageMapOptions): MessageDto {
+  const timestamp = usableTimestamp(source.timestamp, options)
   const message: MessageDto = {
     ...(pick(source, MESSAGE_FIELDS) as MessageDto), // required fields are filled by wwebjs
     id: serializeId(source.id),
@@ -400,14 +426,11 @@ export function mapMessage(source: MessageSource, options: MessageMapOptions): M
     broadcast: source.broadcast ?? false,
     isEphemeral: source.isEphemeral ?? false,
     isForwarded: source.isForwarded ?? false,
-    timestamp: source.timestamp ?? null,
+    timestamp,
     // For a group chat `from` is the group, `author` the sender
     chatId: source.fromMe ? source.to : source.from,
-    // A message without a timestamp is dated by its arrival so that it still has a place in the order
-    sentAt:
-      source.timestamp === undefined || source.timestamp === null
-        ? toIso(options.receivedAt)
-        : unixToIso(source.timestamp),
+    // A message without a usable timestamp is dated by its arrival so that it still has a place in the order
+    sentAt: timestamp === null ? toIso(options.receivedAt) : unixToIso(timestamp),
     receivedAt: toIso(options.receivedAt),
     mentionedIds: source.mentionedIds.map(serializeId),
     groupMentions: source.groupMentions.map(({ groupSubject, groupJid }) => ({
