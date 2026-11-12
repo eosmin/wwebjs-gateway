@@ -10,6 +10,37 @@ const libraryRoot = join(process.cwd(), 'node_modules/whatsapp-web.js/src')
 describe('the patched whatsapp-web.js', () => {
   const source = (file: string): string => readFileSync(join(libraryRoot, file), 'utf8')
 
+  // The code the library sends to WhatsApp Web cannot run in Jest, so it runs here with a fake
+  // `window`: `modules` is what `window.require` answers, and the helpers of the library are the
+  // real ones (`LoadUtils` is the function the library injects into the page)
+  const VERSION = '2.3000.1054303363'
+  const evaluateHere = (fn: (...args: unknown[]) => unknown, ...args: unknown[]): unknown =>
+    fn(...args)
+  const withPage = async <T>(
+    modules: Record<string, unknown>,
+    run: () => Promise<T>
+  ): Promise<T> => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library
+    const { LoadUtils } = require(join(libraryRoot, 'util/Injected/Utils.js')) as {
+      LoadUtils: () => void
+    }
+    const target = globalThis as { window?: unknown }
+    const before = target.window
+    target.window = {
+      require: (name: string) => modules[name],
+      Debug: { VERSION },
+      crypto: { getRandomValues: (bytes: Uint8Array) => bytes }
+    }
+    try {
+      LoadUtils()
+      return await run()
+    } finally {
+      target.window = before
+    }
+  }
+  const pageOf = (): { WWebJS: Record<string, unknown> } =>
+    (globalThis as unknown as { window: { WWebJS: Record<string, unknown> } }).window
+
   // 1.34.8 reads the key of a message as `_serialized || $1` everywhere (upstream #201832), which is
   // what our own fallback did in 1.34.7. The patch keeps only the one spot upstream missed, so these
   // tests fail when a refresh brings back a bare `_serialized` read on a key from the page
@@ -63,18 +94,10 @@ describe('the patched whatsapp-web.js', () => {
       subject: 'g'
     }
     // Runs the function the library hands to `pupPage.evaluate` with `window` replaced
-    const create = async (modules: Record<string, unknown>): Promise<unknown> => {
-      const target = globalThis as { window?: unknown }
-      const before = target.window
-      target.window = { require: (name: string) => modules[name], WWebJS: {} }
-      try {
-        const evaluate = (fn: (...args: unknown[]) => unknown, ...args: unknown[]): unknown =>
-          fn(...args)
-        return await prototype.createGroup.call({ pupPage: { evaluate } }, 'g', [], {})
-      } finally {
-        target.window = before
-      }
-    }
+    const create = async (modules: Record<string, unknown>): Promise<unknown> =>
+      withPage(modules, () =>
+        prototype.createGroup.call({ pupPage: { evaluate: evaluateHere } }, 'g', [], {})
+      )
 
     it('loads the lazy bundle before it asks for the module that creates the group', async () => {
       const modules: Record<string, unknown> = {}
@@ -100,6 +123,19 @@ describe('the patched whatsapp-web.js', () => {
       expect(requireBundle).not.toHaveBeenCalled()
     })
 
+    it('answers the missing module and the build when the bundle does not bring it', async () => {
+      const modules = { WAWebNewGroupFlowLoadable: { requireBundle: () => Promise.resolve() } }
+
+      const answer = await create(modules)
+
+      expect(answer).toEqual(expect.stringContaining('CreateGroupError'))
+      expect(answer).toEqual(
+        expect.stringContaining(
+          `[lazy-module] WAWebGroupCreateJob is not available in WhatsApp Web ${VERSION} (its bundle WAWebNewGroupFlowLoadable did not load it)`
+        )
+      )
+    })
+
     it('keeps the cause of a failure in the text it answers, not only the library generic', async () => {
       const modules = {
         WAWebNewGroupFlowLoadable: {
@@ -111,6 +147,222 @@ describe('the patched whatsapp-web.js', () => {
 
       expect(answer).toEqual(expect.stringContaining('CreateGroupError'))
       expect(answer).toEqual(expect.stringContaining('bundle offline'))
+    })
+  })
+
+  // F14: WhatsApp Web 2.3000.1054303363 answers `undefined` to window.require(name) for modules that
+  // nobody loaded yet, so forward, acceptGroupV4Invite, setDisplayName, revokeStatusMessage and the
+  // call link failed with 502 and no cause. The bundle that loads each one was found by probing a page
+  // (docs/sessions.md); a module that is still missing must fail with its name and the version
+  describe('modules that WhatsApp Web loads lazily', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const { prototype } = require(join(libraryRoot, 'Client.js')) as {
+      prototype: Record<
+        'acceptGroupV4Invite' | 'setDisplayName' | 'revokeStatusMessage' | 'createCallLink',
+        (...args: unknown[]) => Promise<unknown>
+      >
+    }
+    const evaluate = { pupPage: { evaluate: evaluateHere } }
+
+    interface LazyCase {
+      method: string
+      module: string
+      loadable: string | null
+      // the other modules the page code needs, and the call of the library
+      others: Record<string, unknown>
+      action: string
+      call: () => Promise<unknown>
+    }
+    const cases: LazyCase[] = [
+      {
+        method: 'acceptGroupV4Invite',
+        module: 'WAWebGroupInviteV4Job',
+        loadable: 'WAWebInfoFlowLoadable',
+        others: { WAWebWidFactory: { createWid: (id: string) => id } },
+        action: 'joinGroupViaInviteV4',
+        call: () =>
+          prototype.acceptGroupV4Invite.call(evaluate, {
+            groupId: 'g@g.us',
+            fromId: 'f@c.us',
+            inviteCode: 'code',
+            inviteCodeExp: 1
+          })
+      },
+      {
+        method: 'setDisplayName',
+        module: 'WAWebSetPushnameConnAction',
+        loadable: 'WAWebProfileDrawerLoadableRequireBundle',
+        others: { WAWebConnModel: { Conn: { canSetMyPushname: () => true } } },
+        action: 'setPushname',
+        call: () => prototype.setDisplayName.call(evaluate, 'name')
+      },
+      {
+        method: 'revokeStatusMessage',
+        module: 'WAWebRevokeStatusAction',
+        loadable: 'WAWebStatusQuotedFlowLoadable',
+        others: {
+          WAWebCollections: {
+            Status: { getMyStatus: () => ({}) },
+            Msg: { get: () => ({ id: { fromMe: true, remote: { isStatus: () => true } } }) }
+          }
+        },
+        action: 'sendStatusRevokeMsgAction',
+        call: () => prototype.revokeStatusMessage.call(evaluate, 'status-id')
+      },
+      {
+        method: 'forwardMessage',
+        module: 'WAWebChatForwardMessage',
+        loadable: 'WAWebForwardMessageFlowLoadable',
+        others: { WAWebCollections: { Msg: { get: () => ({}) } } },
+        action: 'forwardMessages',
+        call: () => {
+          const forward = pageOf().WWebJS.forwardMessage as (
+            c: string,
+            m: string
+          ) => Promise<unknown>
+          // forwardMessage reads window.WWebJS.getChat when it runs: the stub replaces the real one
+          pageOf().WWebJS.getChat = () => Promise.resolve({})
+          return forward('c@c.us', 'm')
+        }
+      },
+      {
+        method: 'createCallLink',
+        module: 'WAWebGenerateEventCallLink',
+        loadable: null,
+        others: {},
+        action: 'createEventCallLink',
+        call: () => prototype.createCallLink.call(evaluate, new Date(), 'video')
+      }
+    ]
+
+    // The module and the bundle are what the page answers: `bundleLoads` says what loading the bundle does
+    const run = (
+      c: LazyCase,
+      state: { present: boolean; bundle: 'loads' | 'does-nothing' | 'absent' | 'throws' }
+    ): { action: jest.Mock; requireBundle: jest.Mock; result: Promise<unknown> } => {
+      const action = jest.fn(() => Promise.resolve('done'))
+      const lazy = { [c.action]: action }
+      const modules: Record<string, unknown> = { ...c.others }
+      if (state.present) modules[c.module] = lazy
+      const requireBundle = jest.fn(() => {
+        if (state.bundle === 'throws') return Promise.reject(new Error('bundle offline'))
+        if (state.bundle === 'loads') modules[c.module] = lazy
+        return Promise.resolve()
+      })
+      if (c.loadable && state.bundle !== 'absent') modules[c.loadable] = { requireBundle }
+      const result = withPage(modules, c.call)
+      return { action, requireBundle, result }
+    }
+
+    const withLoadable = cases.filter(c => c.loadable)
+
+    it.each(withLoadable.map(c => [c.method, c] as const))(
+      '%s loads the bundle of its module when the module is not there yet',
+      async (_name, c) => {
+        const { action, requireBundle, result } = run(c, { present: false, bundle: 'loads' })
+
+        await result
+        expect(requireBundle).toHaveBeenCalledTimes(1)
+        expect(action).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    it.each(cases.map(c => [c.method, c] as const))(
+      '%s does not load any bundle when the module is already there',
+      async (_name, c) => {
+        const { action, requireBundle, result } = run(c, { present: true, bundle: 'loads' })
+
+        await result
+        expect(requireBundle).not.toHaveBeenCalled()
+        expect(action).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    it.each(cases.map(c => [c.method, c] as const))(
+      '%s fails naming the module and the WhatsApp Web version when the module is still missing',
+      async (_name, c) => {
+        const { action, result } = run(c, { present: false, bundle: 'does-nothing' })
+
+        await expect(result).rejects.toThrow(
+          new RegExp(`\\[lazy-module\\] ${c.module} is not available in WhatsApp Web ${VERSION}`)
+        )
+        expect(action).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each(withLoadable.map(c => [c.method, c] as const))(
+      '%s names the bundle that did not load the module',
+      async (_name, c) => {
+        const { result } = run(c, { present: false, bundle: 'does-nothing' })
+
+        await expect(result).rejects.toThrow(`its bundle ${c.loadable} did not load it`)
+      }
+    )
+
+    it.each(withLoadable.map(c => [c.method, c] as const))(
+      '%s fails clearly when the bundle itself is not in the page',
+      async (_name, c) => {
+        const { result } = run(c, { present: false, bundle: 'absent' })
+
+        await expect(result).rejects.toThrow(
+          `[lazy-module] ${c.module} is not available in WhatsApp Web ${VERSION} (its bundle ${c.loadable} did not load it)`
+        )
+      }
+    )
+
+    it.each(withLoadable.map(c => [c.method, c] as const))(
+      '%s names the module and the build when the bundle fails to load',
+      async (_name, c) => {
+        const { result } = run(c, { present: false, bundle: 'throws' })
+
+        await expect(result).rejects.toThrow(
+          `[lazy-module] ${c.module} is not available in WhatsApp Web ${VERSION} (its bundle ${c.loadable} failed to load: bundle offline)`
+        )
+      }
+    )
+
+    it('says that no bundle is known when the call link module is missing', async () => {
+      const link = cases.find(c => c.method === 'createCallLink') as LazyCase
+      const { result } = run(link, { present: false, bundle: 'absent' })
+
+      await expect(result).rejects.toThrow('no bundle is known to load it')
+    })
+
+    it.each(cases.map(c => [c.method, c] as const))(
+      '%s treats a module the page answers null for as missing, before and after the bundle',
+      async (_name, c) => {
+        const modules: Record<string, unknown> = { ...c.others, [c.module]: null }
+        if (c.loadable) modules[c.loadable] = { requireBundle: () => Promise.resolve() }
+
+        await expect(withPage(modules, c.call)).rejects.toThrow(`${c.module} is not available`)
+      }
+    )
+
+    it('does not fail on a bundle without requireBundle: it only reports the module as missing', async () => {
+      const c = cases[1] as LazyCase
+      const modules = { ...c.others, [c.loadable as string]: {} }
+
+      await expect(withPage(modules, c.call)).rejects.toThrow(`${c.module} is not available`)
+    })
+
+    it('says "unknown" when the page has no build number', async () => {
+      const c = cases[1] as LazyCase
+      const target = globalThis as { window?: { Debug?: unknown } }
+
+      await expect(
+        withPage(c.others, async () => {
+          delete target.window?.Debug
+          return c.call()
+        })
+      ).rejects.toThrow(`WhatsApp Web unknown`)
+    })
+
+    // The send of an event with a call link (`callType` other than `none`) reaches the same module;
+    // sendMessage is too big to run here, so the call is pinned in the source
+    it('asks for the module of the event call link through the helper', () => {
+      expect(source('util/Injected/Utils.js')).toMatch(
+        /requireLazyModule\(\s*'WAWebGenerateEventCallLink',?\s*\)/
+      )
     })
   })
 

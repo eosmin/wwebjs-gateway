@@ -105,7 +105,8 @@ function sanitize(message: string): string {
       .replace(/[A-Za-z0-9+/=_-]{24,}/g, token =>
         /\d/.test(token) && /[A-Za-z]/.test(token) ? '[redacted]' : token
       )
-      .replace(/\d{7,}/g, '#')
+      // The build of WhatsApp Web ("2.3000.1054303363", always "2.<4 digits>.") is not the number of a person: it is kept
+      .replace(/(?<!\d)(?<!\b2\.\d{4}\.)\d{7,}/g, '#')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, MAX_CAUSE_MESSAGE_LENGTH)
