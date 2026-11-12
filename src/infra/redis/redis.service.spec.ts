@@ -7,7 +7,8 @@ const config: AppConfig = parseEnv({
   PUBLIC_BASE_URL: 'http://localhost:3000',
   DATABASE_URL: 'postgresql://gateway:gateway@localhost:5432/gateway',
   REDIS_URL: 'redis://127.0.0.1:1',
-  ADMIN_API_KEY: 'a'.repeat(32)
+  ADMIN_API_KEY: 'a'.repeat(32),
+  REDIS_CONNECT_TIMEOUT_MS: '300'
 })
 
 describe('RedisService', () => {
@@ -20,6 +21,28 @@ describe('RedisService', () => {
 
   afterEach(() => {
     for (const service of services.splice(0)) service.client.disconnect()
+  })
+
+  it('fails the start with a clear message when Redis does not answer in time', async () => {
+    const service = new RedisService({
+      ...config,
+      REDIS_URL: 'redis://user:s3cret@127.0.0.1:1'
+    })
+    services.push(service)
+
+    const failure = await service.onModuleInit().catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    const message = (failure as Error).message
+    expect(message).toContain('Redis is not reachable at 127.0.0.1:1 after 300 ms')
+    expect(message).not.toContain('s3cret')
+  })
+
+  it('lets the start go on as soon as Redis is ready', async () => {
+    const service = create()
+    Object.defineProperty(service.client, 'status', { value: 'ready' })
+
+    await expect(service.onModuleInit()).resolves.toBeUndefined()
   })
 
   it('opens a shared client and separate connections on request', () => {

@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, type OnApplicationShutdown } from '@nestjs/common'
+import {
+  Inject,
+  Injectable,
+  Logger,
+  type OnApplicationShutdown,
+  type OnModuleInit
+} from '@nestjs/common'
 import type { Redis } from 'ioredis'
 
 import { withTimeout } from '../../common/lib/timeout.js'
@@ -10,7 +16,7 @@ import { createRedisClient } from './redis.factory.js'
 const QUIT_TIMEOUT_MS = 2000
 
 @Injectable()
-export class RedisService implements OnApplicationShutdown {
+export class RedisService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(RedisService.name)
   private readonly connections = new Set<Redis>()
   // The shared connection for ordinary commands
@@ -18,6 +24,25 @@ export class RedisService implements OnApplicationShutdown {
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {
     this.client = this.createConnection()
+  }
+
+  // ioredis retries for ever (BullMQ needs it), so without this bound a gateway whose Redis is
+  // unreachable would sit silent instead of failing; the supervisor restarts a process that exits
+  async onModuleInit(): Promise<void> {
+    if (this.client.status === 'ready') return
+    const timeoutMs = this.config.REDIS_CONNECT_TIMEOUT_MS
+    const ready = new Promise<void>(resolve => {
+      this.client.once('ready', () => resolve())
+    })
+    try {
+      await withTimeout(ready, timeoutMs, 'redis connect')
+    } catch {
+      // Host and port only: the URL carries the password
+      const { hostname, port } = new URL(this.config.REDIS_URL)
+      throw new Error(
+        `Redis is not reachable at ${hostname}:${port === '' ? '6379' : port} after ${timeoutMs} ms (REDIS_URL, REDIS_CONNECT_TIMEOUT_MS)`
+      )
+    }
   }
 
   // A separate connection, for the consumers that block (BullMQ workers) or subscribe

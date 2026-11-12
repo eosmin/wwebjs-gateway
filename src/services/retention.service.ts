@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common'
 import { type Job, Queue, UnrecoverableError, Worker } from 'bullmq'
 
-import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import {
@@ -10,6 +9,7 @@ import {
 } from '../database/repositories/deliveries.repository.js'
 import { IdempotencyRepository } from '../database/repositories/idempotency.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
+import { closeQueue, closeWorker } from '../infra/redis/bullmq-close.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 
 import { type DeliveryJobState, DeliveryQueueService } from './delivery-queue.service.js'
@@ -144,11 +144,9 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
     this.worker = undefined
     this.queue = undefined
     if (worker !== undefined) {
-      await withTimeout(worker.close(), CLOSE_TIMEOUT_MS, 'retention worker close').catch(() =>
-        worker.close(true)
-      )
+      await closeWorker(worker, this.redis.client, CLOSE_TIMEOUT_MS, 'retention worker close')
     }
-    await queue?.close()
+    if (queue !== undefined) await closeQueue(queue, this.redis.client, 'retention queue close')
   }
 
   async process(job: Pick<Job, 'name'>): Promise<void> {

@@ -15,10 +15,14 @@ import { SendQueueService } from './services/send-queue.service.js'
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, createFastifyAdapter(), {
-    bufferLogs: true
+    bufferLogs: true,
+    // The error reaches the catch below instead of aborting the process without a message
+    abortOnError: false
   })
   app.useLogger(app.get(Logger))
-  app.enableShutdownHooks()
+  // process.exit after the hooks instead of re-sending the signal to itself: the re-sent signal
+  // left the process alive until the hard exit when Redis was down (measured: 30 s)
+  app.enableShutdownHooks(undefined, { useProcessExit: true })
   armHardExit()
   const config = app.get<AppConfig>(APP_CONFIG)
   await setupHttp(app, config)
@@ -31,4 +35,10 @@ async function bootstrap(): Promise<void> {
   await app.listen(config.PORT, config.HOST)
 }
 
-void bootstrap()
+// A failure while the application starts (Redis or Postgres unreachable, an invalid environment)
+// must end the process with the reason on stderr and a non-zero code, not leave it half started
+bootstrap().catch((error: unknown) => {
+  const reason = error instanceof Error ? error.message : String(error)
+  process.stderr.write(`${JSON.stringify({ level: 'fatal', msg: `Startup failed: ${reason}` })}\n`)
+  process.exit(1)
+})

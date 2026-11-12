@@ -9,7 +9,6 @@ import { readPackageInfo } from '../common/lib/package-info.js'
 import { RequestFailedError, postToPublicUrl } from '../common/lib/public-post.js'
 import { retry } from '../common/lib/retry.js'
 import type { SsrfPolicy } from '../common/lib/ssrf.js'
-import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { isTransientDbError } from '../database/db-errors.js'
@@ -20,6 +19,7 @@ import {
 } from '../database/repositories/deliveries.repository.js'
 import { REDACTED } from '../infra/logger/redaction.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
+import { closeWorker } from '../infra/redis/bullmq-close.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 
 import {
@@ -120,9 +120,7 @@ export class DeliveryProcessor implements OnModuleInit, OnModuleDestroy {
     const worker = this.worker
     this.worker = undefined
     if (worker === undefined) return
-    await withTimeout(worker.close(), CLOSE_TIMEOUT_MS, 'delivery worker close').catch(() =>
-      worker.close(true)
-    )
+    await closeWorker(worker, this.redis.client, CLOSE_TIMEOUT_MS, 'delivery worker close')
   }
 
   // One attempt. Resolves when there is nothing more to do for the job and throws to have BullMQ
