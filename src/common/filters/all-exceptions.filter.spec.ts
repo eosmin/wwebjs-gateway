@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { APP_CONFIG } from '../../config/config.module.js'
 import type { AppConfig } from '../../config/env.schema.js'
 import { createFastifyAdapter } from '../../infra/logger/fastify-adapter.js'
-import { ConflictError, InternalError, WhatsAppError } from '../errors.js'
+import { ConflictError, InternalError, ServiceBusyError, WhatsAppError } from '../errors.js'
 
 import { AllExceptionsFilter, type ErrorBody } from './all-exceptions.filter.js'
 
@@ -19,6 +19,16 @@ class ProbeController {
   @Get('app-error')
   appError(): never {
     throw new ConflictError('SESSION_NOT_READY', undefined, { sessionId: 'shop', state: 'QR' })
+  }
+
+  @Get('busy')
+  busy(): never {
+    throw new ServiceBusyError('SEND_QUEUE_FULL', 7, true, undefined, { scope: 'session' })
+  }
+
+  @Get('unavailable')
+  unavailable(): never {
+    throw new ServiceBusyError('QUEUE_UNAVAILABLE', 5, true)
   }
 
   @Get('whatsapp')
@@ -110,6 +120,30 @@ describe('AllExceptionsFilter', () => {
       const { requestId } = response.json<ErrorBody>().error
       expect(requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/)
       expect(response.headers['x-request-id']).toBe(requestId)
+    })
+
+    it('sends Retry-After with a refusal because the gateway is full or a dependency is down', async () => {
+      const response = await get('/probe/busy')
+
+      expect(response.statusCode).toBe(429)
+      expect(response.headers['retry-after']).toBe('7')
+      expect(response.json<ErrorBody>().error).toMatchObject({
+        code: 'SEND_QUEUE_FULL',
+        details: { scope: 'session' }
+      })
+    })
+
+    it('sends Retry-After with 503 QUEUE_UNAVAILABLE too', async () => {
+      const response = await get('/probe/unavailable')
+
+      expect(response.statusCode).toBe(503)
+      expect(response.headers['retry-after']).toBe('5')
+    })
+
+    it('sends no Retry-After with an error that is not a refusal of that kind', async () => {
+      const response = await get('/probe/app-error')
+
+      expect(response.headers['retry-after']).toBeUndefined()
     })
 
     it('omits details when the error has none', async () => {

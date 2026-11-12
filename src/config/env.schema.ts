@@ -76,6 +76,15 @@ export const envSchema = z
       ),
     HOST: z.string().min(1).default('0.0.0.0').describe('Interface the HTTP server binds to'),
     PORT: count(3000, { min: 1, max: 65535 }).describe('Port the HTTP server listens on'),
+    HTTP_REQUEST_TIMEOUT_MS: count(120000, { min: 1 }).describe(
+      'Milliseconds a client has to send a whole request (headers and body); a request that is not complete by then is closed. A body of the largest size (about 40 MiB with media) needs a client that uploads faster than 350 KB/s at the default'
+    ),
+    HTTP_HEADERS_TIMEOUT_MS: count(30000, { min: 1 }).describe(
+      'Milliseconds a client has to send the headers of a request; must not be longer than HTTP_REQUEST_TIMEOUT_MS'
+    ),
+    HTTP_CONNECTION_TIMEOUT_MS: count(0).describe(
+      'Milliseconds of silence after which a connection is closed (0 = never). Leave it at 0 or above the longest wait for an answer (about 185 s): a connection that waits for a slow WhatsApp call is silent'
+    ),
     PUBLIC_BASE_URL: z
       .url({ protocol: /^https?$/ })
       .describe('Public URL of the gateway, used to build absolute links'),
@@ -249,10 +258,19 @@ export const envSchema = z
     ),
     MAX_MEDIA_BYTES: count(33554432, { min: 1 }).describe('Largest media file in bytes'),
     MEDIA_FETCH_CONCURRENCY: count(4, { min: 1 }).describe(
-      'Media URLs downloaded at the same time; each one can hold up to MAX_MEDIA_BYTES, about three times over while it is converted'
+      'Media URLs downloaded at the same time (all the sessions together; when they are all busy the next turn goes to the session that has waited longest since its last one); each one can hold up to MAX_MEDIA_BYTES, about three times over while it is converted'
     ),
     MEDIA_FETCH_TIMEOUT_MS: count(30000, { min: 1 }).describe(
       'Milliseconds the download of a media URL of a send may take'
+    ),
+    SEND_QUEUE_MAX_PER_SESSION: count(500, { min: 1 }).describe(
+      'Sends a session may have waiting or running in its queue; the next one is refused with 429 SEND_QUEUE_FULL. Redis keeps every job, media included, so the memory this allows is this number times the size of the sends'
+    ),
+    SEND_QUEUE_MAX_TOTAL: count(2000, { min: 1 }).describe(
+      'Sends all the sessions together may have waiting or running; the next one is refused with 429 SEND_QUEUE_FULL'
+    ),
+    SEND_ENQUEUE_TIMEOUT_MS: count(5000, { min: 1 }).describe(
+      'Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE'
     ),
 
     // Send policy (every value can be overridden per session)
@@ -430,6 +448,14 @@ export const envSchema = z
       error: 'must not contain a range that covers every address (a /0 prefix) in production'
     }
   )
+  .refine(env => env.SEND_QUEUE_MAX_TOTAL >= env.SEND_QUEUE_MAX_PER_SESSION, {
+    path: ['SEND_QUEUE_MAX_TOTAL'],
+    error: 'must not be smaller than SEND_QUEUE_MAX_PER_SESSION'
+  })
+  .refine(env => env.HTTP_HEADERS_TIMEOUT_MS <= env.HTTP_REQUEST_TIMEOUT_MS, {
+    path: ['HTTP_HEADERS_TIMEOUT_MS'],
+    error: 'must not be longer than HTTP_REQUEST_TIMEOUT_MS'
+  })
   .refine(env => env.INBOUND_ORDER_MAX_HOLD_MS >= env.INBOUND_ORDER_WINDOW_MS, {
     path: ['INBOUND_ORDER_MAX_HOLD_MS'],
     error: 'must not be shorter than INBOUND_ORDER_WINDOW_MS'

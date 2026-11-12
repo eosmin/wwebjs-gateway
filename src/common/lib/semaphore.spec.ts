@@ -38,4 +38,59 @@ describe('Semaphore', () => {
     await expect(semaphore.run(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom')
     await expect(semaphore.run(() => Promise.resolve('next'))).resolves.toBe('next')
   })
+
+  it('keeps the order of arrival for the tasks of one owner', async () => {
+    const semaphore = new Semaphore(1)
+    const first = gate()
+    const started: string[] = []
+    const run = (name: string, g?: ReturnType<typeof gate>) =>
+      semaphore.run(async () => {
+        started.push(name)
+        await g?.opened
+      }, 'a')
+    const tasks = [run('a1', first), run('a2'), run('a3')]
+    first.open()
+    await Promise.all(tasks)
+    expect(started).toEqual(['a1', 'a2', 'a3'])
+  })
+
+  it('gives the next permit to the owner that has waited longest, so a busy owner cannot starve another', async () => {
+    const semaphore = new Semaphore(1)
+    const blocker = gate()
+    const started: string[] = []
+    const run = (owner: string, name: string, g?: ReturnType<typeof gate>) =>
+      semaphore.run(async () => {
+        started.push(name)
+        await g?.opened
+      }, owner)
+    // `busy` holds the permit and has three more waiting; `quiet` arrives last with one
+    const tasks = [
+      run('busy', 'busy1', blocker),
+      run('busy', 'busy2'),
+      run('busy', 'busy3'),
+      run('busy', 'busy4'),
+      run('quiet', 'quiet1')
+    ]
+    blocker.open()
+    await Promise.all(tasks)
+    // quiet1 goes second, not last: the turns alternate between the owners that wait
+    expect(started).toEqual(['busy1', 'busy2', 'quiet1', 'busy3', 'busy4'])
+  })
+
+  it('does not leave an owner behind when its queue empties and fills again', async () => {
+    const semaphore = new Semaphore(1)
+    const g = gate()
+    const started: string[] = []
+    const run = (owner: string, name: string, hold?: ReturnType<typeof gate>) =>
+      semaphore.run(async () => {
+        started.push(name)
+        await hold?.opened
+      }, owner)
+    const tasks = [run('a', 'a1', g), run('a', 'a2'), run('a', 'a3')]
+    // a2 and a3 wait; `b` arrives after a2 has been queued and must go before a3
+    tasks.push(run('b', 'b1'))
+    g.open()
+    await Promise.all(tasks)
+    expect(started).toEqual(['a1', 'a2', 'b1', 'a3'])
+  })
 })

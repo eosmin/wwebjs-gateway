@@ -10,9 +10,13 @@ import { type Observable, TimeoutError, catchError, throwError, timeout } from '
 import { APP_CONFIG } from '../../config/config.module.js'
 import type { AppConfig } from '../../config/env.schema.js'
 import { WhatsAppError } from '../errors.js'
+import { LONG_CALL_TIMEOUT_MS } from '../lib/call-limits.js'
 
-// The calls that wait on WhatsApp enforce their own limits (WA_CALL_TIMEOUT_MS, SEND_SYNC_TIMEOUT_MS) and
-// answer with a precise error. This is the backstop behind them, so it waits a little longer.
+// The calls that wait on WhatsApp enforce their own limits (WA_CALL_TIMEOUT_MS, the adapter's deadline
+// for long calls, SEND_SYNC_TIMEOUT_MS) and answer with a precise error. This is the backstop behind
+// all of them, so it waits a little longer than the longest: a call the adapter still allows (a group
+// with many participants takes up to 120 s) is never cut short by a status that hides its outcome.
+// A Redis that is down no longer reaches it: the send queue refuses at once (QUEUE_UNAVAILABLE).
 const GRACE_MS = 5000
 
 @Injectable()
@@ -20,7 +24,9 @@ export class TimeoutInterceptor implements NestInterceptor {
   private readonly limitMs: number
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
-    this.limitMs = Math.max(config.WA_CALL_TIMEOUT_MS, config.SEND_SYNC_TIMEOUT_MS) + GRACE_MS
+    this.limitMs =
+      Math.max(config.WA_CALL_TIMEOUT_MS, LONG_CALL_TIMEOUT_MS, config.SEND_SYNC_TIMEOUT_MS) +
+      GRACE_MS
   }
 
   // The handler cannot be cancelled, so it keeps running after the answer: only the wait ends

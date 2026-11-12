@@ -25,7 +25,8 @@ const decodedSize = (base64: string): number => {
 // Gets the bytes of the media of a send from wherever the request says they are
 @Injectable()
 export class MediaResolverService {
-  // Each download can hold the file several times over while it is converted, so they take turns
+  // Each download can hold the file several times over while it is converted, so they take turns, and
+  // the turns are shared between the sessions: one with a long line cannot keep the others waiting
   private readonly downloads: Semaphore
 
   constructor(
@@ -37,7 +38,7 @@ export class MediaResolverService {
 
   async resolve(sessionId: string, source: MediaSource): Promise<OutboundMedia> {
     if ('base64' in source) return this.inline(source)
-    if ('url' in source) return this.fromUrl(source)
+    if ('url' in source) return this.fromUrl(sessionId, source)
     return this.fromMessage(sessionId, source.messageId)
   }
 
@@ -65,16 +66,21 @@ export class MediaResolverService {
   }
 
   // The SSRF guard, the size cap and the timeout live in the download itself
-  private async fromUrl(source: Extract<MediaSource, { url: string }>): Promise<OutboundMedia> {
-    const file = await this.downloads.run(() =>
-      downloadPublicFile(source.url, {
-        policy: {
-          privateHostAllowlist: this.config.WEBHOOK_PRIVATE_HOST_ALLOWLIST,
-          allowPrivate: this.config.ALLOW_PRIVATE_WEBHOOK_TARGETS
-        },
-        maxBytes: this.config.MAX_MEDIA_BYTES,
-        timeoutMs: this.config.MEDIA_FETCH_TIMEOUT_MS
-      })
+  private async fromUrl(
+    sessionId: string,
+    source: Extract<MediaSource, { url: string }>
+  ): Promise<OutboundMedia> {
+    const file = await this.downloads.run(
+      () =>
+        downloadPublicFile(source.url, {
+          policy: {
+            privateHostAllowlist: this.config.WEBHOOK_PRIVATE_HOST_ALLOWLIST,
+            allowPrivate: this.config.ALLOW_PRIVATE_WEBHOOK_TARGETS
+          },
+          maxBytes: this.config.MAX_MEDIA_BYTES,
+          timeoutMs: this.config.MEDIA_FETCH_TIMEOUT_MS
+        }),
+      sessionId
     )
     const mimetype = resolveMimetype(file.contentType, file.data)
     if (mimetype === undefined) {
@@ -94,7 +100,7 @@ export class MediaResolverService {
   private async fromMessage(sessionId: string, messageId: string): Promise<OutboundMedia> {
     // The browser hands the whole file over as base64, so it takes its turn like a download
     const client = this.sessions.requireReady(sessionId)
-    const media = await this.downloads.run(() => client.downloadMedia(messageId))
+    const media = await this.downloads.run(() => client.downloadMedia(messageId), sessionId)
     if (media === null) {
       throw new NotFoundError('NOT_FOUND', `Message ${messageId} has no media available`)
     }

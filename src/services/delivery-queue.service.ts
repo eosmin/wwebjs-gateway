@@ -114,6 +114,11 @@ export class DeliveryQueueService implements OnModuleDestroy {
     if (data.deliveryId === '' || /[_:]/.test(data.deliveryId)) {
       throw new Error('The delivery id cannot be used in the id of a job')
     }
+    // The add of a job would wait in the offline queue of the connection and go out when Redis is back,
+    // long after the caller was told it failed (the delivery is marked failed and the job runs anyway)
+    if (this.redis.client.status !== 'ready') {
+      throw new Error('The delivery queue (Redis) is not connected')
+    }
     const credential = REDACTED_EVENTS.includes(data.envelope.event)
     const failedKept = credential
       ? CREDENTIAL_KEPT_SECONDS

@@ -15,6 +15,7 @@ import wwebjs, {
 } from 'whatsapp-web.js'
 import { z } from 'zod'
 
+import { LONG_CALL_TIMEOUT_MS } from '../common/lib/call-limits.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { processTreeRssBytes } from '../infra/process/process-memory.js'
 import type {
@@ -157,7 +158,6 @@ const CHROMIUM_ARGS = [
 ]
 
 // Sending and moving media take longer than a query (TDD §6.3)
-const LONG_CALL_TIMEOUT_MS = 180_000
 const LONG_CALLS: ReadonlySet<string> = new Set([
   'sendMessage',
   'sendChannelMessage',

@@ -157,6 +157,35 @@ describe('MediaResolverService', () => {
     expect(peak).toBe(2)
   })
 
+  it('shares the turns between sessions: a session with a long line does not starve another', async () => {
+    const order: string[] = []
+    const release: (() => void)[] = []
+    jest.spyOn(download, 'downloadPublicFile').mockImplementation(async url => {
+      order.push(url.split('/').pop() ?? '')
+      await new Promise<void>(resolve => release.push(resolve))
+      return { data: Buffer.from('x'), contentType: 'image/png' }
+    })
+    const resolver = build()
+    const pending = [
+      ...Array.from({ length: 5 }, (_, n) =>
+        resolver.resolve('busy', { url: `https://cdn.example.com/busy${n}` })
+      ),
+      resolver.resolve('quiet', { url: 'https://cdn.example.com/quiet' })
+    ]
+    // Two run (busy0, busy1); every finished download frees a turn
+    let settled = false
+    void Promise.all(pending).then(() => {
+      settled = true
+    })
+    while (!settled) {
+      await new Promise(resolve => setImmediate(resolve))
+      release.shift()?.()
+    }
+
+    // First come two of busy, then the turns alternate: quiet is fourth, where a plain line made it sixth
+    expect(order.indexOf('quiet')).toBe(3)
+  })
+
   it('reuses the media of another message, and 404s when it is gone', async () => {
     const downloadMedia = jest
       .fn()
