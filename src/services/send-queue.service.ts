@@ -5,12 +5,12 @@ import { DelayedError, Queue, Worker, type Job } from 'bullmq'
 
 import { NotFoundError } from '../common/errors.js'
 import { abortableSleep } from '../common/lib/abortable-sleep.js'
-import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { IdempotencyRepository } from '../database/repositories/idempotency.repository.js'
 import { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
+import { closeQueue, closeWorker } from '../infra/redis/bullmq-close.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 import { EventPipelineService } from '../whatsapp/event-pipeline.service.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
@@ -305,10 +305,8 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     lane.abort.abort()
     if (lane.breakerTimer) clearTimeout(lane.breakerTimer)
     // close() waits for the job in hand; a job stuck in WhatsApp must not hold the shutdown forever
-    await withTimeout(lane.worker.close(), CLOSE_TIMEOUT_MS, 'send worker close').catch(() =>
-      lane.worker.close(true)
-    )
-    await lane.queue.close()
+    await closeWorker(lane.worker, this.redis.client, CLOSE_TIMEOUT_MS, 'send worker close')
+    await closeQueue(lane.queue, this.redis.client, 'send queue close')
     this.settledLanes.delete(lane.sessionId)
     this.notifyQueuesChanged()
   }

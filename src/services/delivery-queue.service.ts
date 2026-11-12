@@ -6,6 +6,7 @@ import { z } from 'zod'
 
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
+import { closeQueue } from '../infra/redis/bullmq-close.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 
 import { REDACTED_EVENTS } from './webhook-payload.js'
@@ -183,8 +184,9 @@ export class DeliveryQueueService implements OnModuleDestroy {
 
   // Before Redis closes
   async onModuleDestroy(): Promise<void> {
-    await this.queue?.close()
+    const queue = this.queue
     this.queue = undefined
+    if (queue !== undefined) await closeQueue(queue, this.redis.client, 'delivery queue close')
   }
 
   private open(): Queue<DeliveryJobData> {

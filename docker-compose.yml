@@ -38,7 +38,8 @@ services:
 
   api:
     build: .
-    # The values of .env.example, except where the services are reached by name
+    # The values of .env.example (NODE_ENV=development, so the placeholders are accepted), except where
+    # the services are reached by name. The image has no pino-pretty, so the logs are JSON.
     env_file: .env.example
     environment:
       DATABASE_URL: postgresql://gateway:gateway@postgres:5432/gateway

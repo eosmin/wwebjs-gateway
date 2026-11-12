@@ -10,9 +10,10 @@ const valid = {
 
 // Every default of TDD §6.15, so that a typo in any of them fails here
 const DEFAULTS = {
-  NODE_ENV: 'development',
+  NODE_ENV: 'production',
   HOST: '0.0.0.0',
   PORT: 3000,
+  REDIS_CONNECT_TIMEOUT_MS: 15000,
   LOG_LEVEL: 'info',
   API_KEY_ROTATION_GRACE_MINUTES: 10,
   API_KEY_MAX_TTL_DAYS: 0,
@@ -373,6 +374,27 @@ describe('envSchema bounds and edges', () => {
       'METRICS_TOKEN'
     ],
     [
+      'a placeholder key when NODE_ENV is unset',
+      { ADMIN_API_KEY: `replace-this-${'a'.repeat(32)}` },
+      'ADMIN_API_KEY'
+    ],
+    ['the docs on in production', { NODE_ENV: 'production', ENABLE_DOCS: 'true' }, 'ENABLE_DOCS'],
+    [
+      'a wildcard CORS origin in production',
+      { NODE_ENV: 'production', CORS_ORIGINS: 'https://a.test, *' },
+      'CORS_ORIGINS'
+    ],
+    [
+      'an IPv4 allowlist that covers everything in production',
+      { NODE_ENV: 'production', WEBHOOK_PRIVATE_HOST_ALLOWLIST: 'bot,0.0.0.0/0' },
+      'WEBHOOK_PRIVATE_HOST_ALLOWLIST'
+    ],
+    [
+      'an IPv6 allowlist that covers everything in production',
+      { NODE_ENV: 'production', WEBHOOK_PRIVATE_HOST_ALLOWLIST: '::/0' },
+      'WEBHOOK_PRIVATE_HOST_ALLOWLIST'
+    ],
+    [
       'private webhook targets allowed in production',
       { NODE_ENV: 'production', ALLOW_PRIVATE_WEBHOOK_TARGETS: 'true' },
       'ALLOW_PRIVATE_WEBHOOK_TARGETS'
@@ -395,6 +417,7 @@ describe('envSchema bounds and edges', () => {
     expect(
       envSchema.safeParse({
         ...valid,
+        NODE_ENV: 'development',
         ADMIN_API_KEY: `replace-this-${'a'.repeat(32)}`,
         METRICS_TOKEN: 'replace-this-token-with-a-random-one'
       }).success
@@ -417,6 +440,32 @@ describe('envSchema bounds and edges', () => {
     ).toBe(true)
   })
 
+  it('accepts open docs, CORS and allowlists outside production, and narrow ones in production', () => {
+    const open = {
+      ENABLE_DOCS: 'true',
+      CORS_ORIGINS: '*',
+      WEBHOOK_PRIVATE_HOST_ALLOWLIST: '0.0.0.0/0'
+    }
+    for (const NODE_ENV of ['development', 'test']) {
+      expect(envSchema.safeParse({ ...valid, NODE_ENV, ...open }).success).toBe(true)
+    }
+    expect(
+      envSchema.safeParse({
+        ...valid,
+        NODE_ENV: 'production',
+        ENABLE_DOCS: 'false',
+        CORS_ORIGINS: 'https://app.example.com',
+        WEBHOOK_PRIVATE_HOST_ALLOWLIST: '10.0.0.0/8,fd00::/8'
+      }).success
+    ).toBe(true)
+  })
+
+  it('treats an unset or empty NODE_ENV as production', () => {
+    expect(parseEnv({ ...valid, NODE_ENV: undefined }).NODE_ENV).toBe('production')
+    expect(parseEnv({ ...valid, NODE_ENV: '' }).NODE_ENV).toBe('production')
+    expect(parseEnv({ ...valid, NODE_ENV: undefined }).ENABLE_DOCS).toBe(false)
+  })
+
   it('accepts a placeholder-free production environment without METRICS_TOKEN', () => {
     expect(
       envSchema.safeParse({ ...valid, NODE_ENV: 'production', METRICS_TOKEN: undefined }).success
@@ -437,8 +486,11 @@ describe('parseEnv', () => {
   })
 
   it('lets ENABLE_DOCS override the default of the mode', () => {
-    expect(parseEnv({ ...valid, NODE_ENV: 'production', ENABLE_DOCS: 'true' }).ENABLE_DOCS).toBe(
-      true
+    expect(parseEnv({ ...valid, NODE_ENV: 'development', ENABLE_DOCS: 'false' }).ENABLE_DOCS).toBe(
+      false
+    )
+    expect(() => parseEnv({ ...valid, NODE_ENV: 'production', ENABLE_DOCS: 'true' })).toThrow(
+      /ENABLE_DOCS: must not be true in production/
     )
   })
 
