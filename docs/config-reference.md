@@ -6,22 +6,23 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 
 | Variable | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `NODE_ENV` | `development`, `test`, `production` | no | `development` | Runtime mode |
+| `NODE_ENV` | `development`, `test`, `production` | no | `production` | Runtime mode. Unset or empty means production, so a deployment that forgets it gets the strict checks instead of the development ones; set development for a local run |
 | `HOST` | string, 1 character or more | no | `0.0.0.0` | Interface the HTTP server binds to |
 | `PORT` | integer, 1 to 65535 | no | `3000` | Port the HTTP server listens on |
 | `PUBLIC_BASE_URL` | URL | yes |  | Public URL of the gateway, used to build absolute links |
 | `LOG_LEVEL` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` | no | `info` | Minimum level written by the logger |
 | `DATABASE_URL` | URL | yes |  | PostgreSQL connection string |
 | `REDIS_URL` | URL | yes |  | Redis connection string |
+| `REDIS_CONNECT_TIMEOUT_MS` | integer, 1 or more | no | `15000` | Milliseconds the gateway waits for Redis at start before it exits with an error; once it runs, a lost connection is retried without a limit |
 | `ADMIN_API_KEY` | string, 32 characters or more | yes |  | Admin API key, 32 characters or more (stored only as a hash) |
 | `METRICS_TOKEN` | string, 32 characters or more | no |  | Bearer token, 32 characters or more, that grants access to GET /metrics; when unset, only an admin key can read it |
 | `API_KEY_ROTATION_GRACE_MINUTES` | integer, 0 or more | no | `10` | Minutes the previous API key keeps working after a rotation |
 | `API_KEY_MAX_TTL_DAYS` | integer, 0 or more | no | `0` | Longest lifetime in days an API key may be given; 0 means no cap |
 | `TRUST_PROXY_HOPS` | integer, 0 or more | no | `0` | Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP; behind a proxy it must be set, or every client shares the proxy address and its rate limit |
 | `BULL_BOARD_ENABLED` | `true`, `false` | no | `false` | Serve the BullMQ dashboard to admin keys |
-| `CORS_ORIGINS` | string | no |  | Comma-separated origins allowed by CORS and Socket.IO |
+| `CORS_ORIGINS` | string | no |  | Comma-separated origins allowed by CORS and Socket.IO; a * is refused in production |
 | `RATE_LIMIT_MAX` | integer, 1 or more | no | `300` | Requests per minute allowed per API key and, separately, per client address |
-| `ENABLE_DOCS` | `true`, `false` | no |  | Serve Swagger UI and the OpenAPI JSON; when unset, true except in production |
+| `ENABLE_DOCS` | `true`, `false` | no |  | Serve Swagger UI and the OpenAPI JSON; when unset, true except in production, where true is refused |
 | `WWEBJS_DATA_PATH` | string, 1 character or more | no | `./.wwebjs_auth` | Folder where whatsapp-web.js keeps the authenticated sessions. It is created if missing and tested for writing at boot: the gateway does not start when it cannot be used, and /ready goes 503 if it stops being writable |
 | `PUPPETEER_EXECUTABLE_PATH` | string, 1 character or more | no |  | Chromium or Chrome binary. Set it: the install does not download one (puppeteer build scripts are off), so a session cannot start without it |
 | `WWEB_VERSION` | string, 1 character or more | no |  | Pins the WhatsApp Web version; when unset, the live latest build |
@@ -95,7 +96,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `WEBHOOK_BACKOFF_MS` | integer, 1 or more | no | `5000` | Milliseconds before the first webhook retry; later retries back off exponentially |
 | `WEBHOOK_WORKER_CONCURRENCY` | integer, 1 or more | no | `10` | Webhook deliveries in parallel |
 | `WEBHOOK_INLINE_MEDIA_MAX_BYTES` | integer, 0 or more | no | `5242880` | Largest media in bytes a webhook carries inline; larger media goes by URL |
-| `WEBHOOK_PRIVATE_HOST_ALLOWLIST` | string | no |  | Comma-separated hosts exempt from the private-address check of webhook URLs |
+| `WEBHOOK_PRIVATE_HOST_ALLOWLIST` | string | no |  | Comma-separated hosts exempt from the private-address check of webhook URLs; a range that covers every address (0.0.0.0/0, ::/0) is refused in production |
 | `ALLOW_PRIVATE_WEBHOOK_TARGETS` | `true`, `false` | no | `false` | Allow webhook URLs that resolve to private addresses; development only, refused in production |
 | `CALL_CACHE_SIZE` | integer, 1 or more | no | `50` | Recent calls kept in memory to reject them |
 | `DELIVERY_RETENTION_DAYS` | integer, 1 or more | no | `14` | Days webhook deliveries are kept before they are deleted |

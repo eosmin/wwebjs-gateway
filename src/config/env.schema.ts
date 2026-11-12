@@ -61,13 +61,19 @@ const list = () =>
 // The repository is public: the secrets of .env.example are known to everyone
 const PLACEHOLDER_PREFIX = 'replace-this-'
 
+function coversEveryAddress(entry: string): boolean {
+  return /\/0+$/.test(entry)
+}
+
 export const envSchema = z
   .object({
     // Core
     NODE_ENV: z
       .enum(['development', 'test', 'production'])
-      .default('development')
-      .describe('Runtime mode'),
+      .default('production')
+      .describe(
+        'Runtime mode. Unset or empty means production, so a deployment that forgets it gets the strict checks instead of the development ones; set development for a local run'
+      ),
     HOST: z.string().min(1).default('0.0.0.0').describe('Interface the HTTP server binds to'),
     PORT: count(3000, { min: 1, max: 65535 }).describe('Port the HTTP server listens on'),
     PUBLIC_BASE_URL: z
@@ -79,6 +85,9 @@ export const envSchema = z
       .describe('Minimum level written by the logger'),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }).describe('PostgreSQL connection string'),
     REDIS_URL: z.url({ protocol: /^rediss?$/ }).describe('Redis connection string'),
+    REDIS_CONNECT_TIMEOUT_MS: count(15000, { min: 1 }).describe(
+      'Milliseconds the gateway waits for Redis at start before it exits with an error; once it runs, a lost connection is retried without a limit'
+    ),
     ADMIN_API_KEY: z
       .string()
       .trim()
@@ -100,12 +109,14 @@ export const envSchema = z
       'Reverse proxies whose X-Forwarded-For is trusted when resolving the client IP; behind a proxy it must be set, or every client shares the proxy address and its rate limit'
     ),
     BULL_BOARD_ENABLED: flag(false).describe('Serve the BullMQ dashboard to admin keys'),
-    CORS_ORIGINS: list().describe('Comma-separated origins allowed by CORS and Socket.IO'),
+    CORS_ORIGINS: list().describe(
+      'Comma-separated origins allowed by CORS and Socket.IO; a * is refused in production'
+    ),
     RATE_LIMIT_MAX: count(300, { min: 1 }).describe(
       'Requests per minute allowed per API key and, separately, per client address'
     ),
     ENABLE_DOCS: optionalFlag().describe(
-      'Serve Swagger UI and the OpenAPI JSON; when unset, true except in production'
+      'Serve Swagger UI and the OpenAPI JSON; when unset, true except in production, where true is refused'
     ),
 
     // WhatsApp
@@ -331,7 +342,9 @@ export const envSchema = z
       .refine(items => items.every(isValidAllowlistEntry), {
         message: 'Every entry must be a hostname, an IP address or a CIDR such as 10.0.0.0/8'
       })
-      .describe('Comma-separated hosts exempt from the private-address check of webhook URLs'),
+      .describe(
+        'Comma-separated hosts exempt from the private-address check of webhook URLs; a range that covers every address (0.0.0.0/0, ::/0) is refused in production'
+      ),
     ALLOW_PRIVATE_WEBHOOK_TARGETS: flag(false).describe(
       'Allow webhook URLs that resolve to private addresses; development only, refused in production'
     ),
@@ -398,6 +411,25 @@ export const envSchema = z
     error:
       'must not be true in production: list the private targets in WEBHOOK_PRIVATE_HOST_ALLOWLIST'
   })
+  // The docs list every route and its schemas, and CLAUDE.md keeps them off in production
+  .refine(env => env.NODE_ENV !== 'production' || env.ENABLE_DOCS !== true, {
+    path: ['ENABLE_DOCS'],
+    error: 'must not be true in production: the API documentation stays private'
+  })
+  .refine(env => env.NODE_ENV !== 'production' || !env.CORS_ORIGINS.includes('*'), {
+    path: ['CORS_ORIGINS'],
+    error: 'must not contain * in production: list the origins that may call the gateway'
+  })
+  // A /0 range would turn the allowlist into "any private or internal address", which is what the
+  // SSRF guard exists to stop
+  .refine(
+    env =>
+      env.NODE_ENV !== 'production' || !env.WEBHOOK_PRIVATE_HOST_ALLOWLIST.some(coversEveryAddress),
+    {
+      path: ['WEBHOOK_PRIVATE_HOST_ALLOWLIST'],
+      error: 'must not contain a range that covers every address (a /0 prefix) in production'
+    }
+  )
   .refine(env => env.INBOUND_ORDER_MAX_HOLD_MS >= env.INBOUND_ORDER_WINDOW_MS, {
     path: ['INBOUND_ORDER_MAX_HOLD_MS'],
     error: 'must not be shorter than INBOUND_ORDER_WINDOW_MS'
@@ -408,7 +440,8 @@ type ParsedEnv = z.output<typeof envSchema>
 // The environment as the rest of the code reads it: ENABLE_DOCS is always resolved
 export type AppConfig = Omit<ParsedEnv, 'ENABLE_DOCS'> & { ENABLE_DOCS: boolean }
 
-// A variable set to an empty value (`FOO=`) counts as unset: z.coerce.number() would read it as 0
+// A variable set to an empty value (`FOO=`) counts as unset: z.coerce.number() would read it as 0.
+// So an empty NODE_ENV is unset, and unset means production.
 export function parseEnv(raw: Record<string, unknown>): AppConfig {
   const present = Object.entries(raw).filter(
     ([, value]) => typeof value !== 'string' || value.trim() !== ''

@@ -200,6 +200,8 @@ jobs:
           node-version-file: .nvmrc
       # The scan reads the OS and the base image; run the image too, in the mode it has where deployed:
       # production, where the docs are off. The gateway listens on PORT, which .env.example sets to 3000.
+      # Production refuses the placeholders of .env.example, so the two secrets are random; CORS and the
+      # allowlist keep the narrow values of the file (a wildcard or a /0 range would be refused).
       - name: The image starts and answers
         run: |
           export METRICS_TOKEN="$(openssl rand -hex 24)"
