@@ -40,7 +40,10 @@ export class MessagesService {
   }
 
   async get(sessionId: string, messageId: string): Promise<MessageDto> {
-    return this.found(await this.client(sessionId).getMessageById(messageId), messageId)
+    return this.found(
+      await this.client(sessionId).getMessageById(messageId),
+      `Message ${messageId} does not exist`
+    )
   }
 
   async search(
@@ -73,7 +76,10 @@ export class MessagesService {
   }
 
   async quoted(sessionId: string, messageId: string): Promise<MessageDto> {
-    return this.found(await this.client(sessionId).getQuotedMessage(messageId), messageId)
+    return this.found(
+      await this.client(sessionId).getQuotedMessage(messageId),
+      `Message ${messageId} does not quote another message`
+    )
   }
 
   mentions(sessionId: string, messageId: string): Promise<AnyContactDto[]> {
@@ -85,15 +91,24 @@ export class MessagesService {
   }
 
   async info(sessionId: string, messageId: string): Promise<MessageInfoDto> {
-    return this.found(await this.client(sessionId).getMessageInfo(messageId), messageId)
+    return this.found(
+      await this.client(sessionId).getMessageInfo(messageId),
+      `Message ${messageId} has no delivery info (only messages sent by the account have it)`
+    )
   }
 
-  order(sessionId: string, messageId: string): Promise<OrderDto> {
-    return this.client(sessionId).getMessageOrder(messageId)
+  async order(sessionId: string, messageId: string): Promise<OrderDto> {
+    return this.found(
+      await this.client(sessionId).getMessageOrder(messageId),
+      `Message ${messageId} is not an order`
+    )
   }
 
-  payment(sessionId: string, messageId: string): Promise<PaymentDto> {
-    return this.client(sessionId).getMessagePayment(messageId)
+  async payment(sessionId: string, messageId: string): Promise<PaymentDto> {
+    return this.found(
+      await this.client(sessionId).getMessagePayment(messageId),
+      `Message ${messageId} is not a payment`
+    )
   }
 
   reactions(sessionId: string, messageId: string): Promise<ReactionListDto[]> {
@@ -162,8 +177,9 @@ export class MessagesService {
     return this.sessions.requireReady(sessionId)
   }
 
-  private found<T>(value: T | null, messageId: string): T {
-    if (value === null) throw new NotFoundError('NOT_FOUND', `Message ${messageId} does not exist`)
+  // The message exists (the adapter already looked it up): null means it has no such part
+  private found<T>(value: T | null, missing: string): T {
+    if (value === null) throw new NotFoundError('NOT_FOUND', missing)
     return value
   }
 }

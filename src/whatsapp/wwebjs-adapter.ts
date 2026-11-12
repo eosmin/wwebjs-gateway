@@ -1093,21 +1093,24 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     })
   }
 
-  getMessageOrder(messageId: string): Promise<OrderDto> {
+  getMessageOrder(messageId: string): Promise<OrderDto | null> {
     return this.run('getMessageOrder', async () => {
       const order = await (await this.messageById('getMessageOrder', messageId)).getOrder()
-      return mapping(() => mapOrder(order))
+      // wwebjs answers undefined for a message that is not an order
+      return mapping(() => (order ? mapOrder(order) : null))
     })
   }
 
-  getMessagePayment(messageId: string): Promise<PaymentDto> {
+  getMessagePayment(messageId: string): Promise<PaymentDto | null> {
     return this.run('getMessagePayment', async () => {
       const payment = await (await this.messageById('getMessagePayment', messageId)).getPayment()
+      // wwebjs answers undefined for a message that is not a payment
+      if (!payment) return null
       return mapping(() =>
         mapPayment({
           ...payment,
           id: toIdLike(payment.id),
-          paymentMessageReceiverJid: toIdLike(payment.paymentMessageReceiverJid)
+          paymentMessageReceiverJid: toIdLikeOrNull(payment.paymentMessageReceiverJid)
         })
       )
     })
@@ -1448,7 +1451,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
         requests.map(request =>
           mapMembershipRequest({
             id: toIdLike(request.id),
-            addedBy: toIdLike(request.addedBy),
+            addedBy: toIdLikeOrNull(request.addedBy),
             parentGroupId: toIdLikeOrNull(request.parentGroupId),
             requestMethod: request.requestMethod,
             t: request.t

@@ -583,7 +583,8 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     try {
       const info = await withTimeout(client.getClientInfo(), CALL_TIMEOUT_MS, 'getClientInfo')
       patch.phoneNumber = info.wid.split('@')[0] ?? null
-      patch.pushName = info.pushname
+      // An account that has no push name keeps the one the row has
+      if (info.pushname !== undefined) patch.pushName = info.pushname
     } catch (error: unknown) {
       this.logger.warn(`[${id}] Reading the account failed (${errorKind(error)})`)
     }

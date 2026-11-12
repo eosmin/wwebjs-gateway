@@ -49,7 +49,7 @@ import { SessionIdParamsDto } from '../../types/sessions.dto.js'
 import { requestSchemaOf } from '../request-schema.js'
 import { WaOperation } from '../wa-operation.decorator.js'
 
-import { SEND_ERRORS, idempotencyKeyOf, sendAnswer } from './send-answer.js'
+import { SEND_ERRORS, idempotencyKeyOf, readableMessage, sendAnswer } from './send-answer.js'
 
 const MESSAGE_ID = 'false_5215500000001@c.us_3EB0C767D0F2A2B91F42'
 const MESSAGE_EXAMPLE = {
@@ -188,8 +188,8 @@ export class MessagesController {
     wwebjs: [],
     gateway: true
   })
-  sendJob(@Param() { sessionId, jobId }: SessionJobParamsDto): Promise<SendJobDto> {
-    return this.messages.sendJob(sessionId, jobId)
+  async sendJob(@Param() { sessionId, jobId }: SessionJobParamsDto): Promise<SendJobDto> {
+    return readableMessage(await this.messages.sendJob(sessionId, jobId))
   }
 
   // ---- Reading ---------------------------------------------------------------------------------
@@ -370,7 +370,8 @@ export class MessagesController {
     id: 'messages.order',
     scope: 'read',
     summary: 'Read the order of an order message',
-    description: 'The products and totals of a message that carries an order.',
+    description:
+      'The products and totals of a message that carries an order. Answers 404 when the message is not an order.',
     errors: ON_MESSAGE,
     examples: {
       request: null,
@@ -388,7 +389,8 @@ export class MessagesController {
     id: 'messages.payment',
     scope: 'read',
     summary: 'Read the payment of a payment message',
-    description: 'The amount and status of a message that carries a payment.',
+    description:
+      'The amount and status of a message that carries a payment. Answers 404 when the message is not a payment.',
     errors: ON_MESSAGE,
     examples: {
       request: null,

@@ -591,6 +591,19 @@ describe('calls', () => {
     await expect(h.adapter.starMessage('x')).rejects.toBeInstanceOf(WaOperationError)
   })
 
+  it('answers null for the order or payment of a message that is neither (wwebjs answers undefined)', async () => {
+    const h = harness()
+    const message = {
+      getOrder: jest.fn().mockResolvedValue(undefined),
+      getPayment: jest.fn().mockResolvedValue(undefined)
+    }
+    stub(h.client, 'getMessageById').mockResolvedValue(message)
+    ready(h)
+
+    await expect(h.adapter.getMessageOrder('m1')).resolves.toBeNull()
+    await expect(h.adapter.getMessagePayment('m1')).resolves.toBeNull()
+  })
+
   it('answers null for media that is gone', async () => {
     const h = harness()
     const message = { downloadMedia: jest.fn().mockResolvedValue(undefined) }

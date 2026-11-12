@@ -1,8 +1,9 @@
-import { HttpStatus } from '@nestjs/common'
+import { HttpStatus, Logger } from '@nestjs/common'
 import type { FastifyReply } from 'fastify'
 
 import { AppError, type ErrorCode, ValidationError } from '../../common/errors.js'
 import type { SendResult } from '../../services/message-send.service.js'
+import { MessageDto } from '../../types/dto.js'
 import { IdempotencyKeyHeader, type SendJobDto } from '../../types/messages.dto.js'
 
 // The errors every send route can answer
@@ -42,6 +43,25 @@ export const idempotencyKeyOf = (header: string | undefined): string | undefined
   return parsed.data
 }
 
+const logger = new Logger('SendAnswer')
+
+// The message of a send that went out is shown only when it fits its schema. A response that fails
+// its schema becomes a 500, and a 500 after the message was sent makes the caller retry and send it
+// twice, so a message that cannot be read is left out (and logged, by field, never by value) and the
+// job still says `sent`. The message stays readable through the stored messages and the events.
+export function readableMessage<T extends { jobId: string; message?: MessageDto | undefined }>(
+  job: T
+): T {
+  if (job.message === undefined) return job
+  const parsed = MessageDto.safeParse(job.message)
+  if (parsed.success) return job
+  const fields = parsed.error.issues.map(issue => issue.path.join('.')).join(', ')
+  logger.error(`The message of send job ${job.jobId} does not fit its schema (${fields}); left out`)
+  const rest: Partial<T> = { ...job }
+  delete rest.message
+  return rest as T
+}
+
 // The answer of every send route: 201 with the message when it went out, 202 with the job when it is
 // still queued, and the error of the job when it failed
 export function sendAnswer(result: SendResult, reply: FastifyReply): SendJobDto {
@@ -54,9 +74,9 @@ export function sendAnswer(result: SendResult, reply: FastifyReply): SendJobDto 
   if (!outcome.ok) {
     throw new AppError(outcome.error.code, outcome.error.message, outcome.error.details)
   }
-  return {
+  return readableMessage({
     jobId,
     status: 'sent',
     ...(outcome.message !== undefined && { message: outcome.message })
-  }
+  })
 }

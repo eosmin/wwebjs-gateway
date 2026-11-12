@@ -564,7 +564,7 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | --- | --- | --- | --- |
 | `id` | string | yes |  |
 | `from` | string | no |  |
-| `timestamp` | integer | yes |  |
+| `timestamp` | integer | no |  |
 | `isVideo` | boolean | yes |  |
 | `isGroup` | boolean | yes |  |
 | `fromMe` | boolean | yes |  |
@@ -575,7 +575,6 @@ The data types that events carry. The others (contacts, channels, labels…) are
 ```json
 {
   "id": "string",
-  "timestamp": 0,
   "isVideo": false,
   "isGroup": false,
   "fromMe": false,
@@ -593,8 +592,8 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | `isGroup` | boolean | yes |  |
 | `isReadOnly` | boolean | yes |  |
 | `isMuted` | boolean | yes |  |
-| `muteExpiration` | integer | yes |  |
-| `name` | string | yes |  |
+| `muteExpiration` | integer | no |  |
+| `name` | string | no |  |
 | `timestamp` | integer or null | yes | Unix seconds; null when WhatsApp gave none |
 | `unreadCount` | integer | yes |  |
 | `lastMessage` | [MessageDto](#messagedto) | no |  |
@@ -608,8 +607,6 @@ The data types that events carry. The others (contacts, channels, labels…) are
   "isGroup": false,
   "isReadOnly": false,
   "isMuted": false,
-  "muteExpiration": 0,
-  "name": "string",
   "timestamp": 0,
   "unreadCount": 0,
   "pinned": false,
@@ -622,23 +619,21 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | string | yes |  |
-| `author` | string | yes |  |
+| `author` | string | no |  |
 | `body` | string | yes |  |
 | `chatId` | string | yes |  |
 | `recipientIds` | string[] | yes |  |
-| `timestamp` | integer | yes |  |
+| `timestamp` | integer | no |  |
 | `type` | string | yes | add, invite, remove, leave, promote, demote, subject, description, picture, announce or restrict |
 
 ```json
 {
   "id": "string",
-  "author": "string",
   "body": "string",
   "chatId": "string",
   "recipientIds": [
     "string"
   ],
-  "timestamp": 0,
   "type": "string"
 }
 ```
@@ -668,8 +663,8 @@ The data types that events carry. The others (contacts, channels, labels…) are
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `latitude` | string | yes |  |
-| `longitude` | string | yes |  |
+| `latitude` | number | yes | Degrees; wwebjs types it string but delivers a number |
+| `longitude` | number | yes | Degrees; wwebjs types it string but delivers a number |
 | `name` | string | no |  |
 | `address` | string | no |  |
 | `url` | string | no |  |
@@ -677,8 +672,8 @@ The data types that events carry. The others (contacts, channels, labels…) are
 
 ```json
 {
-  "latitude": "string",
-  "longitude": "string"
+  "latitude": 0,
+  "longitude": 0
 }
 ```
 
@@ -871,21 +866,18 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | `id` | string | yes |  |
 | `orphan` | integer | yes |  |
 | `orphanReason` | string | no |  |
-| `timestamp` | integer | yes |  |
-| `reaction` | string | yes |  |
+| `timestamp` | integer | no |  |
+| `reaction` | string | no |  |
 | `read` | boolean | yes |  |
 | `msgId` | string | yes |  |
-| `senderId` | string | yes |  |
+| `senderId` | string | no |  |
 | `ack` | integer | no |  |
 
 ```json
 {
   "id": "string",
   "orphan": 0,
-  "timestamp": 0,
-  "reaction": "string",
   "read": false,
-  "msgId": "string",
-  "senderId": "string"
+  "msgId": "string"
 }
 ```

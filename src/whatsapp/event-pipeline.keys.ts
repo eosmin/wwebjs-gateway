@@ -21,7 +21,7 @@ export function dedupeSuffix(event: ClientEvent): string | undefined {
     case 'message_edit':
       return `${event.data.message.id}:${shortHash(event.data.newBody)}`
     case 'message_reaction':
-      return `${event.data.msgId}:${event.data.id}:${shortHash(event.data.reaction)}`
+      return `${event.data.msgId}:${event.data.id}:${shortHash(event.data.reaction ?? '')}`
     default:
       return undefined
   }

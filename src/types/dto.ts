@@ -6,7 +6,10 @@ import { z } from 'zod'
 // never inlined here. A DTO has the id of its schema in `meta`, so the generated docs name it.
 // wwebjs types some fields as always there although it only fills them for some kinds of message
 // (polls, events, orders) or for some business profiles: those are optional here, so that a real
-// object never fails its own schema.
+// object never fails its own schema. The rule for the response DTOs: required are the `id`s, what the
+// gateway or the wwebjs structure fills with a default (`body || ''`, `recipientIds = []`), and what
+// is derived; every other field wwebjs copies as it comes (`this.x = data.x`) can be missing, so it is
+// optional. docs/adr/0006 lists the audit.
 
 const dto = <T extends z.ZodRawShape>(id: string, shape: T) => z.object(shape).meta({ id })
 
@@ -35,8 +38,8 @@ export type SessionStatus = z.infer<typeof SessionStatus>
 // ---- Message ---------------------------------------------------------------------------------
 
 export const LocationDto = dto('LocationDto', {
-  latitude: z.string(),
-  longitude: z.string(),
+  latitude: z.number().describe('Degrees; wwebjs types it string but delivers a number'),
+  longitude: z.number().describe('Degrees; wwebjs types it string but delivers a number'),
   name: z.string().optional(),
   address: z.string().optional(),
   url: z.string().optional(),
@@ -187,18 +190,18 @@ export const ReactionDto = dto('ReactionDto', {
   id: serializedId,
   orphan: z.number().int(),
   orphanReason: z.string().optional(),
-  timestamp: unixSeconds,
-  reaction: z.string(),
+  timestamp: unixSeconds.optional(),
+  reaction: z.string().optional(),
   read: z.boolean(),
   msgId: serializedId,
-  senderId: z.string(),
+  senderId: z.string().optional(),
   ack: z.number().int().optional()
 })
 export type ReactionDto = z.infer<typeof ReactionDto>
 
 export const ReactionListDto = dto('ReactionListDto', {
   id: z.string(),
-  aggregateEmoji: z.string(),
+  aggregateEmoji: z.string().optional(),
   hasReactionByMe: z.boolean(),
   senders: z.array(ReactionDto)
 })
@@ -216,7 +219,7 @@ export type PollVoteDto = z.infer<typeof PollVoteDto>
 
 export const ContactDto = dto('ContactDto', {
   id: serializedId,
-  number: z.string(),
+  number: z.string().optional(),
   isBusiness: z.boolean(),
   isEnterprise: z.boolean(),
   isGroup: z.boolean(),
@@ -227,11 +230,11 @@ export const ContactDto = dto('ContactDto', {
   isBlocked: z.boolean(),
   labels: z.array(z.string()).optional(),
   name: z.string().optional(),
-  pushname: z.string(),
-  sectionHeader: z.string(),
+  pushname: z.string().optional(),
+  sectionHeader: z.string().optional(),
   shortName: z.string().optional(),
   statusMute: z.boolean(),
-  type: z.string(),
+  type: z.string().optional(),
   verifiedLevel: z.string().optional(),
   verifiedName: z.string().optional()
 })
@@ -241,7 +244,7 @@ const businessHoursOfDay = z.object({ mode: z.string(), hours: z.array(z.number(
 
 export const BusinessProfileDto = dto('BusinessProfileDto', {
   id: serializedId,
-  tag: z.string(),
+  tag: z.string().optional(),
   description: z.string().nullish(),
   categories: z.array(z.object({ id: z.string(), localized_display_name: z.string() })),
   profileOptions: z.object({ commerceExperience: z.string(), cartEnabled: z.boolean() }),
@@ -249,10 +252,15 @@ export const BusinessProfileDto = dto('BusinessProfileDto', {
   website: z.array(z.string()).optional(),
   latitude: z.number().nullish(),
   longitude: z.number().nullish(),
-  businessHours: z.object({
-    config: z.record(z.string(), businessHoursOfDay).describe('Keyed by day: sun, mon, tue…'),
-    timezone: z.string()
-  }),
+  businessHours: z
+    .object({
+      config: z
+        .record(z.string(), businessHoursOfDay)
+        .optional()
+        .describe('Keyed by day: sun, mon, tue…'),
+      timezone: z.string().optional()
+    })
+    .optional(),
   address: z.string().nullish(),
   fbPage: opaque.nullish(),
   ifProfileLinked: z.boolean(),
@@ -274,8 +282,8 @@ export const ChatDto = dto('ChatDto', {
   isGroup: z.boolean(),
   isReadOnly: z.boolean(),
   isMuted: z.boolean(),
-  muteExpiration: unixSeconds,
-  name: z.string(),
+  muteExpiration: unixSeconds.optional(),
+  name: z.string().optional(),
   timestamp: unixSeconds.nullable().describe('Unix seconds; null when WhatsApp gave none'),
   unreadCount: z.number().int(),
   lastMessage: MessageDto.optional(),
@@ -302,35 +310,35 @@ export type GroupChatDto = z.infer<typeof GroupChatDto>
 
 export const ChannelDto = dto('ChannelDto', {
   id: serializedId,
-  name: z.string(),
-  description: z.string(),
+  name: z.string().optional(),
+  description: z.string().optional(),
   isChannel: z.boolean(),
   isGroup: z.boolean(),
   isReadOnly: z.boolean(),
   unreadCount: z.number().int(),
-  timestamp: unixSeconds,
+  timestamp: unixSeconds.optional(),
   isMuted: z.boolean(),
-  muteExpiration: unixSeconds,
+  muteExpiration: unixSeconds.optional(),
   lastMessage: MessageDto.optional()
 })
 export type ChannelDto = z.infer<typeof ChannelDto>
 
 export const MembershipRequestDto = dto('MembershipRequestDto', {
   id: serializedId.describe('Who asks to enter the group'),
-  addedBy: serializedId.describe('Who created the request'),
+  addedBy: serializedId.describe('Who created the request').optional(),
   parentGroupId: serializedId.nullish(),
-  requestMethod: z.string().describe('NonAdminAdd, InviteLink or LinkedGroupJoin'),
-  t: unixSeconds
+  requestMethod: z.string().describe('NonAdminAdd, InviteLink or LinkedGroupJoin').optional(),
+  t: unixSeconds.optional()
 })
 export type MembershipRequestDto = z.infer<typeof MembershipRequestDto>
 
 export const GroupNotificationDto = dto('GroupNotificationDto', {
   id: serializedId,
-  author: z.string(),
+  author: z.string().optional(),
   body: z.string(),
   chatId: z.string(),
   recipientIds: z.array(z.string()),
-  timestamp: unixSeconds,
+  timestamp: unixSeconds.optional(),
   type: z
     .string()
     .describe(
@@ -344,13 +352,13 @@ export type GroupNotificationDto = z.infer<typeof GroupNotificationDto>
 export const LabelDto = dto('LabelDto', {
   id: z.string(),
   name: z.string(),
-  hexColor: z.string()
+  hexColor: z.string().optional()
 })
 export type LabelDto = z.infer<typeof LabelDto>
 
 export const BroadcastDto = dto('BroadcastDto', {
   id: serializedId,
-  timestamp: unixSeconds,
+  timestamp: unixSeconds.optional(),
   totalCount: z.number().int(),
   unreadCount: z.number().int(),
   msgs: z.array(MessageDto)
@@ -360,7 +368,7 @@ export type BroadcastDto = z.infer<typeof BroadcastDto>
 export const CallDto = dto('CallDto', {
   id: z.string(),
   from: z.string().optional(),
-  timestamp: unixSeconds,
+  timestamp: unixSeconds.optional(),
   isVideo: z.boolean(),
   isGroup: z.boolean(),
   fromMe: z.boolean(),
@@ -375,31 +383,31 @@ export type CallDto = z.infer<typeof CallDto>
 export const ProductDto = dto('ProductDto', {
   id: z.string(),
   price: z.string().optional(),
-  thumbnailUrl: z.string(),
-  currency: z.string(),
-  name: z.string(),
+  thumbnailUrl: z.string().optional(),
+  currency: z.string().optional(),
+  name: z.string().optional(),
   quantity: z.number().int()
 })
 export type ProductDto = z.infer<typeof ProductDto>
 
 export const OrderDto = dto('OrderDto', {
   products: z.array(ProductDto),
-  subtotal: z.string(),
-  total: z.string(),
-  currency: z.string(),
-  createdAt: unixSeconds
+  subtotal: z.string().optional(),
+  total: z.string().optional(),
+  currency: z.string().optional(),
+  createdAt: unixSeconds.optional()
 })
 export type OrderDto = z.infer<typeof OrderDto>
 
 export const PaymentDto = dto('PaymentDto', {
   id: serializedId,
-  paymentCurrency: z.string(),
+  paymentCurrency: z.string().optional(),
   paymentAmount1000: z.number(),
-  paymentMessageReceiverJid: serializedId,
-  paymentTransactionTimestamp: unixSeconds,
+  paymentMessageReceiverJid: serializedId.optional(),
+  paymentTransactionTimestamp: unixSeconds.optional(),
   paymentStatus: z.number().int(),
   paymentTxnStatus: z.number().int(),
-  paymentNote: z.string()
+  paymentNote: z.string().optional()
 })
 export type PaymentDto = z.infer<typeof PaymentDto>
 
@@ -414,8 +422,8 @@ export type BatteryInfoDto = z.infer<typeof BatteryInfoDto>
 export const ClientInfoDto = dto('ClientInfoDto', {
   wid: serializedId,
   me: serializedId.describe('Deprecated in wwebjs, use wid'),
-  platform: z.string(),
-  pushname: z.string(),
+  platform: z.string().optional(),
+  pushname: z.string().optional(),
   phone: z
     .object({
       wa_version: z.string(),

@@ -24,6 +24,10 @@ type ChatCall =
 
 // What the chats routes do: reads, the typing and recording indicators, and the actions on one chat,
 // each a call to the session's client.
+// Reads of the chat after an unarchive or an unpin, and the pause between them
+const UNDO_READS = 3
+const UNDO_READ_PAUSE_MS = 150
+
 @Injectable()
 export class ChatsService implements OnModuleDestroy {
   private readonly logger = new Logger(ChatsService.name)
@@ -110,7 +114,7 @@ export class ChatsService implements OnModuleDestroy {
   }
 
   unarchive(sessionId: string, chatId: string): Promise<void> {
-    return this.done(sessionId, chatId, 'unarchiveChat', 'unarchive the chat')
+    return this.undone(sessionId, chatId, 'unarchiveChat', 'unarchive the chat', 'archived')
   }
 
   pin(sessionId: string, chatId: string): Promise<void> {
@@ -118,7 +122,7 @@ export class ChatsService implements OnModuleDestroy {
   }
 
   unpin(sessionId: string, chatId: string): Promise<void> {
-    return this.done(sessionId, chatId, 'unpinChat', 'unpin the chat')
+    return this.undone(sessionId, chatId, 'unpinChat', 'unpin the chat', 'pinned')
   }
 
   clearMessages(sessionId: string, chatId: string): Promise<void> {
@@ -214,6 +218,30 @@ export class ChatsService implements OnModuleDestroy {
     if (!(await client[call](chatId))) {
       throw new WhatsAppError('WHATSAPP_ERROR', `WhatsApp did not ${what}`)
     }
+  }
+
+  // `unarchiveChat` and `unpinChat` of wwebjs 1.34.7 end in `return false` even when WhatsApp Web did
+  // it, so their answer says nothing. The state of the chat afterwards does: the call succeeded when
+  // the flag is off (also when it already was: undoing what is not done is not an error).
+  private async undone(
+    sessionId: string,
+    chatId: string,
+    call: ChatCall,
+    what: string,
+    flag: 'archived' | 'pinned'
+  ): Promise<void> {
+    const client = await this.existing(sessionId, chatId)
+    await client[call](chatId)
+    // WhatsApp Web may take a moment to show the new state: a few reads before giving up
+    for (let read = 1; read <= UNDO_READS; read++) {
+      const chat = await client.getChatById(chatId)
+      const stillOn =
+        flag === 'archived' ? 'archived' in chat && chat.archived : 'pinned' in chat && chat.pinned
+      if (!stillOn) return
+      if (read < UNDO_READS)
+        await new Promise<void>(resolve => setTimeout(resolve, UNDO_READ_PAUSE_MS))
+    }
+    throw new WhatsAppError('WHATSAPP_ERROR', `WhatsApp did not ${what}`)
   }
 
   private cancel(key: string): void {
