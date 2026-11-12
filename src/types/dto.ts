@@ -247,7 +247,7 @@ export const BusinessProfileDto = dto('BusinessProfileDto', {
   tag: z.string().optional(),
   description: z.string().nullish(),
   categories: z.array(z.object({ id: z.string(), localized_display_name: z.string() })),
-  profileOptions: z.object({ commerceExperience: z.string(), cartEnabled: z.boolean() }),
+  profileOptions: z.object({ commerceExperience: z.string(), cartEnabled: z.boolean() }).optional(),
   email: z.string().nullish(),
   website: z.array(z.string()).optional(),
   latitude: z.number().nullish(),
@@ -263,7 +263,9 @@ export const BusinessProfileDto = dto('BusinessProfileDto', {
     .optional(),
   address: z.string().nullish(),
   fbPage: opaque.nullish(),
-  ifProfileLinked: z.boolean(),
+  ifProfileLinked: z
+    .boolean()
+    .describe('Read from isProfileLinked, the key WhatsApp Web really sends; false when absent'),
   coverPhoto: opaque.nullish()
 })
 export type BusinessProfileDto = z.infer<typeof BusinessProfileDto>

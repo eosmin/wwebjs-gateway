@@ -166,6 +166,115 @@ describe('the DTOs accept what a real account leaves out', () => {
     expect(ContactDto.parse(dto)).toEqual(dto)
   })
 
+  // wwebjs 1.34.8 `GET contacts` answered 500: `isEnterprise` (and `statusMute`) are copied from the
+  // WhatsApp Web model, which does not always carry them
+  it.each([
+    'isBusiness',
+    'isEnterprise',
+    'isGroup',
+    'isMe',
+    'isMyContact',
+    'isUser',
+    'isWAContact',
+    'isBlocked',
+    'statusMute'
+  ])('a contact without %s is delivered with it false', field => {
+    const dto = mapContact(sparse(without(CONTACT, field)))
+
+    expect(dto[field as keyof ContactDto]).toBe(false)
+    expect(ContactDto.parse(dto)).toEqual(dto)
+  })
+
+  // The shape wwebjs 1.34.8 delivers for a real address book (keys and types only, redacted)
+  it('a contact as 1.34.8 delivers it: number null, verifiedLevel a number, no isEnterprise or statusMute', () => {
+    const dto = mapContact(
+      sparse({
+        ...without(CONTACT, 'isEnterprise', 'statusMute', 'pushname', 'sectionHeader'),
+        number: null,
+        verifiedLevel: 2,
+        verifiedName: 'Shop',
+        labels: []
+      })
+    )
+
+    expect(dto).toMatchObject({ isEnterprise: false, statusMute: false, verifiedLevel: '2' })
+    expect(dto).not.toHaveProperty('number')
+    expect(ContactDto.parse(dto)).toEqual(dto)
+  })
+
+  it('a business profile whose link flag is isProfileLinked, as the runtime spells it', () => {
+    const dto = mapBusinessContact(
+      sparse({
+        ...CONTACT,
+        isBusiness: true,
+        businessProfile: {
+          id: id('100000000000001@lid'),
+          categories: [],
+          profileOptions: { commerceExperience: 'none', cartEnabled: false },
+          isProfileLinked: true,
+          isProfileLocked: false
+        }
+      })
+    )
+
+    expect(dto.businessProfile.ifProfileLinked).toBe(true)
+    expect(BusinessContactDto.parse(dto)).toEqual(dto)
+  })
+
+  it('a business profile without link flag, categories or profile options', () => {
+    const dto = mapBusinessContact(
+      sparse({ ...CONTACT, businessProfile: { id: id('100000000000001@lid') } })
+    )
+
+    expect(dto.businessProfile).toMatchObject({ ifProfileLinked: false, categories: [] })
+    expect(BusinessContactDto.parse(dto)).toEqual(dto)
+  })
+
+  it('a contact with every flag missing', () => {
+    const dto = mapContact(sparse({ id: id('100000000000001@lid') }))
+
+    expect(ContactDto.parse(dto)).toEqual(dto)
+  })
+
+  it('a chat without its flags and counters', () => {
+    const dto = mapChat(sparse({ id: id('100000000000001@lid') }), OPTIONS)
+
+    expect(dto).toMatchObject({ isGroup: false, isMuted: false, unreadCount: 0, pinned: false })
+    expect(ChatDto.parse(dto)).toEqual(dto)
+  })
+
+  it('a group chat without its flags, counters and with participants without admin flags', () => {
+    const dto = mapGroupChat(
+      sparse({
+        id: id('g@g.us'),
+        createdAt: 1_761_577_446,
+        participants: [{ id: id('100000000000001@lid') }]
+      }),
+      OPTIONS
+    )
+
+    expect(dto.isGroup).toBe(true)
+    expect(dto.participants[0]).toEqual({
+      id: '100000000000001@lid',
+      isAdmin: false,
+      isSuperAdmin: false
+    })
+    expect(GroupChatDto.parse(dto)).toEqual(dto)
+  })
+
+  it('a channel without its flags and counters', () => {
+    const dto = mapChannel(sparse({ id: id('1@newsletter') }), OPTIONS)
+
+    expect(dto).toMatchObject({
+      isChannel: true,
+      isGroup: false,
+      isReadOnly: false,
+      isMuted: false,
+      unreadCount: 0
+    })
+    expect(ChannelDto.parse(dto)).toEqual(dto)
+  })
+
   it('a business contact whose profile has no tag or business hours', () => {
     const dto = mapBusinessContact(
       sparse({

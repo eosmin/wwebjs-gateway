@@ -8,7 +8,7 @@ import {
   Logger
 } from '@nestjs/common'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { ZodValidationException } from 'nestjs-zod'
+import { ZodSerializationException, ZodValidationException } from 'nestjs-zod'
 import { z } from 'zod'
 
 import { APP_CONFIG } from '../../config/config.module.js'
@@ -103,6 +103,16 @@ export function describeException(exception: unknown, hideInternal: boolean): De
   }
 }
 
+// Where a response broke its schema: the paths and issue codes, never the values (they are personal data)
+function failedSchemaFields(exception: unknown): string | undefined {
+  if (!(exception instanceof ZodSerializationException)) return undefined
+  const zodError = exception.getZodError()
+  if (!(zodError instanceof z.ZodError)) return undefined
+  return zodError.issues
+    .map(issue => `${issue.path.join('.') || '(root)'} [${issue.code}]`)
+    .join(', ')
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name)
@@ -114,7 +124,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const request = http.getRequest<FastifyRequest>()
     const reply = http.getResponse<FastifyReply>()
     const { status, ...error } = describeException(exception, this.config.NODE_ENV === 'production')
-    if (status >= FIRST_SERVER_ERROR) this.logger.error(exception)
+    if (status >= FIRST_SERVER_ERROR) {
+      this.logger.error(exception)
+      const fields = failedSchemaFields(exception)
+      if (fields !== undefined) this.logger.error(`A response failed its schema at: ${fields}`)
+    }
     const body: ErrorBody = { error: { ...error, requestId: request.id } }
     void reply.header(REQUEST_ID_HEADER, request.id)
     if (exception instanceof ServiceBusyError) {
