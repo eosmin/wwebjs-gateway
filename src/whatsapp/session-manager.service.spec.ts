@@ -19,7 +19,7 @@ import type { SessionStatus } from '../types/dto.js'
 
 import type { EventPipelineService } from './event-pipeline.service.js'
 import { SessionManager, type RunRef } from './session-manager.service.js'
-import { WaOperationError } from './wa-errors.js'
+import { WaOperationError, WaProfileLockedError } from './wa-errors.js'
 
 const NOW = new Date('2026-10-28T12:00:00.000Z')
 const ID = 'support-line'
@@ -453,6 +453,123 @@ describe('SessionManager status machine', () => {
     })
     await jest.advanceTimersByTimeAsync(600_000)
     expect(built.factory.clients).toHaveLength(1)
+  })
+
+  it('deletes the saved login after a LOGOUT, once the browser is gone', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW, phoneNumber: PHONE })
+    const client = await startSession(built)
+    await makeReady(built, client)
+
+    client.emit({ event: 'disconnected', data: { reason: 'LOGOUT' } })
+    await flush()
+
+    const order = client.calls
+      .map(call => call.method)
+      .filter(m => m === 'destroy' || m === 'discardAuth')
+    expect(order).toEqual(['destroy', 'discardAuth'])
+    expect(built.manager.status(ID)).toBe('created')
+  })
+
+  it('deletes the saved login on a logout asked through the API', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW, phoneNumber: PHONE })
+    const client = await startSession(built)
+    await makeReady(built, client)
+
+    await built.manager.logout(ID)
+
+    expect(client.callsOf('discardAuth')).toHaveLength(1)
+  })
+
+  it('still ends in created when the saved login cannot be deleted', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW, phoneNumber: PHONE })
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const client = await startSession(built)
+    await makeReady(built, client)
+    client.script('discardAuth', () => Promise.reject(new WaOperationError('discardAuth')))
+
+    client.emit({ event: 'disconnected', data: { reason: 'LOGOUT' } })
+    await flush()
+
+    expect(built.manager.status(ID)).toBe('created')
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Deleting the saved login failed'))
+  })
+
+  it('does not delete the login when the session only stops or drops', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    client.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
+    await flush()
+    await built.manager.stop(ID)
+
+    expect(client.callsOf('discardAuth')).toHaveLength(0)
+  })
+
+  it('gives up as failed after SESSION_INITIALIZE_MAX_ATTEMPTS browser starts in a row', async () => {
+    const built = build({ SESSION_INITIALIZE_MAX_ATTEMPTS: '3' }, { initializeFails: true })
+    built.sessions.seed({ id: ID })
+    await built.manager.start(ID)
+    await flush()
+    expect(built.manager.status(ID)).toBe('disconnected')
+    await untilNextClient(built, 1)
+    await flush()
+    expect(built.manager.status(ID)).toBe('disconnected')
+    await untilNextClient(built, 2)
+    await flush()
+
+    expect(built.manager.status(ID)).toBe('failed')
+    expect(built.sessions.rows.get(ID)?.lastError).toMatch(/did not start 3 times in a row/)
+    expect(built.sessions.rows.get(ID)?.lastError).toMatch(/initialize failed \(WaOperationError\)/)
+    const clients = built.factory.clients.length
+    await jest.advanceTimersByTimeAsync(900_000)
+    expect(built.factory.clients).toHaveLength(clients)
+    expect(clients).toBe(3)
+  })
+
+  it('counts the failed starts again after a sign of life such as a QR code', async () => {
+    let calls = 0
+    const built = build(
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '2' },
+      {
+        initialize: () =>
+          ++calls === 2 ? Promise.resolve() : Promise.reject(new WaOperationError('x'))
+      }
+    )
+    built.sessions.seed({ id: ID })
+    await built.manager.start(ID)
+    await flush()
+    await untilNextClient(built, 1)
+    built.factory.clientFor(ID)?.emit({ event: 'qr', data: { qr: 'q' } })
+    await flush()
+    expect(built.manager.status(ID)).toBe('qr')
+    built.factory.clientFor(ID)?.emit({ event: 'session_error', data: { code: 'x', message: 'x' } })
+    await flush()
+    await untilNextClient(built, 2)
+    await flush()
+
+    // The third start fails too, but it is the first of a new run of failures
+    expect(built.manager.status(ID)).toBe('disconnected')
+  })
+
+  it('puts what to do into lastError when a foreign process holds the profile', async () => {
+    const built = build(
+      {},
+      {
+        initialize: () =>
+          Promise.reject(new WaProfileLockedError(4242, 'it does not belong to this gateway'))
+      }
+    )
+    built.sessions.seed({ id: ID })
+    await built.manager.start(ID)
+    await flush()
+
+    expect(built.sessions.rows.get(ID)?.lastError).toMatch(
+      /WaProfileLockedError\): the browser profile is locked by process 4242/
+    )
   })
 
   it('fails on a CONFLICT unless the takeover is on', async () => {

@@ -167,6 +167,9 @@ export const envSchema = z
     SESSION_RECONNECT_MAX_ATTEMPTS: count(0).describe(
       'Reconnection attempts after a disconnect; 0 means unlimited'
     ),
+    SESSION_INITIALIZE_MAX_ATTEMPTS: count(5, { min: 1 }).describe(
+      'Consecutive failed browser starts of a session before it is marked failed'
+    ),
     WATCHDOG_INTERVAL_MS: count(30000, { min: 1 }).describe(
       'Milliseconds between health checks of each session'
     ),

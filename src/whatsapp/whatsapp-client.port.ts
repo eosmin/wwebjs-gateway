@@ -259,6 +259,9 @@ export interface WhatsAppClientPort {
   initialize(): Promise<void>
   destroy(): Promise<void>
   logout(): Promise<void>
+  // Deletes the saved login of the session from disk, so the next start asks for a QR code. It needs
+  // no browser and runs after `destroy`: a browser that still runs would write into what it deletes.
+  discardAuth(): Promise<void>
   resetState(): Promise<void>
   getState(): Promise<string | null>
   getWWebVersion(): Promise<string>

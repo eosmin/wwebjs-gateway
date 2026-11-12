@@ -1,3 +1,6 @@
+import { rm } from 'node:fs/promises'
+import { resolve, sep } from 'node:path'
+
 import { Logger } from '@nestjs/common'
 import wwebjs, {
   type Channel,
@@ -57,12 +60,15 @@ import {
   type MessageMapOptions,
   mediaDownloadUrl
 } from './mappers.js'
+import { releaseProfileLock } from './profile-lock.js'
 import { failedAfterDispatch, isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
 import {
   MapperFailure,
   WaChatNotFoundError,
+  WaDisconnectedError,
   WaMappingError,
-  WaOperationError
+  WaOperationError,
+  WaProfileLockedError
 } from './wa-errors.js'
 import type {
   AddParticipantsOptions,
@@ -284,11 +290,15 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   private ended = false
   // The initialize in flight, kept so that destroy can clean up after it
   private starting: Promise<void> | undefined
+  // Set by destroy, cleared by initialize: tells an initialize that was waiting to stand down
+  private destroyRequested = false
 
   constructor(
     readonly sessionId: string,
     private readonly client: InstanceType<typeof Client>,
-    private readonly config: WwebjsAdapterConfig
+    private readonly config: WwebjsAdapterConfig,
+    // The look at the profile lock before each start; a spec of timers replaces it, since it reads the disk
+    private readonly releaseLock: typeof releaseProfileLock = releaseProfileLock
   ) {
     this.logger = new Logger(`WwebjsAdapter:${sessionId}`)
     this.wireEvents()
@@ -735,6 +745,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
 
   async initialize(): Promise<void> {
     this.ended = false
+    this.destroyRequested = false
+    await this.freeProfile()
+    // A destroy that came while the lock was being cleared: a browser started now would belong to
+    // nobody and would hold the profile
+    if (this.destroyRequested) throw new WaDisconnectedError('initialize', false)
     const starting = this.client.initialize()
     this.starting = starting
     await runWaCall(
@@ -748,8 +763,43 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     this.guardBrowser()
   }
 
+  // Where LocalAuth keeps the profile of this session (the folder it names `session-<clientId>`)
+  private profileDir(): string {
+    return resolve(this.config.WWEBJS_DATA_PATH, `session-${this.sessionId}`)
+  }
+
+  // A browser that a dead gateway left behind holds the profile lock and the next browser would not
+  // start; a lock of a dead process is cleared and an orphan of this very profile is closed. A lock held
+  // by anything else stops the start with an error that says so. Failing to look is not a reason to
+  // fail: the browser then gets its chance.
+  private async freeProfile(): Promise<void> {
+    try {
+      const outcome = await this.releaseLock(this.profileDir())
+      if (outcome !== 'free') this.logger.warn(`Found a leftover browser lock (${outcome})`)
+    } catch (error: unknown) {
+      if (error instanceof WaProfileLockedError) throw error
+      this.logger.warn(`Checking the browser profile failed (${errorKind(error)})`)
+    }
+  }
+
+  async discardAuth(): Promise<void> {
+    const dir = this.profileDir()
+    // The folder of this session only: the id is validated upstream, and this refuses a path that
+    // would leave the data folder anyway
+    if (!dir.startsWith(resolve(this.config.WWEBJS_DATA_PATH) + sep)) {
+      throw new WaOperationError('discardAuth', 'discardAuth failed')
+    }
+    try {
+      await rm(dir, { recursive: true, force: true })
+    } catch (error: unknown) {
+      this.logger.warn(`Deleting the saved login failed (${errorKind(error)})`)
+      throw new WaOperationError('discardAuth', 'discardAuth failed')
+    }
+  }
+
   async destroy(): Promise<void> {
     this.ended = true
+    this.destroyRequested = true
     this.ready = false
     try {
       await this.run('destroy', () => this.client.destroy())
