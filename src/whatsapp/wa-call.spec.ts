@@ -1,4 +1,4 @@
-import { isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
+import { describeCause, isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
 import {
   MapperFailure,
   WaChatNotFoundError,
@@ -256,5 +256,94 @@ describe('notReady', () => {
 
     expect(error).toBeInstanceOf(WaDisconnectedError)
     expect(error).toMatchObject({ operation: 'sendMessage', dispatched: false })
+  })
+})
+
+describe('describeCause', () => {
+  it('keeps the message and the type of a failure of the page, with a stable code', () => {
+    const cause = describeCause(new Error('Data passed to getter must include an id property'))
+
+    expect(cause).toEqual({
+      code: 'PAGE_ERROR',
+      kind: 'Error',
+      message: 'Data passed to getter must include an id property'
+    })
+  })
+
+  it('reads a string thrown by the library', () => {
+    expect(describeCause('auth timeout')).toEqual({
+      code: 'PAGE_ERROR',
+      kind: 'string',
+      message: 'auth timeout'
+    })
+  })
+
+  it('gives every family of failure its own code', () => {
+    expect(describeCause(new Error('Protocol error: Target closed.')).code).toBe('BROWSER_GONE')
+    expect(describeCause(new WaOperationError('x')).code).toBe('GATEWAY_ERROR')
+    expect(describeCause(new MapperFailure(new TypeError('x'))).code).toBe('MAPPING')
+    expect(
+      describeCause(Object.assign(new Error('boom'), { afterDispatch: true as const })).code
+    ).toBe('AFTER_DISPATCH')
+    expect(describeCause(new WaChatNotFoundError('x')).code).toBe('CHAT_NOT_FOUND')
+    expect(describeCause(undefined).code).toBe('UNKNOWN')
+  })
+
+  it('describes the original of a mapper failure, not our wrapper', () => {
+    expect(describeCause(new MapperFailure(new TypeError('x is undefined')))).toEqual({
+      code: 'MAPPING',
+      kind: 'TypeError',
+      message: 'x is undefined'
+    })
+  })
+
+  it('never lets a phone number, a chat id, a token or a QR string through', () => {
+    const { message } = describeCause(
+      new Error(
+        'No chat 5215512345678@c.us nor 120363012345678901@g.us; qr 2@AbCdEfGhIjKlMnOpQrStUvWxYz0123456789==,x'
+      )
+    )
+
+    expect(message).not.toMatch(/\d{7}/)
+    expect(message).not.toContain('AbCdEfGh')
+    expect(message).toContain('[id]')
+  })
+
+  it('keeps the line short and on one line', () => {
+    const { message } = describeCause(new Error(`first\nsecond ${'word '.repeat(200)}`))
+
+    expect(message).not.toContain('\n')
+    expect(message.length).toBeLessThanOrEqual(200)
+  })
+
+  it('describes the original of a failure after the dispatch', () => {
+    const error = Object.assign(new Error('wrapper'), {
+      afterDispatch: true as const,
+      cause: new TypeError('x is not a function')
+    })
+
+    expect(describeCause(error)).toEqual({
+      code: 'AFTER_DISPATCH',
+      kind: 'TypeError',
+      message: 'x is not a function'
+    })
+  })
+
+  it('survives a mapper failure with no cause or with a cause that points back at it', () => {
+    const empty = new MapperFailure(undefined)
+    const loop = new MapperFailure(undefined)
+    loop.cause = loop
+
+    expect(describeCause(empty).code).toBe('MAPPING')
+    expect(describeCause(loop).code).toBe('MAPPING')
+  })
+
+  it('keeps the name of a WhatsApp Web module, which has no digits, and masks a token', () => {
+    const { message } = describeCause(
+      new Error('WAWebCollectionsChatCollection missing; key a1b2c3d4e5f6a1b2c3d4e5f6a1b2')
+    )
+
+    expect(message).toContain('WAWebCollectionsChatCollection')
+    expect(message).toContain('[redacted]')
   })
 })

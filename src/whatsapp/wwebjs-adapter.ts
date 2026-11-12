@@ -61,9 +61,15 @@ import {
   mediaDownloadUrl
 } from './mappers.js'
 import { releaseProfileLock } from './profile-lock.js'
-import { failedAfterDispatch, isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
 import {
-  MapperFailure,
+  type CauseCode,
+  describeCause,
+  isPuppeteerFailure,
+  mapping,
+  notReady,
+  runWaCall
+} from './wa-call.js'
+import {
   WaChatNotFoundError,
   WaDisconnectedError,
   WaMappingError,
@@ -253,6 +259,14 @@ function webVersionCache(
 
 // ---- Boundary helpers --------------------------------------------------------------------------
 
+// Causes logged at debug (see `logCause`)
+const QUIET_CAUSES: ReadonlySet<CauseCode> = new Set([
+  'CHAT_NOT_FOUND',
+  'TIMEOUT',
+  'BROWSER_GONE',
+  'GATEWAY_ERROR'
+])
+
 const errorKind = (error: unknown): string => (error instanceof Error ? error.name : typeof error)
 
 // The typings of wwebjs say `object` for some ids that are wids at runtime
@@ -312,16 +326,20 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       ? Math.max(this.config.WA_CALL_TIMEOUT_MS, LONG_CALL_TIMEOUT_MS)
       : this.config.WA_CALL_TIMEOUT_MS
     return await runWaCall(operation, timeoutMs, call, error => {
-      // The kind only: the text of a library error can hold chat ids and phone numbers
-      const message = `${operation} failed (${errorKind(error)})`
-      // A mapper of ours meeting data it did not expect, or the library failing after the page sent a
-      // message, must not stay at debug
-      if (error instanceof MapperFailure) {
-        this.logger.warn(`${operation} failed (${errorKind(error.cause)})`)
-      } else if (failedAfterDispatch(error)) {
-        this.logger.warn(`${operation} failed after the page sent it (${errorKind(error.cause)})`)
-      } else this.logger.debug(message)
+      this.logCause(operation, error)
     })
+  }
+
+  // Why a call failed, for the log: the error that reaches the caller says only what failed, so this
+  // line is the one place that keeps the original (see `describeCause` for what it holds and masks)
+  private logCause(operation: string, error: unknown): void {
+    const { code, kind, message } = describeCause(error)
+    const line = `${operation} failed [${code}] (${kind})${message ? `: ${message}` : ''}`
+    // What a flapping session or a wrong id makes routine (a timeout, a browser that went away, a chat
+    // that does not exist, an error of ours already told to the caller) stays at debug, so the log of a
+    // busy gateway keeps the faults: the library failing, a mapper of ours, an unknown outcome
+    if (QUIET_CAUSES.has(code)) this.logger.debug(line)
+    else this.logger.warn(line)
   }
 
   // WhatsApp accepted the message by the time it is mapped: a failure here is an unknown outcome and
@@ -757,7 +775,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       Math.max(this.config.WA_CALL_TIMEOUT_MS, INITIALIZE_TIMEOUT_MS),
       () => starting,
       error => {
-        this.logger.debug(`initialize failed (${errorKind(error)})`)
+        this.logCause('initialize', error)
       }
     )
     this.guardBrowser()

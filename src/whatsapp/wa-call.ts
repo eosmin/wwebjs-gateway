@@ -1,4 +1,4 @@
-import { WhatsAppError } from '../common/errors.js'
+import { AppError, WhatsAppError } from '../common/errors.js'
 import { withTimeout } from '../common/lib/timeout.js'
 
 import {
@@ -74,6 +74,68 @@ function translate(operation: string, error: unknown): Error {
     return new WaDisconnectedError(operation, true, `${operation}: the browser went away`)
   }
   return new WaOperationError(operation, `${operation} failed`)
+}
+
+// A stable name for the family of a failure, for the log and for the person reading it
+export type CauseCode =
+  | 'TIMEOUT'
+  | 'BROWSER_GONE'
+  | 'MAPPING'
+  | 'AFTER_DISPATCH'
+  | 'CHAT_NOT_FOUND'
+  | 'GATEWAY_ERROR'
+  | 'PAGE_ERROR'
+  | 'UNKNOWN'
+
+export interface Cause {
+  code: CauseCode
+  kind: string
+  message: string
+}
+
+const MAX_CAUSE_MESSAGE_LENGTH = 200
+
+// A message of the library can name a chat, a number or a QR string, and the line goes to the log:
+// ids and long digit runs are masked, so are long opaque tokens, and the length is capped
+function sanitize(message: string): string {
+  return (
+    message
+      .replace(/[^\s@]+@(?:c\.us|g\.us|s\.whatsapp\.net|lid|newsletter|broadcast)\b/g, '[id]')
+      // A token mixes letters and digits; a name of a module or a class (letters only) is what is being diagnosed
+      .replace(/[A-Za-z0-9+/=_-]{24,}/g, token =>
+        /\d/.test(token) && /[A-Za-z]/.test(token) ? '[redacted]' : token
+      )
+      .replace(/\d{7,}/g, '#')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, MAX_CAUSE_MESSAGE_LENGTH)
+  )
+}
+
+// The error to describe: our wrappers carry the original as `cause` (one level, never followed again,
+// so a cause that points back at its wrapper cannot loop)
+function original(error: unknown): unknown {
+  const wrapped = error instanceof MapperFailure || failedAfterDispatch(error)
+  return wrapped && error.cause !== undefined && error.cause !== error ? error.cause : error
+}
+
+// What went wrong, for the log: the original message and type (the error given to the caller carries a
+// fixed text), under a code that does not change with the wording of the library. Never serializes
+// the error: a wwebjs object holds the page.
+export function describeCause(error: unknown): Cause {
+  const source = original(error)
+  const kind = source instanceof Error ? source.name : typeof source
+  const message = sanitize(messageOf(source))
+  if (error instanceof MapperFailure) return { code: 'MAPPING', kind, message }
+  if (failedAfterDispatch(error)) return { code: 'AFTER_DISPATCH', kind, message }
+  if (error instanceof WaChatNotFoundError) return { code: 'CHAT_NOT_FOUND', kind, message }
+  if (error instanceof AppError) {
+    return { code: isTimeout(error) ? 'TIMEOUT' : 'GATEWAY_ERROR', kind, message }
+  }
+  if (isPuppeteerFailure(error)) return { code: 'BROWSER_GONE', kind, message }
+  if (error instanceof Error || typeof error === 'string')
+    return { code: 'PAGE_ERROR', kind, message }
+  return { code: 'UNKNOWN', kind, message }
 }
 
 // Runs a mapper of ours: whatever it throws becomes a MapperFailure, which is not WhatsApp Web failing

@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 
+import { DataPathGuard } from './data-path.js'
 import { EventBusService } from './event-bus.service.js'
 import { EventPipelineService } from './event-pipeline.service.js'
 import { ProcessGuardService } from './process-guard.service.js'
@@ -16,6 +17,7 @@ import { createWwebjsClientFactory } from './wwebjs-adapter.js'
 // because they are providers here: they start and stop with the application.
 @Module({
   providers: [
+    DataPathGuard,
     EventBusService,
     EventPipelineService,
     SessionManager,

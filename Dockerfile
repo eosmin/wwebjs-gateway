@@ -55,6 +55,13 @@ COPY --from=build /app/prisma.config.ts ./
 COPY --from=build /app/prisma prisma
 COPY --chmod=755 docker-entrypoint.sh ./
 
+# The saved logins and the WhatsApp Web cache live under /data, which a volume replaces in
+# production. The gateway refuses to start on a folder it cannot write, and /app belongs to root, so
+# the folders exist and belong to the user the process runs as.
+ENV WWEBJS_DATA_PATH=/data/wwebjs_auth \
+    WWEB_CACHE_PATH=/data/wwebjs_cache
+RUN mkdir -p /data/wwebjs_auth /data/wwebjs_cache && chown -R node:node /data
+
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \

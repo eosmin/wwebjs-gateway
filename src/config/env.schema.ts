@@ -111,7 +111,9 @@ export const envSchema = z
     // WhatsApp
     WWEBJS_DATA_PATH: text()
       .default('./.wwebjs_auth')
-      .describe('Folder where whatsapp-web.js keeps the authenticated sessions'),
+      .describe(
+        'Folder where whatsapp-web.js keeps the authenticated sessions. It is created if missing and tested for writing at boot: the gateway does not start when it cannot be used, and /ready goes 503 if it stops being writable'
+      ),
     PUPPETEER_EXECUTABLE_PATH: text()
       .optional()
       .describe(

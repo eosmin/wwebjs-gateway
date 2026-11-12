@@ -22,7 +22,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `CORS_ORIGINS` | string | no |  | Comma-separated origins allowed by CORS and Socket.IO |
 | `RATE_LIMIT_MAX` | integer, 1 or more | no | `300` | Requests per minute allowed per API key and, separately, per client address |
 | `ENABLE_DOCS` | `true`, `false` | no |  | Serve Swagger UI and the OpenAPI JSON; when unset, true except in production |
-| `WWEBJS_DATA_PATH` | string, 1 character or more | no | `./.wwebjs_auth` | Folder where whatsapp-web.js keeps the authenticated sessions |
+| `WWEBJS_DATA_PATH` | string, 1 character or more | no | `./.wwebjs_auth` | Folder where whatsapp-web.js keeps the authenticated sessions. It is created if missing and tested for writing at boot: the gateway does not start when it cannot be used, and /ready goes 503 if it stops being writable |
 | `PUPPETEER_EXECUTABLE_PATH` | string, 1 character or more | no |  | Chromium or Chrome binary. Set it: the install does not download one (puppeteer build scripts are off), so a session cannot start without it |
 | `WWEB_VERSION` | string, 1 character or more | no |  | Pins the WhatsApp Web version; when unset, the live latest build |
 | `WWEB_VERSION_CACHE_TYPE` | `local`, `remote`, `none` | no | `local` | Where the pinned WhatsApp Web HTML snapshot is read from |
