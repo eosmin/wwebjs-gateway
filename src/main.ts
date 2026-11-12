@@ -10,6 +10,7 @@ import type { AppConfig } from './config/env.schema.js'
 import { applyServerTimeouts, setupHttp } from './infra/http/http-setup.js'
 import { createFastifyAdapter } from './infra/logger/fastify-adapter.js'
 import { armHardExit } from './infra/process/hard-exit.js'
+import { formatStartupFailure } from './infra/process/startup-failure.js'
 import { DeliveryQueueService } from './services/delivery-queue.service.js'
 import { SendQueueService } from './services/send-queue.service.js'
 
@@ -39,7 +40,6 @@ async function bootstrap(): Promise<void> {
 // A failure while the application starts (Redis or Postgres unreachable, an invalid environment)
 // must end the process with the reason on stderr and a non-zero code, not leave it half started
 bootstrap().catch((error: unknown) => {
-  const reason = error instanceof Error ? error.message : String(error)
-  process.stderr.write(`${JSON.stringify({ level: 'fatal', msg: `Startup failed: ${reason}` })}\n`)
+  process.stderr.write(formatStartupFailure(error))
   process.exit(1)
 })
