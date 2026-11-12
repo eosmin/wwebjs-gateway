@@ -31,6 +31,17 @@ describe('buildLoggerParams', () => {
     expect(production.pinoHttp).not.toHaveProperty('transport')
     expect(development.pinoHttp).toHaveProperty('transport.target', 'pino-pretty')
   })
+
+  // The compose stack runs the production image with NODE_ENV=development from .env.example, and
+  // that image has no dev dependencies: a transport for a missing module kills the logger thread
+  it('writes JSON in development when pino-pretty is not installed', () => {
+    const development = buildLoggerParams(
+      { LOG_LEVEL: 'debug', NODE_ENV: 'development' },
+      () => false
+    )
+
+    expect(development.pinoHttp).not.toHaveProperty('transport')
+  })
 })
 
 describe('a request logged with the configured options', () => {

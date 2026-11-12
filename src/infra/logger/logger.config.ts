@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
 
 import type { Params } from 'nestjs-pino'
 import type { Options } from 'pino-http'
@@ -41,7 +43,22 @@ function redactFields({
   return { ...(typeof redacted === 'object' ? redacted : {}), req, res, err }
 }
 
-export function buildPinoHttpOptions(config: Pick<AppConfig, 'LOG_LEVEL' | 'NODE_ENV'>): Options {
+// pino-pretty is a development dependency: the production image does not have it, and a transport
+// that names a missing module ends the logger thread with an error that hides every log line
+const nodeRequire = createRequire(join(process.cwd(), 'package.json'))
+export function isPrettyAvailable(): boolean {
+  try {
+    nodeRequire.resolve('pino-pretty')
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function buildPinoHttpOptions(
+  config: Pick<AppConfig, 'LOG_LEVEL' | 'NODE_ENV'>,
+  prettyAvailable: () => boolean = isPrettyAvailable
+): Options {
   return {
     level: config.LOG_LEVEL,
     genReqId: generateRequestId,
@@ -68,10 +85,14 @@ export function buildPinoHttpOptions(config: Pick<AppConfig, 'LOG_LEVEL' | 'NODE
         return method.apply(this, scrubbed as typeof inputArgs)
       }
     },
-    ...(config.NODE_ENV === 'development' && { transport: { target: 'pino-pretty' } })
+    ...(config.NODE_ENV === 'development' &&
+      prettyAvailable() && { transport: { target: 'pino-pretty' } })
   }
 }
 
-export function buildLoggerParams(config: Pick<AppConfig, 'LOG_LEVEL' | 'NODE_ENV'>): Params {
-  return { pinoHttp: buildPinoHttpOptions(config) }
+export function buildLoggerParams(
+  config: Pick<AppConfig, 'LOG_LEVEL' | 'NODE_ENV'>,
+  prettyAvailable?: () => boolean
+): Params {
+  return { pinoHttp: buildPinoHttpOptions(config, prettyAvailable) }
 }
