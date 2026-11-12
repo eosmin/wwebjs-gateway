@@ -73,7 +73,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `MEDIA_FETCH_TIMEOUT_MS` | integer, 1 or more | no | `30000` | Milliseconds the download of a media URL of a send may take |
 | `SEND_QUEUE_MAX_PER_SESSION` | integer, 1 or more | no | `500` | Sends a session may have waiting or running in its queue; the next one is refused with 429 SEND_QUEUE_FULL. Redis keeps every job, media included, so the memory this allows is this number times the size of the sends |
 | `SEND_QUEUE_MAX_TOTAL` | integer, 1 or more | no | `2000` | Sends all the sessions together may have waiting or running; the next one is refused with 429 SEND_QUEUE_FULL |
-| `SEND_ENQUEUE_TIMEOUT_MS` | integer, 1 or more | no | `5000` | Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE |
+| `SEND_ENQUEUE_TIMEOUT_MS` | integer, 1 or more | no | `5000` | Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE, or a webhook delivery before it is marked failed |
 | `CONVERSATION_WINDOW_HOURS` | integer, 1 or more | no | `24` | Hours after the last inbound message during which a chat counts as a conversation |
 | `ALLOW_COLD_SENDS` | `true`, `false` | no | `false` | Allow sending to chats without a conversation |
 | `COLD_SENDS_PER_DAY` | integer, 0 to 1000 | no | `20` | Cold sends allowed per session per day |
