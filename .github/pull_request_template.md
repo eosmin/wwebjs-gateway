@@ -15,6 +15,7 @@
 - [ ] Parity matrix / generated docs regenerated (`pnpm docs:gen`) and committed
 - [ ] Tests added or updated (unit; integration if it touches Postgres/Redis); coverage gates pass
 - [ ] Migration includes a rollback script in `prisma/rollbacks/`
+- [ ] Migration is one `BEGIN; ... COMMIT;` (or says why not with a `-- no-transaction: <reason>` line); `pnpm validate:migrations` passes
 - [ ] Sends stay idempotent; events keep `seq` order; nothing blocks the event pipeline
 - [ ] No secrets, QR codes or WhatsApp session data in code, logs or fixtures
 - [ ] The step's checkbox and progress row in `docs/IMPLEMENTATION_PLAN.md` are updated
