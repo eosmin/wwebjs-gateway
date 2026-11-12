@@ -220,15 +220,18 @@ describe('the patched whatsapp-web.js', () => {
     })
   })
 
-  // Probed against a real linked account on WhatsApp Web 2.3000.1052525806 (issue #42): an incoming
-  // call reaches `WAWebCallCollection.setActiveCall(call)` and `setActiveCall(null)` ends it. The
-  // internal Map the library used to wrap is never written, and `add` / `processIncomingCall` are never
-  // called. The page code cannot run in Jest, so the block of Client.js that installs the hook runs here
-  // against a fake `window`
+  // Probed against a real linked account (issue #42, F9b): on WhatsApp Web 2.3000.1052525806 an incoming
+  // call reaches `WAWebCallCollection.setActiveCall(call)` and `setActiveCall(null)` ends it; on
+  // 2.3000.1054292354 `setActiveCall` is not called and the call arrives as `processIncomingCall(id, wid,
+  // offer)` followed by `add(call)`, once per call. The internal Map the library used to wrap is never
+  // written. The page code cannot run in Jest, so the block of Client.js that installs the hooks runs
+  // here against a fake `window`
   describe('the incoming call hook', () => {
     interface CallModule {
       on?: () => void
       setActiveCall?: (call: unknown, ...rest: unknown[]) => unknown
+      add?: (call: unknown, ...rest: unknown[]) => unknown
+      processIncomingCall?: (...args: unknown[]) => unknown
     }
     const hookSource = (): string => {
       const text = source('Client.js')
@@ -262,6 +265,22 @@ describe('the patched whatsapp-web.js', () => {
       on: () => undefined,
       setActiveCall: inner
     })
+    // The shape `add` got in a real call on 2.3000.1054292354 (values redacted): no `outgoing`
+    const added = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+      id: 'CALL1',
+      isGroup: false,
+      groupJid: null,
+      peerJid: { server: 'lid', user: '1', _serialized: '1@lid' },
+      isVideo: false,
+      offerTime: 1793438493,
+      isSilenced: false,
+      offerReceivedWhileOffline: false,
+      ...overrides
+    })
+    const moduleWithAdd = (
+      add: jest.Mock = jest.fn((): string => 'added'),
+      setActiveCall: jest.Mock = jest.fn()
+    ): CallModule => ({ add, setActiveCall, processIncomingCall: jest.fn() })
 
     it('reports a call that reaches setActiveCall', () => {
       const onIncomingCall = jest.fn()
@@ -411,12 +430,181 @@ describe('the patched whatsapp-web.js', () => {
       await new Promise(resolve => setImmediate(resolve))
     })
 
-    it('does nothing when the module is gone or has no setActiveCall', () => {
+    describe('on a build where the call arrives through add', () => {
+      it('reports a call that reaches add, as an incoming one', () => {
+        const onIncomingCall = jest.fn()
+        const module = moduleWithAdd()
+        install(module, onIncomingCall)
+
+        module.add?.(added({ isVideo: true }))
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(1)
+        expect(onIncomingCall).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: 'CALL1',
+            peerJid: '1@lid',
+            offerTime: 1793438493,
+            isVideo: true,
+            isGroup: false,
+            outgoing: false
+          })
+        )
+      })
+
+      it('still runs the original add with its arguments and answers what it answers', () => {
+        const add = jest.fn((): string => 'added')
+        const module = moduleWithAdd(add)
+        install(module)
+        const call = added()
+
+        expect(module.add?.(call, 'extra')).toBe('added')
+        expect(add).toHaveBeenCalledWith(call, 'extra')
+      })
+
+      it('stamps the arrival time when offerTime is 0', () => {
+        jest.useFakeTimers().setSystemTime(new Date(1793438493500))
+        try {
+          const onIncomingCall = jest.fn()
+          const module = moduleWithAdd()
+          install(module, onIncomingCall)
+
+          module.add?.(added({ offerTime: 0 }))
+
+          expect(onIncomingCall).toHaveBeenCalledWith(
+            expect.objectContaining({ offerTime: 1793438493 })
+          )
+        } finally {
+          jest.useRealTimers()
+        }
+      })
+
+      // The order seen in a real voice call: processIncomingCall, add, three repeats of
+      // processIncomingCall 1.5 s later (their isVideo is unreliable), another when the caller hangs up
+      it('reports one call for the whole sequence of a real call', () => {
+        const onIncomingCall = jest.fn()
+        const processIncomingCall = jest.fn()
+        const module = moduleWithAdd()
+        module.processIncomingCall = processIncomingCall
+        install(module, onIncomingCall)
+
+        module.processIncomingCall?.('CALL1', {}, { isVideo: true })
+        module.add?.(added({ isVideo: true }))
+        for (let i = 0; i < 3; i++) module.processIncomingCall?.('CALL1', {}, { isVideo: false })
+        module.processIncomingCall?.('CALL1', {}, { isVideo: false })
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(1)
+        expect(onIncomingCall).toHaveBeenCalledWith(expect.objectContaining({ isVideo: true }))
+        expect(processIncomingCall).toHaveBeenCalledTimes(5)
+      })
+
+      it('reports a call once when a build fires both setActiveCall and add', () => {
+        const onIncomingCall = jest.fn()
+        const module = moduleWithAdd()
+        install(module, onIncomingCall)
+
+        module.setActiveCall?.(ringing())
+        module.add?.(added())
+        module.setActiveCall?.(ringing())
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(1)
+      })
+
+      it('reports a call once when add comes first and setActiveCall after', () => {
+        const onIncomingCall = jest.fn()
+        const module = moduleWithAdd()
+        install(module, onIncomingCall)
+
+        module.add?.(added())
+        module.setActiveCall?.(ringing())
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(1)
+      })
+
+      it('reports each of two different calls', () => {
+        const onIncomingCall = jest.fn()
+        const module = moduleWithAdd()
+        install(module, onIncomingCall)
+
+        module.add?.(added({ id: 'A' }))
+        module.add?.(added({ id: 'B' }))
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(2)
+      })
+
+      it('ignores what add gets that is not a call', () => {
+        const onIncomingCall = jest.fn()
+        const add = jest.fn()
+        const module = moduleWithAdd(add)
+        install(module, onIncomingCall)
+
+        module.add?.(undefined)
+        module.add?.('CALL1')
+        module.add?.([added()])
+        module.add?.({ isVideo: true })
+
+        expect(onIncomingCall).not.toHaveBeenCalled()
+        expect(add).toHaveBeenCalledTimes(4)
+      })
+
+      it('reports a call again on the next add when the report failed', async () => {
+        const onIncomingCall = jest
+          .fn()
+          .mockRejectedValueOnce(new Error('binding gone'))
+          .mockResolvedValue(undefined)
+        const module = moduleWithAdd()
+        install(module, onIncomingCall)
+
+        module.add?.(added())
+        await new Promise(resolve => setImmediate(resolve))
+        module.add?.(added())
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(2)
+      })
+
+      it('does not let a failure of the report stop WhatsApp Web adding the call', async () => {
+        const module = moduleWithAdd()
+        install(
+          module,
+          jest.fn(() => {
+            throw new Error('binding gone')
+          })
+        )
+
+        expect(module.add?.(added())).toBe('added')
+        await new Promise(resolve => setImmediate(resolve))
+      })
+
+      it('wraps add once even if the block runs twice in the page', () => {
+        const onIncomingCall = jest.fn()
+        const module = moduleWithAdd()
+        install(module, onIncomingCall)
+        install(module, onIncomingCall)
+
+        module.add?.(added())
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(1)
+      })
+
+      it('hooks add alone when the module has no setActiveCall', () => {
+        const onIncomingCall = jest.fn()
+        const module: CallModule = { add: jest.fn() }
+        install(module, onIncomingCall)
+
+        module.add?.(added())
+
+        expect(onIncomingCall).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    it('does nothing when the module is gone or has no method to hook', () => {
       expect(() => {
         install(undefined)
       }).not.toThrow()
       expect(() => {
         install({ on: () => undefined })
+      }).not.toThrow()
+      expect(() => {
+        install({ add: undefined, setActiveCall: undefined })
       }).not.toThrow()
     })
   })

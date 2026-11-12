@@ -905,6 +905,19 @@ describe('the other mappers produce DTOs that pass their own schema', () => {
     expect(CallDto.parse(fromWid)).toEqual(fromWid)
     expect(fromWid.from).toBe('a@c.us')
 
+    // What the patched hook hands over for a call that arrives through add(): no handling flags
+    const flagless = mapCall({
+      id: 'c4',
+      from: id('1@lid'),
+      timestamp: 1,
+      isVideo: true,
+      isGroup: false,
+      fromMe: false
+    })
+    expect(CallDto.parse(flagless)).toEqual(flagless)
+    expect(flagless).not.toHaveProperty('canHandleLocally')
+    expect(flagless).not.toHaveProperty('webClientShouldHandle')
+
     const cycle: Record<string, unknown> = { 'a@c.us': { state: 'ringing' } }
     cycle['self'] = cycle
     const withParticipants = mapCall({ ...call, id: 'c3', participants: cycle })
