@@ -7,6 +7,7 @@ import { IntervalThrottle } from '../common/lib/throttle.js'
 import { isChannelId } from '../common/lib/wa-id.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { MessageDto } from '../types/dto.js'
+import { PolicyRule } from '../types/send-policy.dto.js'
 import { WaDisconnectedError, WaMappingError, WaTimeoutError } from '../whatsapp/wa-errors.js'
 import type { WhatsAppClientPort } from '../whatsapp/whatsapp-client.port.js'
 
@@ -50,6 +51,26 @@ export class SendJobYield extends Error {
     this.name = 'SendJobYield'
   }
 }
+
+// The send policy holds a cold send for rules that only apply to cold sends (quiet hours, the gap
+// between two cold sends): the wait can be hours and says nothing about the other chats of the
+// session. The job leaves the lane for the delayed set instead of holding it, and the worker takes
+// the next job. The rules every send shares (the budgets of the session, a chat's own interval) keep
+// the job in the lane, where the order of the session is what the wait protects.
+export class SendJobDelayed extends Error {
+  constructor(
+    readonly delayMs: number,
+    readonly waitedMs: number
+  ) {
+    super('The send job was held by a rule that only applies to cold sends')
+    this.name = 'SendJobDelayed'
+  }
+}
+
+const COLD_ONLY_RULES: ReadonlySet<PolicyRule> = new Set([
+  PolicyRule.QUIET_HOURS,
+  PolicyRule.COLD_SEND_GAP
+])
 
 const bodyOf = (data: SendJobData): string | undefined => {
   if (data.content.type === 'text') return data.content.body
@@ -180,6 +201,9 @@ export class SendJobProcessor {
           message: `The send policy refused this message (${decision.rule})`,
           details: { rule: decision.rule }
         })
+      }
+      if (COLD_ONLY_RULES.has(decision.rule)) {
+        throw new SendJobDelayed(decision.delayMs, waited() + decision.delayMs)
       }
       await pause(decision.delayMs)
     }

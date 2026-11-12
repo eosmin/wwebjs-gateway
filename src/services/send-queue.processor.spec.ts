@@ -13,6 +13,7 @@ import {
 
 import type { SendJobData } from './send-queue.job.js'
 import {
+  SendJobDelayed,
   SendJobYield,
   SendJobProcessor,
   type SendJobDependencies,
@@ -219,6 +220,36 @@ describe('SendJobProcessor', () => {
       expect(result.outcome.ok).toBe(true)
       expect(admit).toHaveBeenCalledTimes(2)
     })
+  })
+
+  describe('a cold send held by the policy', () => {
+    it.each(['quiet_hours', 'cold_send_gap'] as const)(
+      'leaves the lane instead of waiting out %s, with the time it will wait',
+      async rule => {
+        admit.mockResolvedValueOnce({ decision: 'delay', delayMs: 60_000, rule })
+
+        const failure = await run(build(), job({ waitedMs: 1000 })).catch((error: unknown) => error)
+
+        expect(failure).toBeInstanceOf(SendJobDelayed)
+        expect(failure).toMatchObject({ delayMs: 60_000, waitedMs: 61_000 })
+        expect(client.callsOf('sendMessage')).toHaveLength(0)
+        expect(hooks.markDispatched).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each(['session_per_minute', 'session_per_hour', 'per_chat_interval'] as const)(
+      'keeps the lane for %s',
+      async rule => {
+        admit
+          .mockResolvedValueOnce({ decision: 'delay', delayMs: 20, rule })
+          .mockResolvedValueOnce(ALLOW)
+
+        const result = await run(build())
+
+        expect(result.outcome.ok).toBe(true)
+        expect(admit).toHaveBeenCalledTimes(2)
+      }
+    )
   })
 
   describe('a session that is not ready', () => {
