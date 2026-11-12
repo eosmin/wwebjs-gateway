@@ -159,6 +159,97 @@ describe('an invite that lacks a field', () => {
   })
 })
 
+describe('an invite as 1.34.8 delivers it (every key a string)', () => {
+  const invite = (inviteCodeExp: unknown) =>
+    mapMessage(
+      sparse<MessageSource>({
+        ...MESSAGE,
+        type: 'groups_v4_invite',
+        inviteV4: {
+          toId: '100000000000001@lid',
+          fromId: '100000000000002@lid',
+          groupId: '120000000000000001@g.us',
+          groupName: 'Group',
+          inviteCode: 'abc',
+          inviteCodeExp
+        }
+      }),
+      OPTIONS
+    )
+
+  it.each([
+    ['1792000000', 1_792_000_000],
+    ['0', 0],
+    [1_792_000_000, 1_792_000_000]
+  ])('reads an expiration of %p as the number %p', (exp, expected) => {
+    const dto = invite(exp)
+
+    expect(dto.inviteV4?.inviteCodeExp).toBe(expected)
+    expect(MessageDto.parse(dto)).toEqual(dto)
+  })
+
+  it.each(['', 'soon', '12x', Number.NaN, null])(
+    'leaves the invite out when the expiration is %p, and keeps the message',
+    exp => {
+      const dto = invite(exp)
+
+      expect(dto.inviteV4).toBeUndefined()
+      expect(MessageDto.parse(dto)).toEqual(dto)
+    }
+  )
+})
+
+describe('a message of a special type that lacks what Message.js copies without a default', () => {
+  it.each(['isStarred', 'links', 'vCards', 'isStatus', 'isGif', 'forwardingScore'])(
+    'is delivered without %s, which is false, empty or 0',
+    field => {
+      const dto = mapMessage(sparse<MessageSource>(without(MESSAGE, field)), OPTIONS)
+
+      expect(MessageDto.parse(dto)).toEqual(dto)
+    }
+  )
+})
+
+describe('a last message that does not fit its schema', () => {
+  const broken = sparse<MessageSource>({ ...MESSAGE, forwardingScore: 'many' })
+
+  it('is left out of the chat, which is kept, and its fields are reported without values', () => {
+    const unreadable = jest.fn()
+
+    const dto = mapChat(sparse({ ...CHAT, lastMessage: broken }), {
+      ...OPTIONS,
+      onUnreadableMessage: unreadable
+    })
+
+    expect(dto.lastMessage).toBeUndefined()
+    expect(unreadable).toHaveBeenCalledWith('forwardingScore')
+    expect(ChatDto.parse(dto)).toEqual(dto)
+  })
+
+  it('is left out of a channel and of a group chat too', () => {
+    const channel = mapChannel(sparse({ id: id('1@newsletter'), lastMessage: broken }), OPTIONS)
+    const group = mapGroupChat(
+      sparse({
+        ...CHAT,
+        id: id('g@g.us'),
+        createdAt: 1_761_577_446,
+        participants: [],
+        lastMessage: broken
+      }),
+      OPTIONS
+    )
+
+    expect(ChannelDto.parse(channel).lastMessage).toBeUndefined()
+    expect(GroupChatDto.parse(group).lastMessage).toBeUndefined()
+  })
+
+  it('stays when it fits', () => {
+    const dto = mapChat(sparse({ ...CHAT, lastMessage: sparse<MessageSource>(MESSAGE) }), OPTIONS)
+
+    expect(dto.lastMessage?.type).toBe('location')
+  })
+})
+
 describe('the DTOs accept what a real account leaves out', () => {
   it('a contact without pushname, section header, number or type', () => {
     const dto = mapContact(sparse(without(CONTACT, 'pushname', 'sectionHeader', 'number', 'type')))

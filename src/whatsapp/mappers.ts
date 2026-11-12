@@ -1,4 +1,5 @@
 import { stripNul } from '../common/lib/nul.js'
+import { MessageDto as MessageSchema } from '../types/dto.js'
 import type {
   BatteryInfoDto,
   BroadcastDto,
@@ -293,9 +294,23 @@ export interface MessageSource extends Omit<
   | 'isForwarded'
   | 'timestamp'
   | 'location'
+  | 'isStarred'
+  | 'links'
+  | 'vCards'
+  | 'isStatus'
+  | 'isGif'
+  | 'forwardingScore'
 > {
   id: IdLike
   location?: LocationSource | null
+  // Message.js copies these as they come (`this.isStarred = data.star`, `this.links = data.links`)
+  // and a message of a special type can lack them: absent is false, empty or 0
+  isStarred?: boolean | null
+  links?: MessageDto['links'] | null
+  vCards?: string[] | null
+  isStatus?: boolean | null
+  isGif?: boolean | null
+  forwardingScore?: number | null
   // WhatsApp leaves these out of some messages
   broadcast?: boolean | null
   isEphemeral?: boolean | null
@@ -310,7 +325,8 @@ export interface MessageSource extends Omit<
   // Typed string[], but Message.js copies the `{ name, localId }` options WhatsApp Web holds
   pollOptions?: (string | { name: string })[] | null
   dynamicReplyButtons?: object | null
-  inviteV4?: InviteV4Dto | null
+  // WhatsApp Web hands every key as a string, `inviteCodeExp` included (typed number)
+  inviteV4?: Partial<Record<keyof InviteV4Dto, unknown>> | null
   latestEditMsgKey?: IdLike | null
   protocolMessageKey?: IdLike | null
   // wwebjs spells it this way
@@ -328,6 +344,9 @@ export interface MessageMapOptions {
   // Called when a message carries a timestamp that is not a date (NaN, Infinity, out of range): it
   // is kept, dated by its arrival, instead of being lost
   onInvalidTimestamp?: () => void
+  // Called with the names of the fields (never the values) when the last message of a chat does not
+  // fit its schema: it is left out of the chat instead of turning the whole listing into a 500
+  onUnreadableMessage?: (fields: string) => void
 }
 
 const MESSAGE_FIELDS = [
@@ -335,21 +354,15 @@ const MESSAGE_FIELDS = [
   'author',
   'deviceType',
   'body',
-  'isStatus',
-  'isGif',
   'from',
   'fromMe',
   'hasMedia',
   'hasQuotedMsg',
   'hasReaction',
   'duration',
-  'forwardingScore',
-  'isStarred',
-  'vCards',
   'mediaKey',
   'to',
   'type',
-  'links',
   'orderId',
   'title',
   'description',
@@ -393,27 +406,43 @@ function mapLocation(source: LocationSource | null | undefined): LocationDto | u
   return { ...pick(source, LOCATION_FIELDS), latitude, longitude }
 }
 
-// An invite that lacks a field cannot be accepted, so it is left out; the message itself is kept
-function mapInvite(source: InviteV4Dto | null | undefined): InviteV4Dto | undefined {
-  if (!source) return undefined
-  const invite = pick(source, INVITE_V4_FIELDS)
-  const complete =
-    invite.inviteCode !== undefined &&
-    invite.inviteCodeExp !== undefined &&
-    invite.groupId !== undefined &&
-    invite.fromId !== undefined &&
-    invite.toId !== undefined
-  return complete ? invite : undefined
+const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
+
+// A whole number of seconds, from a number or from the string WhatsApp Web really delivers
+function wholeSeconds(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isInteger(value) && value >= 0 ? value : undefined
+  if (typeof value === 'string' && /^\d{1,15}$/.test(value)) return Number(value)
+  return undefined
 }
 
-const INVITE_V4_FIELDS = [
-  'inviteCode',
-  'inviteCodeExp',
-  'groupId',
-  'groupName',
-  'fromId',
-  'toId'
-] as const satisfies readonly (keyof InviteV4Dto)[]
+// An invite that lacks a field (or whose expiration is not a number) cannot be accepted, so it is
+// left out; the message itself is kept
+function mapInvite(source: MessageSource['inviteV4']): InviteV4Dto | undefined {
+  if (!source) return undefined
+  const inviteCode = text(source.inviteCode)
+  const inviteCodeExp = wholeSeconds(source.inviteCodeExp)
+  const groupId = text(source.groupId)
+  const fromId = text(source.fromId)
+  const toId = text(source.toId)
+  if (
+    inviteCode === undefined ||
+    inviteCodeExp === undefined ||
+    groupId === undefined ||
+    fromId === undefined ||
+    toId === undefined
+  ) {
+    return undefined
+  }
+  const groupName = text(source.groupName)
+  return {
+    inviteCode,
+    inviteCodeExp,
+    groupId,
+    fromId,
+    toId,
+    ...(groupName !== undefined && { groupName })
+  }
+}
 
 // The route of `messages.media` on the public address of the gateway, which may sit under a path
 // prefix behind a reverse proxy
@@ -465,6 +494,12 @@ function mapMessageFields(source: MessageSource, options: MessageMapOptions): Me
     ...(pick(source, MESSAGE_FIELDS) as MessageDto), // required fields are filled by wwebjs
     id: serializeId(source.id),
     ack: source.ack ?? null,
+    isStarred: source.isStarred ?? false,
+    links: source.links ?? [],
+    vCards: source.vCards ?? [],
+    isStatus: source.isStatus ?? false,
+    isGif: source.isGif ?? false,
+    forwardingScore: source.forwardingScore ?? 0,
     broadcast: source.broadcast ?? false,
     isEphemeral: source.isEphemeral ?? false,
     isForwarded: source.isForwarded ?? false,
@@ -724,6 +759,24 @@ export interface ChatSource extends Omit<
 
 const CHAT_FIELDS = ['muteExpiration', 'name'] as const satisfies readonly (keyof ChatSource)[]
 
+// The last message of a chat is shown only when it fits its schema: one odd message must not
+// turn a listing of every chat into a 500 (ADR 0006). The message stays in `messages` and the events.
+function mapLastMessage(source: MessageSource, options: MessageMapOptions): MessageDto | undefined {
+  try {
+    const message = mapMessage(source, options)
+    const parsed = MessageSchema.safeParse(message)
+    if (parsed.success) return message
+    options.onUnreadableMessage?.(
+      [...new Set(parsed.error.issues.map(issue => issue.path.join('.') || '(root)'))].join(', ')
+    )
+  } catch (error: unknown) {
+    options.onUnreadableMessage?.(
+      `(mapping failed: ${error instanceof Error ? error.name : typeof error})`
+    )
+  }
+  return undefined
+}
+
 export function mapChat(source: ChatSource, options: MessageMapOptions): ChatDto {
   const chat: ChatDto = {
     ...(pick(source, CHAT_FIELDS) as ChatDto),
@@ -738,7 +791,8 @@ export function mapChat(source: ChatSource, options: MessageMapOptions): ChatDto
     isLocked: source.isLocked ?? false,
     timestamp: source.timestamp ?? null
   }
-  if (source.lastMessage) chat.lastMessage = mapMessage(source.lastMessage, options)
+  const lastMessage = source.lastMessage ? mapLastMessage(source.lastMessage, options) : undefined
+  if (lastMessage) chat.lastMessage = lastMessage
   return chat
 }
 
@@ -798,7 +852,8 @@ export function mapChannel(source: ChannelSource, options: MessageMapOptions): C
     unreadCount: source.unreadCount ?? 0,
     isMuted: source.isMuted ?? false
   }
-  if (source.lastMessage) channel.lastMessage = mapMessage(source.lastMessage, options)
+  const lastMessage = source.lastMessage ? mapLastMessage(source.lastMessage, options) : undefined
+  if (lastMessage) channel.lastMessage = lastMessage
   return channel
 }
 

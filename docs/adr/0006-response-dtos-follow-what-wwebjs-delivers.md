@@ -64,6 +64,21 @@ at runtime (typings: `ifProfileLinked`).
   reads `isProfileLinked` first.
 - A response that still fails its schema logs the failing paths and issue codes (never values).
 
+## Addendum (F13, H-F9B-04): one odd message must not take down a listing of chats
+
+A `groups_v4_invite` delivers every `inviteV4` key as a string (`inviteCodeExp` is typed number), and
+while it was the last message of a chat, `GET chats` answered 500 for the whole session.
+
+- `inviteCodeExp` is read from a number or a numeric string; an invite whose expiration is not a
+  whole number is left out (it cannot be accepted), the message is kept.
+- **Decision reversed for the last message of a chat or channel:** the earlier rule "a response that
+  fails its schema is a 500, by design" stays for single objects and for message lists, but the
+  `lastMessage` of a chat/group/channel is validated by the mapper and **left out** when it does not fit
+  (or cannot be mapped); the adapter logs the field names, never the values. A listing of N chats
+  must not fail for one message of a special type.
+- `Message.js` copies `isStarred`, `links`, `vCards`, `isStatus`, `isGif`, `forwardingScore` without a
+  default, so the mapper defaults them (false, `[]`, `[]`, false, false, 0).
+
 ## Alternatives considered
 
 - **Keep the strict schemas and fix each field as a real account breaks it.** Rejected: every miss is a
