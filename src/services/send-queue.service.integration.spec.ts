@@ -257,6 +257,24 @@ describe('send queue (integration)', () => {
       expect(sentBodies()).toEqual(['frio 1', 'frio 2', 'frio 3'])
     })
 
+    it('puts the later messages of the cold chat aside until the held one is due, not once a second', async () => {
+      const service = await boot()
+      holdFirstColdSend(OTHER_CHAT, 3000, 'cold_send_gap')
+      const aside = jest.spyOn(Job.prototype, 'moveToDelayed')
+
+      await service.submit(text('frio 1', { chatId: OTHER_CHAT }))
+      await service.submit(text('frio 2', { chatId: OTHER_CHAT }))
+      await service.submit(text('frio 3', { chatId: OTHER_CHAT }))
+      await new Promise(resolve => setTimeout(resolve, 2300))
+
+      // One for the held job and one for each later message; a turn every second would make 7 by now
+      expect(aside.mock.calls.length).toBeLessThanOrEqual(4)
+      expect(sentBodies()).toEqual([])
+      await until(() => sentBodies().length === 3, 6000)
+      expect(sentBodies()).toEqual(['frio 1', 'frio 2', 'frio 3'])
+      aside.mockRestore()
+    }, 15_000)
+
     it('still blocks the lane for a delay of the whole session, which every send shares', async () => {
       const service = await boot()
       holdFirstColdSend(CHAT, 400, 'session_per_minute')

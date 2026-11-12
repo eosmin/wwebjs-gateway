@@ -48,6 +48,10 @@ const STEP_ASIDE_MS = 1000
 // Putting a job aside is tried this many times, with a growing pause between the tries
 const PUT_ASIDE_ATTEMPTS = 3
 const PUT_ASIDE_RETRY_MS = 100
+// A job that makes way for one that is held waits for it at most this long before it looks again
+const STEP_ASIDE_MAX_MS = 30_000
+// BullMQ writes the score of a delayed job as its due time in ms times this, plus a counter
+const DELAYED_SCORE_UNIT = 0x1000
 // The ids of the waiting and delayed jobs the order check reads: more than any real backlog
 const ORDER_CHECK_IDS = 10_000
 
@@ -486,7 +490,8 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     const startedAt = Date.now()
     let result: SendJobResult
     try {
-      if (await this.hasOlderPending(lane, job)) await this.makeWay(lane, job, token)
+      const wayMs = await this.waitForOlder(lane, job)
+      if (wayMs !== undefined) await this.makeWay(lane, job, token, wayMs)
       result = await lane.processor.run(
         job.data,
         {
@@ -556,10 +561,11 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
   private async makeWay(
     lane: Lane,
     job: Job<SendJobData, SendJobResult>,
-    token: string | undefined
+    token: string | undefined,
+    delayMs: number
   ): Promise<void> {
     try {
-      await this.putAside(job, token, STEP_ASIDE_MS)
+      await this.putAside(job, token, delayMs)
     } catch (error: unknown) {
       if (error instanceof DelayedError) throw error
       this.logger.warn(
@@ -572,33 +578,53 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
   // due, behind the ones that never left it. Those take the first turn only to find it and make way,
   // so the chat keeps its order. It reads the ids of the waiting and delayed jobs and one field of
   // each (the stamp), never the data: a backlog of media would otherwise be loaded on every turn.
+  // Answers how long to make way: a moment when an older job is already waiting its turn, and until the
+  // older one is due when it is only held (a cold send can be held for hours, and a turn every second of
+  // every later message of the chat would cost the worker and Redis more than the wait is worth; the cap
+  // is for a held job that is withdrawn in the meantime). undefined: nothing older is pending.
   // An error here must not fail a send that nothing is wrong with.
-  private async hasOlderPending(
+  private async waitForOlder(
     lane: Lane,
     job: Job<SendJobData, SendJobResult>
-  ): Promise<boolean> {
+  ): Promise<number | undefined> {
     try {
       const client = this.redis.client
       const [waiting, delayed] = await Promise.all([
         client.lrange(lane.queue.toKey('wait'), 0, ORDER_CHECK_IDS - 1),
-        client.zrange(lane.queue.toKey('delayed'), '0', String(ORDER_CHECK_IDS - 1))
+        client.zrange(lane.queue.toKey('delayed'), '0', String(ORDER_CHECK_IDS - 1), 'WITHSCORES')
       ])
-      const others = [...waiting, ...delayed].filter(id => id !== job.id)
-      if (others.length === 0) return false
+      // The score of a delayed job is its due time in ms, times 0x1000 plus a counter
+      const others: { id: string; dueAt?: number }[] = waiting
+        .filter(id => id !== job.id)
+        .map(id => ({ id }))
+      for (let i = 0; i + 1 < delayed.length; i += 2) {
+        const id = delayed[i] as string
+        if (id !== job.id)
+          others.push({ id, dueAt: Math.floor(Number(delayed[i + 1]) / DELAYED_SCORE_UNIT) })
+      }
+      if (others.length === 0) return undefined
       const reads = client.pipeline()
-      for (const id of others) reads.hmget(lane.queue.toKey(id), 'timestamp', 'name')
+      for (const { id } of others) reads.hmget(lane.queue.toKey(id), 'timestamp', 'name')
       const answers = (await reads.exec()) ?? []
       const mine = jobNameOf(job.data.chatId)
-      return answers.some(([error, fields]) => {
-        if (error !== null || !Array.isArray(fields)) return false
+      let wayMs: number | undefined
+      answers.forEach(([error, fields], index) => {
+        if (error !== null || !Array.isArray(fields)) return
         const [stamp, name] = fields as [string | null, string | null]
         // A job of another chat does not matter; one of an older version has no chat, so it counts
         const sameChat = name === null || name === JOB_NAME || name === mine
-        return sameChat && Number(stamp) < job.timestamp
+        if (!sameChat || !(Number(stamp) < job.timestamp)) return
+        const dueAt = others[index]?.dueAt
+        const ms =
+          dueAt === undefined
+            ? STEP_ASIDE_MS
+            : Math.min(Math.max(dueAt - Date.now(), STEP_ASIDE_MS), STEP_ASIDE_MAX_MS)
+        wayMs = wayMs === undefined ? ms : Math.min(wayMs, ms)
       })
+      return wayMs
     } catch (error: unknown) {
       this.logger.warn(`[${lane.sessionId}] Order check failed (${toErrorBody(error).code})`)
-      return false
+      return undefined
     }
   }
 
