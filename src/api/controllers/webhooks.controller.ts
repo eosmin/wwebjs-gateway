@@ -229,8 +229,8 @@ export class WebhooksController {
     scope: 'webhooks',
     summary: 'Send a test event',
     description:
-      'Queues a `ping` event to the webhook, through the same path as the real ones: the signature, the address check and the retries. The answer is the pending delivery; follow it in the list of deliveries. A webhook of every session needs `sessionId` to say which session the ping comes from. A ping has `seq: 0` and is not part of any session sequence.',
-    errors: ON_WEBHOOK,
+      'Queues a `ping` event to the webhook, through the same path as the real ones: the signature, the address check and the retries. The answer is the pending delivery; follow it in the list of deliveries. A webhook of every session needs `sessionId` to say which session the ping comes from. A ping has `seq: 0` and is not part of any session sequence. A webhook accepts `WEBHOOK_TEST_MAX_PER_MINUTE` pings a minute; one more is `429 RATE_LIMITED` with `Retry-After`.',
+    errors: [...ON_WEBHOOK, 'RATE_LIMITED'],
     examples: {
       request: null,
       response: {

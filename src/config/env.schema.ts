@@ -348,6 +348,9 @@ export const envSchema = z
     WEBHOOKS_MAX_PER_SESSION: count(20, { min: 1 }).describe(
       'Webhooks a session can have, and as many for those of every session; creating one past it is refused'
     ),
+    WEBHOOK_TEST_MAX_PER_MINUTE: count(6, { min: 1 }).describe(
+      'Test pings (POST /v1/webhooks/:id/test) a webhook accepts per minute; one more is refused with 429 RATE_LIMITED. Each one is a signed request to the URL of the webhook'
+    ),
     WEBHOOK_TIMEOUT_MS: count(10000, { min: 1 }).describe(
       'Milliseconds a webhook endpoint has to answer'
     ),
