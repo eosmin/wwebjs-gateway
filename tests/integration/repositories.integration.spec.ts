@@ -161,6 +161,19 @@ describe('repositories (integration)', () => {
       expect(await sessions.mergeSettings(`ghost-${id}`, { a: 1 })).toBe(false)
     })
 
+    it('ends with the highest bound whatever the order concurrent raises arrive in', async () => {
+      const id = await newSession('seq-race')
+
+      for (let round = 1; round <= 5; round++) {
+        const base = BigInt(round * 1000)
+        const values = [5n, 1n, 9n, 3n, 7n, 2n, 8n].map(value => base + value)
+        await Promise.all(
+          values.sort(() => Math.random() - 0.5).map(v => sessions.raiseSeqHighWater(id, v))
+        )
+        expect((await sessions.findById(id))?.seqHighWater).toBe(base + 9n)
+      }
+    })
+
     it('only raises the seq bound with raiseSeqHighWater', async () => {
       const id = await newSession('seq-bound')
       expect((await sessions.findById(id))?.seqHighWater).toBe(0n)
@@ -860,6 +873,96 @@ describe('repositories (integration)', () => {
 
       expect(again).toMatchObject({ ack: 2, body: 'edited', emittedAt })
       expect(again.receivedAt).toEqual(new Date('2026-06-01T10:00:01Z'))
+    })
+
+    it('never lowers the ack when a stale copy of the message arrives', async () => {
+      const sessionId = await newSession('msg-upsert-ack')
+      await messages.upsert(message(sessionId, 'm1', { ack: 3 }))
+
+      const stale = await messages.upsert(message(sessionId, 'm1', { ack: 1, body: 'again' }))
+
+      expect(stale).toMatchObject({ ack: 3, body: 'again' })
+      expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(3)
+    })
+
+    it('keeps the ack when the repeated message carries none', async () => {
+      const sessionId = await newSession('msg-upsert-null')
+      await messages.upsert(message(sessionId, 'm1', { ack: 2 }))
+
+      await messages.upsert(message(sessionId, 'm1', { ack: null }))
+
+      expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(2)
+    })
+
+    it('raises the ack of a repeated message and takes the first ack of one stored without', async () => {
+      const sessionId = await newSession('msg-upsert-up')
+      await messages.upsert(message(sessionId, 'm1', { ack: 1 }))
+      await messages.upsert(message(sessionId, 'm2', { ack: null }))
+
+      expect((await messages.upsert(message(sessionId, 'm1', { ack: 2 }))).ack).toBe(2)
+      expect((await messages.upsert(message(sessionId, 'm2', { ack: 1 }))).ack).toBe(1)
+    })
+
+    it('ends with the highest ack whatever the order concurrent upserts arrive in', async () => {
+      const sessionId = await newSession('msg-upsert-race')
+      await messages.upsert(message(sessionId, 'm1', { ack: 0 }))
+
+      for (let round = 0; round < 5; round++) {
+        const acks = [2, 0, 3, 1, 3, 0, 2, 1].sort(() => Math.random() - 0.5)
+        await Promise.all(acks.map(ack => messages.upsert(message(sessionId, 'm1', { ack }))))
+        expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(3)
+      }
+    })
+
+    it('stores the first copy of concurrent upserts of a new message once', async () => {
+      const sessionId = await newSession('msg-upsert-new')
+
+      await Promise.all([1, 3, 2, 0].map(ack => messages.upsert(message(sessionId, 'm1', { ack }))))
+
+      expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(3)
+    })
+
+    it('records each event of a message once, however many copies race', async () => {
+      const sessionId = await newSession('msg-claim')
+      await messages.upsert(message(sessionId, 'm1'))
+
+      const wins = await Promise.all(
+        Array.from({ length: 6 }, () => messages.claimEvent(sessionId, 'm1', 'message'))
+      )
+
+      expect(wins.filter(Boolean)).toHaveLength(1)
+      expect(await messages.claimEvent(sessionId, 'm1', 'message')).toBe(false)
+      // Another event of the same message has its own record
+      expect(await messages.claimEvent(sessionId, 'm1', 'message_create')).toBe(true)
+      expect((await messages.findById(sessionId, 'm1'))?.seenEvents).toEqual([
+        'message',
+        'message_create'
+      ])
+    })
+
+    it('keeps the record of the events when a repeated message is stored again', async () => {
+      const sessionId = await newSession('msg-claim-keep')
+      await messages.upsert(message(sessionId, 'm1'))
+      await messages.claimEvent(sessionId, 'm1', 'message')
+
+      await messages.upsert(message(sessionId, 'm1', { body: 'again' }))
+
+      expect(await messages.claimEvent(sessionId, 'm1', 'message')).toBe(false)
+    })
+
+    it('treats a NULL list as empty', async () => {
+      const sessionId = await newSession('msg-claim-null')
+      await messages.upsert(message(sessionId, 'm1'))
+      await prisma.$executeRaw`UPDATE "messages" SET "seenEvents" = NULL WHERE "sessionId" = ${sessionId}`
+
+      expect(await messages.claimEvent(sessionId, 'm1', 'message')).toBe(true)
+      expect(await messages.claimEvent(sessionId, 'm1', 'message')).toBe(false)
+    })
+
+    it('does not record an event of a message that is not stored', async () => {
+      const sessionId = await newSession('msg-claim-none')
+
+      expect(await messages.claimEvent(sessionId, 'nope', 'message')).toBe(false)
     })
 
     it('tells which ids are already stored', async () => {

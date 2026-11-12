@@ -187,6 +187,10 @@ model StoredMessage {
   policyText      String?
   origin          Json?
   dto             Json
+  // The deduplicated events already handled for this message (`message`, `message_create`), the
+  // durable twin of the Redis dedupe keys: when Redis loses them, a re-emitted event is still
+  // recognised and not published again. Removed together with the row by the retention.
+  seenEvents      String[]         @default([])
   createdAt       DateTime         @default(now()) @db.Timestamptz(3)
 
   @@id([sessionId, id])

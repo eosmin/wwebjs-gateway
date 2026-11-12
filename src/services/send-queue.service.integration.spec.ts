@@ -11,7 +11,7 @@ import type { IdempotencyRepository } from '../database/repositories/idempotency
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import { MetricsService } from '../infra/metrics/metrics.service.js'
 import { RedisService } from '../infra/redis/redis.service.js'
-import type { PolicyDecision } from '../types/send-policy.dto.js'
+import type { PolicyDecision, PolicyRule } from '../types/send-policy.dto.js'
 import type { EventPipelineService } from '../whatsapp/event-pipeline.service.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
 import { WaOperationError } from '../whatsapp/wa-errors.js'
@@ -57,6 +57,7 @@ describe('send queue (integration)', () => {
   let policy: {
     admit: jest.Mock<Promise<PolicyDecision>>
     recordOutcome: jest.Mock<Promise<boolean>>
+    forget: jest.Mock<Promise<void>>
   }
   let idempotency: {
     complete: jest.Mock<Promise<boolean>>
@@ -161,7 +162,8 @@ describe('send queue (integration)', () => {
     }
     policy = {
       admit: jest.fn<Promise<PolicyDecision>, []>().mockResolvedValue(ALLOW),
-      recordOutcome: jest.fn<Promise<boolean>, []>().mockResolvedValue(false)
+      recordOutcome: jest.fn<Promise<boolean>, []>().mockResolvedValue(false),
+      forget: jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined)
     }
   })
 
@@ -197,6 +199,74 @@ describe('send queue (integration)', () => {
 
     await until(() => sentBodies().length === 2)
     expect(sentBodies()).toEqual(['primero', 'segundo'])
+  })
+
+  describe('a cold send held by the policy', () => {
+    const OTHER_CHAT = '5215500000003@c.us'
+    const COLD_RULES: PolicyRule[] = ['quiet_hours', 'cold_send_gap']
+
+    // The first admission of COLD_CHAT is delayed for `delayMs`, the rest are allowed
+    const holdFirstColdSend = (coldChat: string, delayMs: number, rule: PolicyRule): void => {
+      let held = false
+      policy.admit.mockImplementation((intent: { chatId: string }) => {
+        if (intent.chatId === coldChat && !held) {
+          held = true
+          return Promise.resolve({ decision: 'delay', delayMs, rule })
+        }
+        return Promise.resolve(ALLOW)
+      })
+    }
+
+    it.each(COLD_RULES)(
+      'does not block the sends to other chats of the session (%s)',
+      async rule => {
+        const service = await boot()
+        holdFirstColdSend(OTHER_CHAT, 60_000, rule)
+
+        const cold = await service.submit(text('frio', { chatId: OTHER_CHAT }))
+        await service.submit(text('tibio'))
+
+        await until(() => sentBodies().includes('tibio'))
+        expect(sentBodies()).toEqual(['tibio'])
+        await expect(service.status(sessionId, cold.jobId)).resolves.toMatchObject({
+          status: 'queued'
+        })
+      }
+    )
+
+    it('sends it once the hold ends', async () => {
+      const service = await boot()
+      holdFirstColdSend(OTHER_CHAT, 400, 'quiet_hours')
+
+      await service.submit(text('frio', { chatId: OTHER_CHAT }))
+      await service.submit(text('tibio'))
+
+      await until(() => sentBodies().length === 2)
+      expect(sentBodies()).toEqual(['tibio', 'frio'])
+    })
+
+    it('keeps the order of the messages of the cold chat itself', async () => {
+      const service = await boot()
+      holdFirstColdSend(OTHER_CHAT, 400, 'cold_send_gap')
+
+      await service.submit(text('frio 1', { chatId: OTHER_CHAT }))
+      await service.submit(text('frio 2', { chatId: OTHER_CHAT }))
+      await service.submit(text('frio 3', { chatId: OTHER_CHAT }))
+
+      await until(() => sentBodies().length === 3)
+      expect(sentBodies()).toEqual(['frio 1', 'frio 2', 'frio 3'])
+    })
+
+    it('still blocks the lane for a delay of the whole session, which every send shares', async () => {
+      const service = await boot()
+      holdFirstColdSend(CHAT, 400, 'session_per_minute')
+
+      await service.submit(text('primero'))
+      await service.submit(text('segundo', { chatId: OTHER_CHAT }))
+
+      await until(() => sentBodies().length === 2)
+      expect(sentBodies()).toEqual(['primero', 'segundo'])
+    })
   })
 
   it('returns the outcome to a caller that waits and does not publish it as an event', async () => {
@@ -661,6 +731,36 @@ describe('send queue (integration)', () => {
       const queues: number[] = []
       service.watchQueues(list => queues.push(list.length))()
       expect(queues).toEqual([0])
+    })
+
+    it('drops the send policy state of the session, after its lane is closed', async () => {
+      await boot()
+      const order: string[] = []
+      policy.forget.mockImplementation(() => {
+        order.push('forget')
+        return Promise.resolve()
+      })
+
+      await removed?.(sessionId)
+      order.push('removed')
+
+      expect(policy.forget).toHaveBeenCalledWith(sessionId)
+      expect(order).toEqual(['forget', 'removed'])
+    })
+
+    it('drops the send policy state also when the session never had a lane', async () => {
+      await boot()
+
+      await removed?.('no-such-lane')
+
+      expect(policy.forget).toHaveBeenCalledWith('no-such-lane')
+    })
+
+    it('fails the deletion call, not the lane cleanup, when the state cannot be dropped', async () => {
+      await boot()
+      policy.forget.mockRejectedValueOnce(new Error('redis down'))
+
+      await expect(removed?.(sessionId)).rejects.toThrow('redis down')
     })
 
     it('does not fail the deletion when the lane never opened', async () => {

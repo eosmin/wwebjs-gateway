@@ -87,6 +87,12 @@ With `BULL_BOARD_ENABLED=true` the dashboard is served at `/admin/queues`, with 
 
 The check that a session is sending asks the queue, which is true from the dispatch mark until the job is accounted for. A send that starts between the check and the restart ends as `UNKNOWN_OUTCOME`, never as a lost or double message.
 
+## A cold send that the policy holds
+
+Most delays of the send policy are waited out inside the lane: the budgets of the session are shared by every send, and a job that waits in place keeps its turn. The two rules that apply only to cold sends are different: quiet hours (up to a day) and the gap between two new chats (`COLD_SEND_MIN_GAP_MS`). A job held by one of them is moved to the delayed set of BullMQ for the length of the delay (the time counts as waited, as it did in the lane) and the worker takes the next job, so a cold send waiting for the morning does not stop the replies of the session.
+
+The order that matters is the one inside a conversation, so the check "is an older job of mine still queued?" looks at the jobs of the same chat only. Each job is named `send:<chat id>` and the check reads that name from the hash of the job, without loading its data; a job left by an older version (named `send`) counts for every chat. A younger message to a chat steps aside for a second at a time while an older one of the same chat waits, held or not.
+
 ## Callers that wait
 
 When the session is deleted, the callers still waiting for one of its jobs are answered at once with `NOT_FOUND`.

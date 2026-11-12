@@ -44,8 +44,71 @@ describe('db-errors', () => {
       ).toBe(true)
     })
 
-    it.each(['P2002', 'P2003', 'P2025'])('does not take %s, which would fail again', code => {
-      expect(isTransientDbError(knownError(code))).toBe(false)
+    it.each(['P2002', 'P2003', 'P2025', 'P2000', 'P2010', 'P2011', 'P2014'])(
+      'does not take %s, which would fail again',
+      code => {
+        expect(isTransientDbError(knownError(code))).toBe(false)
+      }
+    )
+
+    it.each(['P2028', 'P2037'])('takes %s (transaction expired, too many connections)', code => {
+      expect(isTransientDbError(knownError(code))).toBe(true)
+    })
+
+    // Raw SQL and the driver adapter report the Postgres code (SQLSTATE) in other places
+    const rawError = (meta: Record<string, unknown>): Prisma.PrismaClientKnownRequestError =>
+      new Prisma.PrismaClientKnownRequestError('boom', {
+        code: 'P2010',
+        clientVersion: 'test',
+        meta
+      })
+
+    it.each(['40001', '40P01', '53300', '55P03', '57P01', '57P02', '57P03', '08000', '08006'])(
+      'takes the Postgres code %s in meta.code for transient',
+      code => {
+        expect(isTransientDbError(rawError({ code }))).toBe(true)
+      }
+    )
+
+    it.each(['40001', '57P01', '08006'])(
+      'takes the Postgres code %s of the driver adapter for transient',
+      originalCode => {
+        expect(
+          isTransientDbError(rawError({ driverAdapterError: { cause: { originalCode } } }))
+        ).toBe(true)
+      }
+    )
+
+    it.each(['23505', '23503', '42P01', '22001', '42601', '08P01', '08004'])(
+      'does not take the Postgres code %s, which would fail again',
+      code => {
+        expect(isTransientDbError(rawError({ code }))).toBe(false)
+      }
+    )
+
+    it.each(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', '57P01', '40001'])(
+      'takes a plain error with code %s for transient',
+      code => {
+        expect(isTransientDbError(Object.assign(new Error('boom'), { code }))).toBe(true)
+      }
+    )
+
+    it('looks through the cause of a wrapped error', () => {
+      const wrapped = new Error('wrapper', {
+        cause: Object.assign(new Error('x'), { code: '57P01' })
+      })
+      expect(isTransientDbError(wrapped)).toBe(true)
+    })
+
+    it('stops following a cause that points back to itself', () => {
+      const loop: Error & { cause?: unknown } = new Error('loop')
+      loop.cause = loop
+      expect(isTransientDbError(loop)).toBe(false)
+    })
+
+    it('does not take a plain error with an unrelated code for transient', () => {
+      expect(isTransientDbError(Object.assign(new Error('boom'), { code: 'ENOENT' }))).toBe(false)
+      expect(isTransientDbError(Object.assign(new Error('boom'), { code: 42 }))).toBe(false)
     })
 
     it('does not take any other error for transient', () => {

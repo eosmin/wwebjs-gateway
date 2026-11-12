@@ -66,6 +66,7 @@ const CODE_STEPS = [
   { name: 'validate:env', command: ['validate:env'] },
   { name: 'validate:deprecations', command: ['validate:deprecations'] },
   { name: 'validate:rollbacks', command: ['validate:rollbacks'] },
+  { name: 'validate:migrations', command: ['validate:migrations'] },
   { name: 'validate:pins', command: ['validate:pins'] },
   ...DOCS_STEPS
 ]

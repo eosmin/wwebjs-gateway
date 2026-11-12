@@ -25,6 +25,7 @@ export type PipelineStage = 'dedupe' | 'store' | 'publish' | 'replay' | 'event' 
 export interface PipelineMessages {
   // The row as stored: a repeat of a message comes back with the policy mark it already has
   upsert(message: NewStoredMessage): Promise<{ policyHandledAt?: Date | null }>
+  claimEvent(sessionId: string, id: string, event: MessageEventName): Promise<boolean>
   updateAck(sessionId: string, id: string, ack: number): Promise<boolean>
   markEmitted(sessionId: string, ids: string[], at: Date): Promise<number>
   listUnemitted(sessionId: string, chatId?: string): Promise<StoredMessage[]>
@@ -192,6 +193,8 @@ export class SessionEventPipeline {
       // A message that was not stored cannot be replayed: its repeat must not be taken for a duplicate
       const stored = await this.store(event)
       if (!stored && key !== undefined) await this.unclaim(key)
+      // The key of Redis can be lost (a restart, an eviction): the stored message remembers
+      if (stored && isMessageEvent(event) && !(await this.firstDelivery(event))) return
       // Only what is stored moves the baseline: a message that was not cannot be replayed
       if (stored && isMessageEvent(event) && !event.data.fromMe) {
         this.deps.noteIncoming(new Date(event.data.sentAt))
@@ -224,6 +227,7 @@ export class SessionEventPipeline {
           if (key !== undefined) await this.unclaim(key)
           continue
         }
+        if (!(await this.firstDelivery(event))) continue
         if (!message.fromMe && stored.policyPending) {
           await this.applyPolicy([{ id: message.id, chatId: message.chatId, text: message.body }])
         }
@@ -259,6 +263,18 @@ export class SessionEventPipeline {
       await this.deps.unclaim(key)
     } catch (error) {
       this.fail('dedupe', error)
+    }
+  }
+
+  // Whether the stored message has not seen this event yet. The Redis claim is the fast path, but
+  // Redis can lose its keys, and a repeat then would be published again; the row is the memory that
+  // survives. A database that does not answer lets the event through: at-least-once, as with Redis.
+  private async firstDelivery(event: MessageEvent): Promise<boolean> {
+    try {
+      return await this.deps.messages.claimEvent(this.options.sessionId, event.data.id, event.event)
+    } catch (error) {
+      this.fail('dedupe', error)
+      return true
     }
   }
 

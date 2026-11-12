@@ -49,11 +49,19 @@ class MemoryMessages implements PipelineMessages {
         emittedAt: null,
         policyHandledAt: null,
         policyText: message.policyText ?? null,
+        seenEvents: [],
         createdAt: new Date()
       } as unknown as Row
       this.rows.set(message.id, row)
     }
     return Promise.resolve(row)
+  }
+
+  claimEvent(_sessionId: string, id: string, event: string): Promise<boolean> {
+    const row = this.rows.get(id)
+    if (!row || row.seenEvents.includes(event)) return Promise.resolve(false)
+    row.seenEvents.push(event)
+    return Promise.resolve(true)
   }
 
   updateAck(_sessionId: string, id: string, ack: number): Promise<boolean> {
@@ -360,6 +368,32 @@ describe('SessionEventPipeline', () => {
 
       expect(env.published).toHaveLength(2)
       expect(env.claim).not.toHaveBeenCalled()
+    })
+
+    it('does not publish a repeat when Redis lost its key: the stored message remembers', async () => {
+      const env = environment()
+      // Every claim of Redis succeeds, as after a flush
+      env.claim.mockResolvedValue(true)
+      open(env)
+
+      env.client.emit(message(incoming('a', 0)))
+      await advance(0)
+      env.client.emit(message(incoming('a', 0)))
+      await advance(0)
+
+      expect(names(env)).toEqual(['message:a'])
+    })
+
+    it('still publishes the twin event of a message under its own name', async () => {
+      const env = environment()
+      env.claim.mockResolvedValue(true)
+      open(env)
+
+      env.client.emit(message(incoming('a', 0)))
+      env.client.emit({ event: 'message_create', data: incoming('a', 0) })
+      await advance(0)
+
+      expect(names(env)).toEqual(['message:a', 'message_create:a'])
     })
 
     it('goes on, and counts it, when Redis cannot answer', async () => {
@@ -1713,6 +1747,7 @@ function incomingRow(id: string): Row {
     emittedAt: null,
     policyHandledAt: null,
     policyText: null,
+    seenEvents: [],
     origin: null,
     dto: JSON.parse(JSON.stringify(dto)) as Row['dto'],
     createdAt: new Date()

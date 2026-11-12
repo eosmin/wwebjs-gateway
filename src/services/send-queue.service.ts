@@ -28,9 +28,15 @@ import {
   type SendJobStatus,
   outcomeToJson
 } from './send-queue.job.js'
-import { SendJobProcessor, SendJobYield } from './send-queue.processor.js'
+import { SendJobDelayed, SendJobProcessor, SendJobYield } from './send-queue.processor.js'
 
+// Jobs added by older versions carry just this name; the ones of this version carry it with the chat
+// (see `jobNameOf`)
 const JOB_NAME = 'send'
+// A job is named after its chat, and the order check reads the name from the hash of the job
+// without loading its data: the messages of a conversation keep their order, the other chats of the
+// session do not wait behind a job that is held
+const jobNameOf = (chatId: string): string => `${JOB_NAME}:${chatId}`
 // BullMQ rejects ':' in a queue name, so the TDD's `send:<sessionId>` is written with a hyphen. A session id
 // never holds ':' (it matches ^[-_\w]{1,64}$), so two sessions never share a queue.
 export const sendQueueName = (sessionId: string): string => `send-${sessionId}`
@@ -253,7 +259,7 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     keyed: boolean
   ): Promise<void> {
     const adding = lane.queue.add(
-      JOB_NAME,
+      jobNameOf(job.chatId),
       { ...job, enqueuedAt: stamp },
       {
         jobId,
@@ -430,8 +436,15 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     this.notifyQueuesChanged()
   }
 
-  // The session was deleted: its worker stops and whatever it still held is discarded
+  // The session was deleted: its worker stops, whatever it still held is discarded, and then the send
+  // policy forgets its budgets and flags (after the lane is closed, so no send can write them again;
+  // a new session with the same id must not inherit them)
   private async drop(sessionId: string): Promise<void> {
+    await this.dropLane(sessionId)
+    await this.policy.forget(sessionId)
+  }
+
+  private async dropLane(sessionId: string): Promise<void> {
     // Nobody will ever finish these jobs: answer the callers now instead of at their timeout
     for (const waiter of [...this.waiters.values()]) {
       if (waiter.sessionId === sessionId) {
@@ -497,6 +510,10 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
       if (error instanceof SendJobYield) {
         await this.putAside(job, token, this.config.SEND_NOT_READY_RETRY_MS, error.waitedMs)
       }
+      // Held by a cold-only rule: out of the lane until it is due, the next job takes the worker
+      if (error instanceof SendJobDelayed) {
+        await this.putAside(job, token, error.delayMs, error.waitedMs)
+      }
       result = this.unexpected(lane, job, error)
     } finally {
       lane.dispatching = false
@@ -554,9 +571,16 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
       const others = [...waiting, ...delayed].filter(id => id !== job.id)
       if (others.length === 0) return false
       const reads = client.pipeline()
-      for (const id of others) reads.hget(lane.queue.toKey(id), 'timestamp')
+      for (const id of others) reads.hmget(lane.queue.toKey(id), 'timestamp', 'name')
       const answers = (await reads.exec()) ?? []
-      return answers.some(([error, stamp]) => error === null && Number(stamp) < job.timestamp)
+      const mine = jobNameOf(job.data.chatId)
+      return answers.some(([error, fields]) => {
+        if (error !== null || !Array.isArray(fields)) return false
+        const [stamp, name] = fields as [string | null, string | null]
+        // A job of another chat does not matter; one of an older version has no chat, so it counts
+        const sameChat = name === null || name === JOB_NAME || name === mine
+        return sameChat && Number(stamp) < job.timestamp
+      })
     } catch (error: unknown) {
       this.logger.warn(`[${lane.sessionId}] Order check failed (${toErrorBody(error).code})`)
       return false
