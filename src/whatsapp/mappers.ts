@@ -566,7 +566,7 @@ export function mapReactionList(source: ReactionListSource): ReactionListDto {
   }
 }
 
-// wwebjs hands the poll message itself as `parentMessage`; we keep its id. The typings of 1.34.7 say
+// wwebjs hands the poll message itself as `parentMessage`; we keep its id. The typings of 1.34.8 say
 // `voter` is a string and an option is `{ id, name }`, but PollVote.js assigns the sender's wid and
 // `{ name, localId }`, with `name` undefined when the poll message could not be found.
 export interface PollVoteSource extends Omit<

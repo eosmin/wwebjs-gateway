@@ -19,7 +19,7 @@ import {
 // webhook never carries them. The Socket.IO gateway (step 8.3) must apply the same rule.
 export const CREDENTIAL_EVENTS: readonly string[] = ['qr', 'code']
 
-// The 31 events whatsapp-web.js emits (Constants.js of 1.34.7), then the ones the gateway makes up
+// The 31 events whatsapp-web.js emits (Constants.js of 1.34.8), then the ones the gateway makes up
 export const WA_EVENT_NAMES = [
   'qr',
   'code',

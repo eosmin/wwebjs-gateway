@@ -1,8 +1,8 @@
 diff --git a/src/Client.js b/src/Client.js
-index 800109ebf7720d5f0f29091518a8a25f7fd8e381..65633a9ece78efcb41f5bf0cb673c6371dc222aa 100644
+index 62de539540764a88242b243dd8e403166e45c137..9e2091fb6f4037bc23ea41f2fba766486ecca272 100644
 --- a/src/Client.js
 +++ b/src/Client.js
-@@ -1070,30 +1070,56 @@ class Client extends EventEmitter {
+@@ -1127,30 +1127,56 @@ class Client extends EventEmitter {
                      window.onBatteryStateChangedEvent(state);
                  });
              const WAWebCallCollection = window.require('WAWebCallCollection');
@@ -54,7 +54,7 @@ index 800109ebf7720d5f0f29091518a8a25f7fd8e381..65633a9ece78efcb41f5bf0cb673c637
 +                            Promise.resolve(
 +                                window.onIncomingCall({
 +                                    id: call.id,
-+                                    peerJid: peer == null ? undefined : (peer._serialized ?? String(peer)),
++                                    peerJid: peer == null ? undefined : (peer._serialized ?? peer.$1 ?? String(peer)),
 +                                    // offerTime is 0 while the call rings: use the time it arrived
 +                                    offerTime:
 +                                        call.offerTime ||
@@ -79,21 +79,7 @@ index 800109ebf7720d5f0f29091518a8a25f7fd8e381..65633a9ece78efcb41f5bf0cb673c637
              }
              Chat.on('remove', async (chat) => {
                  window.onRemoveChatEvent(
-@@ -1208,11 +1234,11 @@ class Client extends EventEmitter {
-                             const senderUserJid = sender._serialized;
- 
-                             let parentMessage = Msg.get(
--                                parentMsgKey._serialized,
-+                                (parentMsgKey._serialized ?? String(parentMsgKey)),
-                             );
-                             if (!parentMessage) {
-                                 const fetched = await Msg.getMessagesById([
--                                    parentMsgKey._serialized,
-+                                    (parentMsgKey._serialized ?? String(parentMsgKey)),
-                                 ]);
-                                 parentMessage = fetched?.messages?.[0] || null;
-                             }
-@@ -1547,15 +1573,42 @@ class Client extends EventEmitter {
+@@ -1609,15 +1635,42 @@ class Client extends EventEmitter {
                      content,
                      options,
                  );
@@ -120,11 +106,11 @@ index 800109ebf7720d5f0f29091518a8a25f7fd8e381..65633a9ece78efcb41f5bf0cb673c637
 +                { afterDispatch: true },
 +            );
 +        });
- 
--        return sentMsg ? new Message(this, sentMsg) : undefined;
++
 +        // null: the page found no chat and sent nothing. undefined: it sent, nothing came back
 +        if (sentMsg === null) return null;
-+
+ 
+-        return sentMsg ? new Message(this, sentMsg) : undefined;
 +        // The page has sent the message by now: a failure of this Node code must not read as "not sent"
 +        try {
 +            return sentMsg ? new Message(this, sentMsg) : undefined;
@@ -139,24 +125,54 @@ index 800109ebf7720d5f0f29091518a8a25f7fd8e381..65633a9ece78efcb41f5bf0cb673c637
      }
  
      /**
+@@ -2415,6 +2468,13 @@ class Client extends EventEmitter {
+                         .createWid(parentGroupId));
+ 
+                 try {
++                    // WhatsApp Web loads this module lazily, with the screen "New group": until that
++                    // bundle is loaded the module is undefined (upstream PR 201950 is the same fix)
++                    if (!window.require('WAWebGroupCreateJob')) {
++                        await window
++                            .require('WAWebNewGroupFlowLoadable')
++                            .requireBundle();
++                    }
+                     createGroupResult = await window
+                         .require('WAWebGroupCreateJob')
+                         .createGroup(
+@@ -2434,8 +2494,13 @@ class Client extends EventEmitter {
+                             },
+                             participantWids,
+                         );
+-                } catch (ignoredError) {
+-                    return 'CreateGroupError: An unknown error occupied while creating a group';
++                } catch (error) {
++                    // Keep the cause: the library's text alone hid why every group failed
++                    return (
++                        'CreateGroupError: An unknown error occupied while creating a group (' +
++                        String(error && error.message).slice(0, 200) +
++                        ')'
++                    );
+                 }
+ 
+                 for (const participant of createGroupResult.participants) {
 diff --git a/src/structures/Message.js b/src/structures/Message.js
-index dd977e85b0c0c40d2625cd337264fc9ae3bed17b..e19bd2f554acc13d641901a97ee737a5bd8e6ce3 100644
+index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40526f6345 100644
 --- a/src/structures/Message.js
 +++ b/src/structures/Message.js
-@@ -981,7 +981,7 @@ class Message extends Base {
+@@ -986,7 +986,7 @@ class Message extends Base {
                      .sendEventEditMessage(eventOptions, msg);
                  const editedMsg = window
                      .require('WAWebCollections')
 -                    .Msg.get(msg.id._serialized);
-+                    .Msg.get((msg.id._serialized ?? String(msg.id)));
++                    .Msg.get((msg.id._serialized || msg.id.$1));
                  return editedMsg?.serialize();
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index 540078a9d07b3df07ccd51b030556a72af4cf650..5e0741879202289936029c16c8b7d876682e3670 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..d32331106a62556d6121a85895600705a84ccba3 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
-@@ -502,35 +502,40 @@ exports.LoadUtils = () => {
+@@ -508,35 +508,40 @@ exports.LoadUtils = () => {
              chat.msgs.add(msg);
              chat.t = msg.t;
  
@@ -225,7 +241,7 @@ index 540078a9d07b3df07ccd51b030556a72af4cf650..5e0741879202289936029c16c8b7d876
              return msg;
          }
  
-@@ -562,13 +567,18 @@ exports.LoadUtils = () => {
+@@ -568,13 +573,18 @@ exports.LoadUtils = () => {
                  text: msg.body,
              };
  
@@ -251,7 +267,7 @@ index 540078a9d07b3df07ccd51b030556a72af4cf650..5e0741879202289936029c16c8b7d876
  
              return msg;
          }
-@@ -578,11 +588,18 @@ exports.LoadUtils = () => {
+@@ -584,7 +594,14 @@ exports.LoadUtils = () => {
              .addAndSendMsgToChat(chat, message);
          await msgPromise;
  
@@ -267,55 +283,6 @@ index 540078a9d07b3df07ccd51b030556a72af4cf650..5e0741879202289936029c16c8b7d876
  
          return window
              .require('WAWebCollections')
--            .Msg.get(newMsgKey._serialized);
-+            .Msg.get((newMsgKey._serialized ?? String(newMsgKey)));
-     };
- 
-     window.WWebJS.editMessage = async (msg, content, options = {}) => {
-@@ -625,7 +642,9 @@ exports.LoadUtils = () => {
-         await window
-             .require('WAWebSendMessageEditAction')
-             .sendMessageEdit(msg, content, internalOptions);
--        return window.require('WAWebCollections').Msg.get(msg.id._serialized);
-+        return window
-+            .require('WAWebCollections')
-+            .Msg.get((msg.id._serialized ?? String(msg.id)));
-     };
- 
-     window.WWebJS.toStickerData = async (mediaInfo) => {
-@@ -828,11 +847,12 @@ exports.LoadUtils = () => {
-             msg.replyButtons = JSON.parse(JSON.stringify(msg.replyButtons));
-         }
- 
--        if (typeof msg.id.remote === 'object') {
--            msg.id = Object.assign({}, msg.id, {
--                remote: msg.id.remote._serialized,
--            });
--        }
-+        msg.id = Object.assign({}, msg.id, {
-+            ...(typeof msg.id.remote === 'object'
-+                ? { remote: msg.id.remote._serialized }
-+                : {}),
-+            _serialized: (msg.id._serialized ?? String(msg.id)),
-+        });
- 
-         delete msg.pendingAckUpdate;
- 
-@@ -984,12 +1004,12 @@ exports.LoadUtils = () => {
-             const lastMessage = chat.lastReceivedKey
-                 ? window
-                       .require('WAWebCollections')
--                      .Msg.get(chat.lastReceivedKey._serialized) ||
-+                      .Msg.get((chat.lastReceivedKey._serialized ?? String(chat.lastReceivedKey))) ||
-                   (
-                       await window
-                           .require('WAWebCollections')
-                           .Msg.getMessagesById([
--                              chat.lastReceivedKey._serialized,
-+                              (chat.lastReceivedKey._serialized ?? String(chat.lastReceivedKey)),
-                           ])
-                   )?.messages?.[0]
-                 : null;
 diff --git a/src/util/Puppeteer.js b/src/util/Puppeteer.js
 index 54df7005b474f00cd4e290eecd941e40caaf434e..5b495a954b844e4a81fd9066cf7d556279225402 100644
 --- a/src/util/Puppeteer.js

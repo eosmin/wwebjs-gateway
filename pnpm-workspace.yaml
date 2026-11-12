@@ -22,7 +22,7 @@ peerDependencyRules:
 nodeOptions: '${NODE_OPTIONS:- } --experimental-vm-modules --disable-warning=ExperimentalWarning'
 
 patchedDependencies:
-  whatsapp-web.js@1.34.7: patches/whatsapp-web.js@1.34.7.patch
+  whatsapp-web.js@1.34.8: patches/whatsapp-web.js@1.34.8.patch
 
 # Transitive copies with a published fix. The majors are forced on purpose: archiver (glob 10),
 # @fastify/static (glob 13) and get-uri (basic-ftp 5) only call APIs that kept their shape, checked
@@ -32,3 +32,8 @@ patchedDependencies:
 overrides:
   'basic-ftp@<6.2.1': 6.2.1
   'glob@<14.0.2': 14.0.2
+
+# 1.34.8 is newer than the release-age gate; it was reviewed by hand (diff of 1.34.7..1.34.8) and the
+# entry goes in the next dependency PR (IMPLEMENTATION_PLAN 10.4, F9a)
+minimumReleaseAgeExclude:
+  - whatsapp-web.js@1.34.8

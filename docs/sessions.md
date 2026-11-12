@@ -74,6 +74,19 @@ Two causes have their own treatment:
 
 A session that is already `failed` because of a login that is corrupt (not unlinked through the gateway) is not repaired by `start`: stop the gateway for that session and delete `WWEBJS_DATA_PATH/session-<id>` by hand; the next start asks for a QR code.
 
+## Checking an upgrade of whatsapp-web.js with a real account
+
+CI cannot reach WhatsApp, so a new `whatsapp-web.js` (or a new WhatsApp Web build) is checked by hand with a **test account** before it reaches production (F9b for 1.34.8). Use a throwaway number and a second phone to talk to, never a production session, and write nothing from the run (numbers, texts, QR strings) into the repository or a PR.
+
+1. Start the gateway locally with the branch (`pnpm dev`), create a session `smoke` and link it from the test phone (`GET /sessions/smoke/qr`). Expect `qr` then `authenticated` then `ready`.
+2. **Restart with a saved login:** stop and start the gateway. The session must come back to `ready` without a QR. Repeat 5 times; `ready` must fire every time (the `exposeFunctionIfAbsent` patch).
+3. **Media (H-FB-06):** from the test account send an image, a document and a voice note to the second phone (`POST /sessions/smoke/messages`, `media` by URL and by base64). Expect `201` and the media on the phone; then download one received media (`GET .../media`) and a message whose media is gone (expect the documented "unavailable" answer, never a 500).
+4. **Groups (H-FB-09):** `POST /sessions/smoke/groups` with the second phone. Expect `201` with a `gid`. Do it right after a restart (the lazy bundle is not loaded yet) and again; both must work. If it fails, the `reason` carries the cause after `CreateGroupError`.
+5. **The six methods that need the same bundle** (upstream PR #201950): forward a message, join by invite code, read the invite code of a group, set the display name, revoke a status message, create a call link. Note which fail and with which `reason`; each failure is a line in the plan, not a blocker for the others.
+6. **Unlink and link again (H-FB-11):** in the phone, "Linked devices" then unlink the gateway. The session must go to `logged_out` and `POST /sessions/smoke/start` must reach `qr` (not loop on `initialize failed`); link again and expect `ready`.
+7. **Call (#42):** call the test account from the second phone (voice, then video). Expect one `call` event each.
+8. Record the WhatsApp Web build used (`GET /v1/system/info`, field `wwebVersion` of the session) in the PR. If everything passes and production should stop following WhatsApp Web, pin that build: `WWEB_VERSION=<build>`, `WWEB_VERSION_CACHE_TYPE=local` with the HTML saved on the volume, `WWEB_VERSION_STRICT=true`. Roll back by restoring the previous image tag.
+
 ## Watchdog
 
 The watchdog looks at every running session each `WATCHDOG_INTERVAL_MS` (30 s). A pass that finds the previous one still running does nothing. It only reads the state of a client; for a fix it asks the manager, which ignores a request about a run that has moved on (a reconnect, a stop or the next phase came first). The pass does not wait for the request, so a session with a slow teardown does not delay the checks of the others. Each reconnect it asks for counts in `gw_watchdog_restarts_total` (a frozen browser, a start that never ended, the memory guard). A browser that dies by itself (the process killed, the page crashed or closed) is not the watchdog's: the adapter reports `session_error` with `BROWSER_DISCONNECTED`, `PAGE_CLOSED` or `PAGE_CRASHED`, the manager reconnects, and `gw_browser_recoveries_total{code}` counts it. Every action starts with a `session_error` event (`WATCHDOG_START_TIMEOUT`, `WATCHDOG_HEALTH_CHECK` or `WATCHDOG_BLOCKED_STATE`, with the reason as `message`) that arrives before the `session_status` it causes.

@@ -22,7 +22,7 @@ export class SystemController {
       request: null,
       response: {
         gatewayVersion: '0.0.0',
-        wwebjsVersion: '1.34.7',
+        wwebjsVersion: '1.34.8',
         nodeVersion: '24.20.0',
         uptimeSeconds: 3600,
         sessions: {

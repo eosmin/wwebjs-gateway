@@ -5,7 +5,7 @@ import { ErrorCode } from '../common/errors.js'
 
 import { WA_EVENT_NAMES, WA_EVENTS, eventEnvelope, type WaEventName } from './events.js'
 
-// A snapshot of Constants.js of whatsapp-web.js 1.34.7 and TDD §2.5. whatsapp-web.js is not a
+// A snapshot of Constants.js of whatsapp-web.js 1.34.8 and TDD §2.5. whatsapp-web.js is not a
 // dependency yet; the parity test of the adapter phase compares this list with the installed library.
 const WWEBJS_EVENTS = [
   'authenticated',
