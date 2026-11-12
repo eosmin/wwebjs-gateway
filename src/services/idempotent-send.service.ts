@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { ErrorCode, NotFoundError, UnprocessableError } from '../common/errors.js'
+import { ErrorCode, NotFoundError, ServiceBusyError, UnprocessableError } from '../common/errors.js'
 import { canonicalJson } from '../common/lib/canonical-json.js'
 import { sha256Hex } from '../common/lib/crypto.js'
 import type { IdempotencyKey } from '../database/models.js'
@@ -104,11 +104,14 @@ export class IdempotentSendService {
       const jobId = jobIdFor(job.sessionId, key)
       return { ...(await this.queue.submit(job, { ...options, jobId })), replayed: false }
     } catch (error: unknown) {
-      // Only a refusal that comes before the add (the session does not exist) proves nothing was
-      // queued. Any other error may have left the job in Redis, so the key stays `pending` and heals
+      // Only a refusal that comes before the add (the session does not exist, the queue is full or
+      // Redis is down) proves nothing was queued, and gives the key back: the caller retries with it. Any other error may have left the job in Redis, so the key stays `pending` and heals
       // through the job lookup: a retry never sends twice and never gets a fresh claim.
       // A failed release leaves the key pending, which heals; the error to report is the first one
-      if (error instanceof NotFoundError)
+      if (
+        error instanceof NotFoundError ||
+        (error instanceof ServiceBusyError && error.nothingQueued)
+      )
         await this.keys.release(job.sessionId, key).catch(() => false)
       throw error
     }

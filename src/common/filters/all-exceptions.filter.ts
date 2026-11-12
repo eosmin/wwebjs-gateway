@@ -14,7 +14,7 @@ import { z } from 'zod'
 import { APP_CONFIG } from '../../config/config.module.js'
 import type { AppConfig } from '../../config/env.schema.js'
 import { REQUEST_ID_HEADER } from '../../infra/logger/logger.config.js'
-import { AppError, ErrorCode } from '../errors.js'
+import { AppError, ErrorCode, ServiceBusyError } from '../errors.js'
 
 // The body of every error response (TDD §6.11)
 export interface ErrorBody {
@@ -116,6 +116,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const { status, ...error } = describeException(exception, this.config.NODE_ENV === 'production')
     if (status >= FIRST_SERVER_ERROR) this.logger.error(exception)
     const body: ErrorBody = { error: { ...error, requestId: request.id } }
-    void reply.header(REQUEST_ID_HEADER, request.id).status(status).send(body)
+    void reply.header(REQUEST_ID_HEADER, request.id)
+    if (exception instanceof ServiceBusyError) {
+      void reply.header('retry-after', String(exception.retryAfterSeconds))
+    }
+    void reply.status(status).send(body)
   }
 }

@@ -17,6 +17,8 @@ export const ErrorCode = {
   SESSION_NOT_READY: 'SESSION_NOT_READY',
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   RATE_LIMITED: 'RATE_LIMITED',
+  SEND_QUEUE_FULL: 'SEND_QUEUE_FULL',
+  QUEUE_UNAVAILABLE: 'QUEUE_UNAVAILABLE',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   MEDIA_FETCH_FAILED: 'MEDIA_FETCH_FAILED',
   NUMBER_NOT_ON_WHATSAPP: 'NUMBER_NOT_ON_WHATSAPP',
@@ -99,6 +101,16 @@ export const ERROR_DEFINITIONS = {
     status: HttpStatus.TOO_MANY_REQUESTS,
     meaning:
       'The API key or the client address sent more than RATE_LIMIT_MAX requests in a minute; wait the seconds in the Retry-After header.'
+  },
+  SEND_QUEUE_FULL: {
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    meaning:
+      'The send queue of the session (SEND_QUEUE_MAX_PER_SESSION) or of the whole gateway (SEND_QUEUE_MAX_TOTAL) is full; nothing was queued. `details.scope` is `session` or `global`. Wait the seconds in the Retry-After header; a repeat with the same Idempotency-Key is safe.'
+  },
+  QUEUE_UNAVAILABLE: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    meaning:
+      'The send queue (Redis) cannot be reached, so the message was not accepted. Wait the seconds in the Retry-After header. When `details.queued` is false nothing was queued; when it is `unknown` the message may be queued, so repeat with the same Idempotency-Key (or check the chat) rather than a new request.'
   },
   PAYLOAD_TOO_LARGE: {
     status: HttpStatus.PAYLOAD_TOO_LARGE,
@@ -204,3 +216,20 @@ export class WhatsAppError extends StatusError<
   CodesWithStatus<HttpStatus.BAD_GATEWAY | HttpStatus.GATEWAY_TIMEOUT>
 > {}
 export class InternalError extends StatusError<CodesWithStatus<HttpStatus.INTERNAL_SERVER_ERROR>> {}
+
+// A refusal because the gateway is full or a dependency is down: the caller waits `retryAfterSeconds`
+// (sent as Retry-After) and tries again. `nothingQueued` is true when the refusal came before anything
+// reached the queue, so an Idempotency-Key claimed for the request can be given back.
+export class ServiceBusyError extends StatusError<
+  CodesWithStatus<HttpStatus.TOO_MANY_REQUESTS | HttpStatus.SERVICE_UNAVAILABLE>
+> {
+  constructor(
+    code: CodesWithStatus<HttpStatus.TOO_MANY_REQUESTS | HttpStatus.SERVICE_UNAVAILABLE>,
+    readonly retryAfterSeconds: number,
+    readonly nothingQueued: boolean,
+    message?: string,
+    details?: Readonly<Record<string, unknown>>
+  ) {
+    super(code, message, details)
+  }
+}

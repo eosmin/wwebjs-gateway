@@ -1,5 +1,5 @@
 import { buildMessageDto } from '../../tests/helpers/fake-whatsapp-client.js'
-import { NotFoundError, UnprocessableError } from '../common/errors.js'
+import { NotFoundError, ServiceBusyError, UnprocessableError } from '../common/errors.js'
 import type { IdempotencyKey } from '../database/models.js'
 import type {
   ClaimResult,
@@ -364,6 +364,51 @@ describe('IdempotentSendService', () => {
 
       expect(keys.released).toEqual(['k1'])
       await expect(service.send(job('hola', 'k1'))).resolves.toMatchObject({ replayed: false })
+    })
+
+    it('releases the key when the queue is full, and the retry with it is a fresh send', async () => {
+      submit.mockRejectedValueOnce(new ServiceBusyError('SEND_QUEUE_FULL', 2, true))
+
+      await expect(service.send(job('hola', 'k1'))).rejects.toMatchObject({
+        code: 'SEND_QUEUE_FULL'
+      })
+
+      expect(keys.released).toEqual(['k1'])
+      await expect(service.send(job('hola', 'k1'))).resolves.toMatchObject({ replayed: false })
+    })
+
+    it('releases the key when Redis was down before anything was queued', async () => {
+      submit.mockRejectedValueOnce(new ServiceBusyError('QUEUE_UNAVAILABLE', 5, true))
+
+      await expect(service.send(job('hola', 'k1'))).rejects.toMatchObject({
+        code: 'QUEUE_UNAVAILABLE'
+      })
+
+      expect(keys.released).toEqual(['k1'])
+    })
+
+    it('keeps the key pending when Redis did not confirm the add, so the retry finds the job', async () => {
+      submit.mockRejectedValueOnce(new ServiceBusyError('QUEUE_UNAVAILABLE', 5, false))
+
+      await expect(service.send(job('hola', 'k1'))).rejects.toMatchObject({
+        code: 'QUEUE_UNAVAILABLE'
+      })
+
+      expect(keys.released).toEqual([])
+      status.mockResolvedValue({ jobId: 'x', status: 'queued' })
+      submit.mockClear()
+      await expect(service.send(job('hola', 'k1'))).resolves.toMatchObject({ replayed: true })
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('does not count a replay against the cap: it never reaches the queue', async () => {
+      await service.send(job('hola', 'k1'))
+      status.mockResolvedValue({ jobId: 'x', status: 'queued' })
+      submit.mockClear()
+      submit.mockRejectedValue(new ServiceBusyError('SEND_QUEUE_FULL', 2, true))
+
+      await expect(service.send(job('hola', 'k1'))).resolves.toMatchObject({ replayed: true })
+      expect(submit).not.toHaveBeenCalled()
     })
 
     it('keeps the key pending on any other error, because the job may be in Redis', async () => {

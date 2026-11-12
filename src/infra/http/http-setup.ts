@@ -1,3 +1,5 @@
+import type { Server } from 'node:http'
+
 import helmet from '@fastify/helmet'
 import { HttpStatus } from '@nestjs/common'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
@@ -49,4 +51,24 @@ function rejectNul(instance: FastifyInstance): void {
       }
     })
   })
+}
+
+// Fastify leaves every one of these off, so a client that declares a body (Content-Length) and then
+// stops sending would hold its socket, and the memory of the partial body, for ever. They are set on
+// the Node server itself: `requestTimeout` closes a request that is not complete in time, so it
+// bounds the upload (the largest body, about 40 MiB with media, needs a client faster than
+// 40 MiB / HTTP_REQUEST_TIMEOUT_MS), `headersTimeout` the wait for the headers. `timeout` (the idle
+// time of a connection) stays off unless asked for, because a connection that waits for the answer
+// of a slow call is silent too. Node looks at them every 30 s, so a stalled request ends within that
+// margin after its limit.
+export function applyServerTimeouts(
+  server: Server,
+  config: Pick<
+    AppConfig,
+    'HTTP_REQUEST_TIMEOUT_MS' | 'HTTP_HEADERS_TIMEOUT_MS' | 'HTTP_CONNECTION_TIMEOUT_MS'
+  >
+): void {
+  server.requestTimeout = config.HTTP_REQUEST_TIMEOUT_MS
+  server.headersTimeout = config.HTTP_HEADERS_TIMEOUT_MS
+  server.setTimeout(config.HTTP_CONNECTION_TIMEOUT_MS)
 }

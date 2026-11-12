@@ -13,6 +13,9 @@ const DEFAULTS = {
   NODE_ENV: 'production',
   HOST: '0.0.0.0',
   PORT: 3000,
+  HTTP_REQUEST_TIMEOUT_MS: 120000,
+  HTTP_HEADERS_TIMEOUT_MS: 30000,
+  HTTP_CONNECTION_TIMEOUT_MS: 0,
   REDIS_CONNECT_TIMEOUT_MS: 15000,
   LOG_LEVEL: 'info',
   API_KEY_ROTATION_GRACE_MINUTES: 10,
@@ -57,6 +60,9 @@ const DEFAULTS = {
   SEND_BREAKER_COOLDOWN_MS: 60000,
   MAX_MEDIA_BYTES: 33554432,
   MEDIA_FETCH_CONCURRENCY: 4,
+  SEND_QUEUE_MAX_PER_SESSION: 500,
+  SEND_QUEUE_MAX_TOTAL: 2000,
+  SEND_ENQUEUE_TIMEOUT_MS: 5000,
   MEDIA_FETCH_TIMEOUT_MS: 30000,
   CONVERSATION_WINDOW_HOURS: 24,
   ALLOW_COLD_SENDS: false,
@@ -162,6 +168,18 @@ describe('envSchema', () => {
     expect(envSchema.safeParse({ ...valid, ...override }).success).toBe(false)
   })
 
+  it('accepts limits that are equal at the edge of their cross-checks', () => {
+    const result = envSchema.safeParse({
+      ...valid,
+      SEND_QUEUE_MAX_PER_SESSION: '100',
+      SEND_QUEUE_MAX_TOTAL: '100',
+      HTTP_HEADERS_TIMEOUT_MS: '60000',
+      HTTP_REQUEST_TIMEOUT_MS: '60000'
+    })
+
+    expect(result.success).toBe(true)
+  })
+
   it.each(['PUBLIC_BASE_URL', 'DATABASE_URL', 'REDIS_URL', 'ADMIN_API_KEY'] as const)(
     'requires %s',
     key => {
@@ -237,6 +255,17 @@ describe('envSchema', () => {
     [
       'an order hold shorter than the window',
       { INBOUND_ORDER_WINDOW_MS: '2000', INBOUND_ORDER_MAX_HOLD_MS: '1000' }
+    ],
+    [
+      'a total send queue smaller than the one of a session',
+      { SEND_QUEUE_MAX_PER_SESSION: '100', SEND_QUEUE_MAX_TOTAL: '50' }
+    ],
+    ['a queue of no sends', { SEND_QUEUE_MAX_PER_SESSION: '0' }],
+    ['an enqueue timeout of 0', { SEND_ENQUEUE_TIMEOUT_MS: '0' }],
+    ['a negative connection timeout', { HTTP_CONNECTION_TIMEOUT_MS: '-1' }],
+    [
+      'a headers timeout longer than the request timeout',
+      { HTTP_HEADERS_TIMEOUT_MS: '90000', HTTP_REQUEST_TIMEOUT_MS: '60000' }
     ]
   ])('rejects %s', (_label, override) => {
     expect(envSchema.safeParse({ ...valid, ...override }).success).toBe(false)

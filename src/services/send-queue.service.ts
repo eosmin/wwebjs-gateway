@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common'
 import { DelayedError, Queue, Worker, type Job } from 'bullmq'
 
-import { NotFoundError } from '../common/errors.js'
+import { NotFoundError, ServiceBusyError, WhatsAppError } from '../common/errors.js'
 import { abortableSleep } from '../common/lib/abortable-sleep.js'
+import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { IdempotencyRepository } from '../database/repositories/idempotency.repository.js'
@@ -85,6 +86,10 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
   private unsubscribeRemoved: (() => void) | undefined
   private lastStamp = 0
   private closing = false
+  // Sends waiting or running per session, as the last count of Redis saw them; the admission cap reads it
+  private readonly pending = new Map<string, number>()
+  // Sends accepted by this process whose add has not finished, so a burst cannot all pass the cap at once
+  private readonly adding = new Map<string, number>()
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -127,31 +132,145 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     this.sessions.status(job.sessionId)
     // Taken before any await, so the order of the stamps is the order in which sends were accepted
     const stamp = this.nextStamp()
-    const lane = await this.lane(job.sessionId)
+    // Nothing is queued while Redis cannot take it: the add would wait in the connection's offline queue
+    // and go out after the caller was told it failed, so a retry would send the message twice
+    this.assertRedisReady()
+    const lane = await this.admit(job.sessionId)
     const jobId = options.jobId ?? randomUUID()
     const waiting =
       options.waitMs === undefined ? undefined : this.waitFor(job.sessionId, jobId, options.waitMs)
     try {
-      await lane.queue.add(
-        JOB_NAME,
-        { ...job, enqueuedAt: stamp },
-        {
-          jobId,
-          // BullMQ keeps it in the hash of the job, where the order check reads it without loading the data
-          timestamp: stamp,
-          attempts: 1,
-          removeOnComplete: { age: COMPLETED_KEPT_SECONDS },
-          removeOnFail: { age: FAILED_KEPT_SECONDS }
-        }
-      )
+      await this.add(lane, job, jobId, stamp, options.jobId !== undefined)
     } catch (error: unknown) {
       // The caller gets the error, not a wait; the timer must not outlive the call
       this.waiters.get(jobId)?.settle()
       throw error
+    } finally {
+      this.releaseReservation(job.sessionId)
     }
     await this.refreshDepth(lane)
     const outcome = await waiting
     return outcome === undefined ? { jobId } : { jobId, outcome }
+  }
+
+  private retryAfterSeconds(ms: number): number {
+    return Math.max(1, Math.ceil(ms / 1000))
+  }
+
+  private assertRedisReady(): void {
+    if (this.redis.client.status === 'ready') return
+    throw new ServiceBusyError(
+      'QUEUE_UNAVAILABLE',
+      this.retryAfterSeconds(this.config.SEND_ENQUEUE_TIMEOUT_MS),
+      true,
+      'The send queue (Redis) is not reachable, so the message was not accepted',
+      { queued: false }
+    )
+  }
+
+  // Reserves a place for the add (released by `submit` once the add ends), opens the lane and checks the
+  // room. The reservation comes first and synchronously, so a burst of requests sees each other: the
+  // k-th one counts the k-1 before it, whether or not their jobs have reached Redis yet. Nothing was
+  // added when this fails, so any failure here is "unavailable, not queued" and the caller may retry.
+  private async admit(sessionId: string): Promise<Lane> {
+    const before = this.adding.get(sessionId) ?? 0
+    this.adding.set(sessionId, before + 1)
+    try {
+      const lane = await withTimeout(
+        this.lane(sessionId),
+        this.config.SEND_ENQUEUE_TIMEOUT_MS,
+        'send queue'
+      )
+      const counts = await withTimeout(
+        lane.queue.getJobCounts('waiting', 'delayed', 'active', 'prioritized'),
+        this.config.SEND_ENQUEUE_TIMEOUT_MS,
+        'send queue'
+      )
+      const own = Object.values(counts).reduce((sum, n) => sum + n, 0)
+      this.pending.set(sessionId, own)
+      this.assertRoom(sessionId, own + before)
+      return lane
+    } catch (error: unknown) {
+      this.releaseReservation(sessionId)
+      if (error instanceof ServiceBusyError || error instanceof NotFoundError) throw error
+      throw this.unavailable(true, false)
+    }
+  }
+
+  private releaseReservation(sessionId: string): void {
+    const left = (this.adding.get(sessionId) ?? 0) - 1
+    if (left > 0) this.adding.set(sessionId, left)
+    else this.adding.delete(sessionId)
+  }
+
+  private assertRoom(sessionId: string, own: number): void {
+    const { SEND_QUEUE_MAX_PER_SESSION: perSession, SEND_QUEUE_MAX_TOTAL: total } = this.config
+    let others = 0
+    let reservedElsewhere = 0
+    for (const [id, count] of this.pending) if (id !== sessionId) others += count
+    for (const [id, count] of this.adding) if (id !== sessionId) reservedElsewhere += count
+    const scope =
+      own >= perSession
+        ? 'session'
+        : others + reservedElsewhere + own >= total
+          ? 'global'
+          : undefined
+    if (scope === undefined) return
+    throw new ServiceBusyError(
+      'SEND_QUEUE_FULL',
+      this.retryAfterSeconds(this.config.SEND_MIN_INTERVAL_MS + this.config.SEND_JITTER_MS),
+      true,
+      scope === 'session'
+        ? `The session already has ${own} sends waiting (SEND_QUEUE_MAX_PER_SESSION is ${perSession})`
+        : `The gateway already has ${total} sends waiting (SEND_QUEUE_MAX_TOTAL)`,
+      { scope, limit: scope === 'session' ? perSession : total }
+    )
+  }
+
+  private unavailable(nothingQueued: boolean, keyed: boolean): ServiceBusyError {
+    return new ServiceBusyError(
+      'QUEUE_UNAVAILABLE',
+      this.retryAfterSeconds(this.config.SEND_ENQUEUE_TIMEOUT_MS),
+      nothingQueued,
+      nothingQueued
+        ? 'The send queue (Redis) did not answer in time, so the message was not accepted'
+        : keyed
+          ? 'The send queue (Redis) did not confirm the message in time: it may still be queued. Repeat the request with the same Idempotency-Key'
+          : 'The send queue (Redis) did not confirm the message in time: it may still be queued (the gateway withdraws it if Redis answers late, which cannot be guaranteed). Check the chat before sending it again, and use an Idempotency-Key next time',
+      { queued: nothingQueued ? false : 'unknown' }
+    )
+  }
+
+  // The add is bounded too, but it cannot be cancelled: when it times out the job may still land. A send
+  // with an Idempotency-Key keeps it (the retry finds it by the key); one without would be sent twice
+  // by the retry, so the late job is withdrawn as soon as the add answers (best effort: it fails if
+  // the worker already took the job).
+  private async add(
+    lane: Lane,
+    job: NewSendJob,
+    jobId: string,
+    stamp: number,
+    keyed: boolean
+  ): Promise<void> {
+    const adding = lane.queue.add(
+      JOB_NAME,
+      { ...job, enqueuedAt: stamp },
+      {
+        jobId,
+        // BullMQ keeps it in the hash of the job, where the order check reads it without loading the data
+        timestamp: stamp,
+        attempts: 1,
+        removeOnComplete: { age: COMPLETED_KEPT_SECONDS },
+        removeOnFail: { age: FAILED_KEPT_SECONDS }
+      }
+    )
+    try {
+      await withTimeout(adding, this.config.SEND_ENQUEUE_TIMEOUT_MS, 'send queue add')
+    } catch (error: unknown) {
+      if (!(error instanceof WhatsAppError)) throw error
+      if (!keyed) void adding.then(() => lane.queue.remove(jobId)).catch(() => undefined)
+      throw this.unavailable(false, keyed)
+    }
   }
 
   async status(sessionId: string, jobId: string): Promise<SendJobStatus> {
@@ -324,6 +443,8 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     }
     const pending = this.lanes.get(sessionId)
     this.lanes.delete(sessionId)
+    this.pending.delete(sessionId)
+    this.adding.delete(sessionId)
     if (!pending) return
     // A lane that never opened has nothing to close, but its queue may hold jobs
     const lane = await pending.catch(() => undefined)
@@ -585,9 +706,10 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
 
   private async refreshDepth(lane: Lane): Promise<void> {
     try {
-      const counts = await lane.queue.getJobCounts('waiting', 'delayed')
+      const counts = await lane.queue.getJobCounts('waiting', 'delayed', 'active', 'prioritized')
       const depth = (counts.waiting ?? 0) + (counts.delayed ?? 0)
       this.metrics.metrics.sendQueueDepth.set({ session: lane.sessionId }, depth)
+      this.pending.set(lane.sessionId, depth + (counts.active ?? 0) + (counts.prioritized ?? 0))
     } catch {
       // A gauge is not worth failing a send for
     }

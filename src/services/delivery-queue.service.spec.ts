@@ -65,7 +65,7 @@ function setup() {
   queues.length = 0
   hgets.length = 0
   returnvalues.clear()
-  const client = {}
+  const client = { status: 'ready' }
   const service = new DeliveryQueueService(
     { WEBHOOK_MAX_ATTEMPTS: 7, WEBHOOK_BACKOFF_MS: 1500 } as AppConfig,
     { client } as unknown as RedisService
@@ -86,6 +86,16 @@ describe('DeliveryQueueService', () => {
 
     await service.onModuleDestroy()
 
+    expect(queues).toHaveLength(0)
+  })
+
+  it('refuses at once, without adding a job, while Redis is not connected', async () => {
+    const { service, client } = setup()
+    client.status = 'reconnecting'
+
+    await expect(service.enqueue(JOB)).rejects.toThrow('not connected')
+
+    // A job added now would wait in the offline queue and go out after the caller was told it failed
     expect(queues).toHaveLength(0)
   })
 

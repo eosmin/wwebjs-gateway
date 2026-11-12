@@ -5,7 +5,7 @@ import { Test } from '@nestjs/testing'
 import type { AppConfig } from '../../config/env.schema.js'
 import { createFastifyAdapter } from '../logger/fastify-adapter.js'
 
-import { setupHttp } from './http-setup.js'
+import { applyServerTimeouts, setupHttp } from './http-setup.js'
 
 @Controller('probe')
 class ProbeController {
@@ -119,5 +119,27 @@ describe('setupHttp', () => {
       expect(response.statusCode).toBe(201)
       expect(response.json()).toEqual({ echoed: { name: 'ok' } })
     })
+  })
+})
+
+describe('applyServerTimeouts', () => {
+  it('sets the limits of the request, the headers and the idle connection on the Node server', async () => {
+    const moduleRef = await Test.createTestingModule({ controllers: [ProbeController] }).compile()
+    const app = moduleRef.createNestApplication<NestFastifyApplication>(createFastifyAdapter())
+    await app.init()
+    const server = app.getHttpServer()
+    // Fastify leaves the request timeout off (the failure being fixed)
+    expect(server.requestTimeout).toBe(0)
+
+    applyServerTimeouts(server, {
+      HTTP_REQUEST_TIMEOUT_MS: 90_000,
+      HTTP_HEADERS_TIMEOUT_MS: 20_000,
+      HTTP_CONNECTION_TIMEOUT_MS: 45_000
+    })
+
+    expect(server.requestTimeout).toBe(90_000)
+    expect(server.headersTimeout).toBe(20_000)
+    expect(server.timeout).toBe(45_000)
+    await app.close()
   })
 })

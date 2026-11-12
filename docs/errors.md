@@ -36,10 +36,12 @@ optional: it carries extra data of some codes (the issues of a `VALIDATION_ERROR
 | `RECIPIENT_SUPPRESSED` | 422 Unprocessable Entity | The chat is on the suppression list of the session (rule of the send policy). |
 | `RECIPIENT_UNREACHABLE` | 422 Unprocessable Entity | The chat is flagged unreachable, so cold sends to it are rejected (rule of the send policy). |
 | `RATE_LIMITED` | 429 Too Many Requests | The API key or the client address sent more than RATE_LIMIT_MAX requests in a minute; wait the seconds in the Retry-After header. |
+| `SEND_QUEUE_FULL` | 429 Too Many Requests | The send queue of the session (SEND_QUEUE_MAX_PER_SESSION) or of the whole gateway (SEND_QUEUE_MAX_TOTAL) is full; nothing was queued. `details.scope` is `session` or `global`. Wait the seconds in the Retry-After header; a repeat with the same Idempotency-Key is safe. |
 | `INTERNAL` | 500 Internal Server Error | Unexpected failure of the gateway; the message is hidden in production. |
 | `UNKNOWN_OUTCOME` | 502 Bad Gateway | The send timed out after it was dispatched, so whether it reached WhatsApp is unknown; it is never retried automatically. |
 | `ACK_ERROR` | 502 Bad Gateway | WhatsApp reported a delivery error (ack -1) for the message. |
 | `WHATSAPP_ERROR` | 502 Bad Gateway | WhatsApp Web failed to carry out the operation. `details.kind: "mapping"` marks the case where the operation ran but the gateway could not read its answer (a send made through the send queue ends as `UNKNOWN_OUTCOME` in that case). |
+| `QUEUE_UNAVAILABLE` | 503 Service Unavailable | The send queue (Redis) cannot be reached, so the message was not accepted. Wait the seconds in the Retry-After header. When `details.queued` is false nothing was queued; when it is `unknown` the message may be queued, so repeat with the same Idempotency-Key (or check the chat) rather than a new request. |
 | `POLICY_DELAY_EXCEEDED` | 504 Gateway Timeout | The send policy kept the message waiting longer than SEND_POLICY_MAX_WAIT_MS, so it was given up. |
 | `WHATSAPP_TIMEOUT` | 504 Gateway Timeout | WhatsApp Web did not answer within WA_CALL_TIMEOUT_MS. |
 

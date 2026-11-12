@@ -29,6 +29,15 @@ A job interrupted by a shutdown while it only waits (not dispatched) goes to the
 
 If the worker itself throws (Postgres or Redis failing in the middle of a job), the caller still gets an answer: `INTERNAL` when nothing was dispatched, `UNKNOWN_OUTCOME` when the call may have gone out. The order between jobs rests on a stamp taken when each send is accepted (the clock in milliseconds, forced to grow by at least 1 per call), so two sends in the same millisecond still have an order. A failure of the gateway is not a failure of WhatsApp, so neither the health throttle nor the breaker counts it as bad.
 
+## Admission: limits and Redis down
+
+Before a send is added to the queue the gateway checks two things, and refuses it with nothing queued when either fails:
+
+- **Size of the queue.** A session may have `SEND_QUEUE_MAX_PER_SESSION` sends waiting or running (default 500) and the sessions together `SEND_QUEUE_MAX_TOTAL` (default 2000). The next one is `429 SEND_QUEUE_FULL` with `details.scope` (`session` or `global`), `details.limit` and a `Retry-After` of one send interval (`SEND_MIN_INTERVAL_MS` plus `SEND_JITTER_MS`, at least 1 s). The count is read from Redis and the sends being added in this process are counted too, so a burst cannot pass the limit together. Redis holds every job with its content, base64 media included (up to about 40 MiB each): the memory the limits allow is the limit times the size of the sends, so lower them for a host with little memory, and set `maxmemory` in Redis as a last guard.
+- **Redis.** While the connection to Redis is not ready the answer is `503 QUEUE_UNAVAILABLE` at once (`details.queued: false`, `Retry-After` of `SEND_ENQUEUE_TIMEOUT_MS`). Before, the add waited in the offline queue of the connection and went out when Redis came back, long after the caller got a `504` (after 65 s), so the usual retry sent the message twice. If Redis stops answering while the add is in flight and does not confirm within `SEND_ENQUEUE_TIMEOUT_MS`, the answer is `503 QUEUE_UNAVAILABLE` with `details.queued: "unknown"`: the job may still land. That window is closed with the `Idempotency-Key` (the replay finds the job and never queues a second one); a request without a key cannot be protected, so send with a key. A webhook delivery that cannot be queued because Redis is down fails at once too and goes to `failed` (see [webhooks.md](webhooks.md)).
+
+A replay of an `Idempotency-Key` never reaches the queue, so it is not counted against the limits and is answered even when the queue is full. A key claimed by a request that was refused before the add is given back.
+
 ## Results
 
 - **Sync caller** (`wait=true`): `submit` waits up to the time the caller gives (`SEND_SYNC_TIMEOUT_MS` for the API) and returns the outcome. No event is published for it, because the caller already has it.

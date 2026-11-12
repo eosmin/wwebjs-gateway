@@ -9,6 +9,9 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `NODE_ENV` | `development`, `test`, `production` | no | `production` | Runtime mode. Unset or empty means production, so a deployment that forgets it gets the strict checks instead of the development ones; set development for a local run |
 | `HOST` | string, 1 character or more | no | `0.0.0.0` | Interface the HTTP server binds to |
 | `PORT` | integer, 1 to 65535 | no | `3000` | Port the HTTP server listens on |
+| `HTTP_REQUEST_TIMEOUT_MS` | integer, 1 or more | no | `120000` | Milliseconds a client has to send a whole request (headers and body); a request that is not complete by then is closed. A body of the largest size (about 40 MiB with media) needs a client that uploads faster than 350 KB/s at the default |
+| `HTTP_HEADERS_TIMEOUT_MS` | integer, 1 or more | no | `30000` | Milliseconds a client has to send the headers of a request; must not be longer than HTTP_REQUEST_TIMEOUT_MS |
+| `HTTP_CONNECTION_TIMEOUT_MS` | integer, 0 or more | no | `0` | Milliseconds of silence after which a connection is closed (0 = never). Leave it at 0 or above the longest wait for an answer (about 185 s): a connection that waits for a slow WhatsApp call is silent |
 | `PUBLIC_BASE_URL` | URL | yes |  | Public URL of the gateway, used to build absolute links |
 | `LOG_LEVEL` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` | no | `info` | Minimum level written by the logger |
 | `DATABASE_URL` | URL | yes |  | PostgreSQL connection string |
@@ -65,8 +68,11 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `SEND_BREAKER_THRESHOLD` | integer, 1 or more | no | `5` | Consecutive send failures that open the circuit breaker of a session |
 | `SEND_BREAKER_COOLDOWN_MS` | integer, 1 or more | no | `60000` | Milliseconds an open circuit breaker stays open |
 | `MAX_MEDIA_BYTES` | integer, 1 or more | no | `33554432` | Largest media file in bytes |
-| `MEDIA_FETCH_CONCURRENCY` | integer, 1 or more | no | `4` | Media URLs downloaded at the same time; each one can hold up to MAX_MEDIA_BYTES, about three times over while it is converted |
+| `MEDIA_FETCH_CONCURRENCY` | integer, 1 or more | no | `4` | Media URLs downloaded at the same time (all the sessions together; when they are all busy the next turn goes to the session that has waited longest since its last one); each one can hold up to MAX_MEDIA_BYTES, about three times over while it is converted |
 | `MEDIA_FETCH_TIMEOUT_MS` | integer, 1 or more | no | `30000` | Milliseconds the download of a media URL of a send may take |
+| `SEND_QUEUE_MAX_PER_SESSION` | integer, 1 or more | no | `500` | Sends a session may have waiting or running in its queue; the next one is refused with 429 SEND_QUEUE_FULL. Redis keeps every job, media included, so the memory this allows is this number times the size of the sends |
+| `SEND_QUEUE_MAX_TOTAL` | integer, 1 or more | no | `2000` | Sends all the sessions together may have waiting or running; the next one is refused with 429 SEND_QUEUE_FULL |
+| `SEND_ENQUEUE_TIMEOUT_MS` | integer, 1 or more | no | `5000` | Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE |
 | `CONVERSATION_WINDOW_HOURS` | integer, 1 or more | no | `24` | Hours after the last inbound message during which a chat counts as a conversation |
 | `ALLOW_COLD_SENDS` | `true`, `false` | no | `false` | Allow sending to chats without a conversation |
 | `COLD_SENDS_PER_DAY` | integer, 0 to 1000 | no | `20` | Cold sends allowed per session per day |

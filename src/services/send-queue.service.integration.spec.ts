@@ -5,7 +5,7 @@ import { Job, Queue } from 'bullmq'
 
 import { REAL_ENV, TEST_ENV } from '../../tests/helpers/env.js'
 import { buildMessageDto, FakeWhatsAppClient } from '../../tests/helpers/fake-whatsapp-client.js'
-import { ConflictError, NotFoundError } from '../common/errors.js'
+import { ConflictError, NotFoundError, ServiceBusyError } from '../common/errors.js'
 import { parseEnv } from '../config/env.schema.js'
 import type { IdempotencyRepository } from '../database/repositories/idempotency.repository.js'
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
@@ -746,6 +746,164 @@ describe('send queue (integration)', () => {
       await expect(service.status(sessionId, jobId)).resolves.toMatchObject({ status: 'active' })
       release?.()
       await until(() => !service.isSending(sessionId))
+    })
+  })
+
+  describe('admission', () => {
+    const depthOf = async (id: string): Promise<number> => {
+      const redis = new RedisService(config())
+      const queue = new Queue(sendQueueName(id), { connection: redis.client })
+      const counts = await queue.getJobCounts('waiting', 'delayed', 'active')
+      await queue.close()
+      await redis.onApplicationShutdown()
+      return Object.values(counts).reduce((sum, n) => sum + n, 0)
+    }
+
+    it('refuses the send that passes SEND_QUEUE_MAX_PER_SESSION, queues nothing and says when to retry', async () => {
+      const service = await boot({ SEND_QUEUE_MAX_PER_SESSION: '3', SEND_MIN_INTERVAL_MS: '3000' })
+      ready = false
+      for (const body of ['a', 'b', 'c']) await service.submit(text(body))
+
+      const refused = await service.submit(text('d')).catch((error: unknown) => error)
+
+      expect(refused).toBeInstanceOf(ServiceBusyError)
+      expect(refused).toMatchObject({
+        code: 'SEND_QUEUE_FULL',
+        status: 429,
+        retryAfterSeconds: 3,
+        nothingQueued: true,
+        details: { scope: 'session', limit: 3 }
+      })
+      expect(await depthOf(sessionId)).toBe(3)
+    })
+
+    it('lets only the cap through when many sends arrive at once', async () => {
+      const service = await boot({ SEND_QUEUE_MAX_PER_SESSION: '3' })
+      ready = false
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 12 }, (_, n) => service.submit(text(`m${n}`)))
+      )
+
+      expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(3)
+      expect(await depthOf(sessionId)).toBe(3)
+    })
+
+    it('takes sends again once the queue drains', async () => {
+      const service = await boot({ SEND_QUEUE_MAX_PER_SESSION: '2' })
+      ready = false
+      await service.submit(text('a'))
+      await service.submit(text('b'))
+      await expect(service.submit(text('c'))).rejects.toMatchObject({ code: 'SEND_QUEUE_FULL' })
+
+      ready = true
+      await until(() => sentBodies().length === 2)
+      await until(async () => (await depthOf(sessionId)) === 0)
+
+      await expect(service.submit(text('d'))).resolves.toMatchObject({})
+    })
+
+    it('counts the sends of every session against SEND_QUEUE_MAX_TOTAL', async () => {
+      const other = `${sessionId}-b`
+      const service = await boot({ SEND_QUEUE_MAX_PER_SESSION: '3', SEND_QUEUE_MAX_TOTAL: '3' })
+      ready = false
+      try {
+        await service.submit(text('a'))
+        await service.submit(text('b'))
+        await service.submit({ ...text('c'), sessionId: other })
+
+        await expect(service.submit({ ...text('d'), sessionId: other })).rejects.toMatchObject({
+          code: 'SEND_QUEUE_FULL',
+          details: { scope: 'global', limit: 3 }
+        })
+        await expect(service.submit(text('e'))).rejects.toMatchObject({
+          code: 'SEND_QUEUE_FULL',
+          details: { scope: 'global' }
+        })
+      } finally {
+        await shutdown(service)
+        const redis = new RedisService(config())
+        const queue = new Queue(sendQueueName(other), { connection: redis.client })
+        await queue.obliterate({ force: true })
+        await queue.close()
+        await redis.onApplicationShutdown()
+      }
+    })
+
+    it('answers 503 at once and queues nothing while Redis is not connected', async () => {
+      const service = await boot()
+      const entry = open.find(item => item.service === service)
+      const client = entry?.redis.client as RedisService['client']
+      const original = Object.getOwnPropertyDescriptor(client, 'status')
+      Object.defineProperty(client, 'status', { configurable: true, get: () => 'reconnecting' })
+
+      const started = Date.now()
+      const refused = await service.submit(text('x')).catch((error: unknown) => error)
+      if (original) Object.defineProperty(client, 'status', original)
+
+      expect(Date.now() - started).toBeLessThan(500)
+      expect(refused).toMatchObject({
+        code: 'QUEUE_UNAVAILABLE',
+        status: 503,
+        nothingQueued: true,
+        details: { queued: false }
+      })
+      expect(await depthOf(sessionId)).toBe(0)
+    })
+
+    afterEach(() => {
+      jest.restoreAllMocks()
+    })
+
+    it('answers 503 with queued unknown when Redis does not confirm the add in time, and admits the next send', async () => {
+      const service = await boot({ SEND_ENQUEUE_TIMEOUT_MS: '100' })
+      jest.spyOn(Queue.prototype, 'add').mockImplementationOnce(() => new Promise(() => undefined))
+
+      const refused = await service
+        .submit(text('x'), { jobId: 'idem-test' })
+        .catch((error: unknown) => error)
+
+      expect(refused).toMatchObject({
+        code: 'QUEUE_UNAVAILABLE',
+        nothingQueued: false,
+        details: { queued: 'unknown' },
+        message: expect.stringContaining('same Idempotency-Key') as string
+      })
+      // The reservation of the failed add was given back: the queue is not slowly refusing sends
+      await expect(service.submit(text('y'))).resolves.toMatchObject({})
+    })
+
+    it('withdraws the job of a send without a key when its late add finally lands', async () => {
+      const service = await boot({ SEND_ENQUEUE_TIMEOUT_MS: '100' })
+      ready = false
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the queue as `this` below
+      const realAdd = Queue.prototype.add
+      jest.spyOn(Queue.prototype, 'add').mockImplementationOnce(function (
+        this: Queue,
+        ...args: Parameters<Queue['add']>
+      ) {
+        return new Promise(resolve => setTimeout(resolve, 300)).then(() =>
+          realAdd.apply(this, args)
+        )
+      } as Queue['add'])
+
+      const refused = await service.submit(text('x')).catch((error: unknown) => error)
+
+      expect(refused).toMatchObject({ details: { queued: 'unknown' } })
+      await until(async () => (await depthOf(sessionId)) === 0, 3000)
+    })
+
+    it('answers 503 not queued, and gives the place back, when Redis fails while the room is counted', async () => {
+      const service = await boot({ SEND_QUEUE_MAX_PER_SESSION: '1' })
+      jest
+        .spyOn(Queue.prototype, 'getJobCounts')
+        .mockRejectedValueOnce(new Error('Connection is closed.'))
+
+      await expect(service.submit(text('x'))).rejects.toMatchObject({
+        code: 'QUEUE_UNAVAILABLE',
+        nothingQueued: true
+      })
+      await expect(service.submit(text('y'))).resolves.toMatchObject({})
     })
   })
 })
