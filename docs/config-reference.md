@@ -105,6 +105,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `WEBHOOK_INLINE_MEDIA_MAX_BYTES` | integer, 0 or more | no | `5242880` | Largest media in bytes a webhook carries inline; larger media goes by URL |
 | `WEBHOOK_PRIVATE_HOST_ALLOWLIST` | string | no |  | Comma-separated hosts exempt from the private-address check of webhook URLs; a range that covers every address (0.0.0.0/0, ::/0) is refused in production |
 | `ALLOW_PRIVATE_WEBHOOK_TARGETS` | `true`, `false` | no | `false` | Allow webhook URLs that resolve to private addresses; development only, refused in production |
+| `MEDIA_PRIVATE_HOST_ALLOWLIST` | string | no |  | Comma-separated hosts a send may download media from although they are private. Empty by default and apart from WEBHOOK_PRIVATE_HOST_ALLOWLIST: the media URL comes from the caller of a send, and the file is sent on to a WhatsApp chat, so any host listed here can be read by every key that may send. A range that covers every address (/0) is refused in production |
 | `CALL_CACHE_SIZE` | integer, 1 or more | no | `50` | Recent calls kept in memory to reject them |
 | `DELIVERY_RETENTION_DAYS` | integer, 1 or more | no | `14` | Days webhook deliveries are kept before they are deleted |
 | `MESSAGE_RETENTION_DAYS` | integer, 1 or more | no | `30` | Days messages are kept before they are deleted |
