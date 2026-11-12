@@ -37,3 +37,4 @@ The other options and why each was not chosen.
 | [0005](0005-prisma-7-with-the-pg-driver-adapter.md) | Prisma 7 with the `pg` driver adapter, `cjs` generator |
 | [0006](0006-response-dtos-follow-what-wwebjs-delivers.md) | Response DTOs follow what `whatsapp-web.js` really delivers |
 | [0007](0007-production-is-the-default-and-fails-fast.md) | Production is the default mode, and a bad production setup stops the start |
+| [0008](0008-dedupe-survives-redis-and-migrations-are-atomic.md) | The event dedupe survives a Redis that loses its keys, and every migration is atomic |

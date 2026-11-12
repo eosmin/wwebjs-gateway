@@ -47,14 +47,33 @@ export class MessagesRepository {
 
   // The same message can arrive twice (wwebjs re-emits after a reconnect, reconciliation overlaps a
   // live event). The second time refreshes what can change and keeps `emittedAt` and the arrival
-  // data, so a message already published is never held or reordered again.
-  upsert(message: NewStoredMessage): Promise<StoredMessage> {
+  // data, so a message already published is never held or reordered again. The ack is not part of
+  // that refresh: a copy that arrives late carries an older one, so it goes through `updateAck`,
+  // which only moves it forward (a statement of its own that cannot lower it, however the copies
+  // interleave).
+  async upsert(message: NewStoredMessage): Promise<StoredMessage> {
     const { sessionId, id, ...rest } = message
-    return this.prisma.storedMessage.upsert({
+    const row = await this.prisma.storedMessage.upsert({
       where: { sessionId_id: { sessionId, id } },
       create: { sessionId, id, ...rest },
-      update: { ack: rest.ack, body: rest.body, hasMedia: rest.hasMedia, dto: rest.dto }
+      update: { body: rest.body, hasMedia: rest.hasMedia, dto: rest.dto }
     })
+    if (rest.ack === null) return row
+    const moved = await this.updateAck(sessionId, id, rest.ack)
+    return moved ? { ...row, ack: rest.ack } : row
+  }
+
+  // The durable half of the event dedupe: true the first time `event` is recorded for the message,
+  // false when it was recorded already. One conditional UPDATE, so two copies of the event that race
+  // cannot both win. False also for a message that is not stored.
+  async claimEvent(sessionId: string, id: string, event: string): Promise<boolean> {
+    // Raw so that a NULL list (a row written outside Prisma) counts as empty instead of never matching
+    const count = await this.prisma.$executeRaw`
+      UPDATE "messages"
+      SET "seenEvents" = array_append(COALESCE("seenEvents", ARRAY[]::TEXT[]), ${event})
+      WHERE "sessionId" = ${sessionId} AND "id" = ${id}
+        AND NOT (${event} = ANY(COALESCE("seenEvents", ARRAY[]::TEXT[])))`
+    return count > 0
   }
 
   findById(sessionId: string, id: string): Promise<StoredMessage | null> {

@@ -22,6 +22,7 @@ interface Built {
   redis: { status: string; incr: jest.Mock; set: jest.Mock; del: jest.Mock }
   messages: Record<
     | 'upsert'
+    | 'claimEvent'
     | 'updateAck'
     | 'markEmitted'
     | 'listUnemitted'
@@ -47,6 +48,7 @@ function build(env: Record<string, string> = {}): Built {
   }
   const messages = {
     upsert: jest.fn(() => Promise.resolve({})),
+    claimEvent: jest.fn(() => Promise.resolve(true)),
     updateAck: jest.fn(() => Promise.resolve(true)),
     markEmitted: jest.fn(() => Promise.resolve(1)),
     listUnemitted: jest.fn(() => Promise.resolve([])),
@@ -114,6 +116,79 @@ describe('EventPipelineService', () => {
     await flush()
 
     expect(published).toEqual([])
+  })
+
+  describe('when Redis loses its dedupe keys', () => {
+    const emitTwice = async (built: Built): Promise<void> => {
+      const client = new FakeWhatsAppClient(SESSION)
+      await built.service.open(SESSION, client, { orderingEnabled: true })
+      const data = buildMessageDto({ id: 'a', fromMe: false })
+      client.emit({ event: 'message', data })
+      client.emit({ event: 'message', data })
+      await flush()
+    }
+
+    it('does not publish a message event twice: the database remembers it', async () => {
+      const built = build()
+      // Redis answers OK both times (the key was lost); the database knows the second is a repeat
+      built.messages.claimEvent.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+
+      await emitTwice(built)
+
+      expect(built.published).toMatchObject([{ event: 'message', seq: 1 }])
+      expect(built.messages.claimEvent).toHaveBeenCalledWith(SESSION, 'a', 'message')
+    })
+
+    it('asks only for the events that republish a message, and for message_create apart', async () => {
+      const built = build()
+      const client = new FakeWhatsAppClient(SESSION)
+      await built.service.open(SESSION, client, { orderingEnabled: true })
+
+      const data = buildMessageDto({ id: 'a', fromMe: false })
+      client.emit({ event: 'message_create', data })
+      client.emit({ event: 'message', data })
+      client.emit({ event: 'message_ack', data: { message: data, ack: 2 } })
+      await flush()
+
+      expect(built.messages.claimEvent.mock.calls).toEqual([
+        [SESSION, 'a', 'message_create'],
+        [SESSION, 'a', 'message']
+      ])
+    })
+
+    it('does not ask the database for a message the dedupe of Redis already refused', async () => {
+      const built = build()
+      built.redis.set.mockResolvedValueOnce(null)
+
+      await emitTwice(built)
+
+      expect(built.messages.claimEvent).toHaveBeenCalledTimes(1)
+    })
+
+    it('publishes anyway when the database cannot answer: delivery stays at-least-once', async () => {
+      const built = build()
+      built.messages.claimEvent.mockRejectedValueOnce(new Error('db down'))
+      const client = new FakeWhatsAppClient(SESSION)
+      await built.service.open(SESSION, client, { orderingEnabled: true })
+
+      client.emit({ event: 'message', data: buildMessageDto({ id: 'a', fromMe: false }) })
+      await flush()
+
+      expect(built.published).toMatchObject([{ event: 'message' }])
+    })
+
+    it('does not admit a reconciled message the database already saw', async () => {
+      const built = build()
+      built.messages.claimEvent.mockResolvedValueOnce(false)
+      const client = new FakeWhatsAppClient(SESSION)
+      await built.service.open(SESSION, client, { orderingEnabled: true })
+
+      const count = await built.service.reconcile(SESSION, [
+        buildMessageDto({ id: 'a', fromMe: false })
+      ])
+
+      expect(count).toBe(0)
+    })
   })
 
   it('holds late messages only when both the gateway and the session have ordering on', async () => {
