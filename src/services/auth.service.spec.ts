@@ -241,6 +241,53 @@ describe('AuthService cache', () => {
     })
   })
 
+  it('drops the keys of a deleted session at once, and no other', async () => {
+    const mine = generateApiKey()
+    const other = generateApiKey()
+    const { service, rows } = setup([
+      row({ id: 'key-1', keyHash: mine.hash, sessionId: 'shop' }),
+      row({ id: 'key-2', keyHash: other.hash, sessionId: 'main' })
+    ])
+    await service.authenticate(mine.raw, '203.0.113.1')
+    await service.authenticate(other.raw, '203.0.113.1')
+
+    // The key rows go with the session (cascade), the cache does not know it
+    rows.splice(0, 1)
+    service.invalidateSession('shop')
+
+    await expect(service.authenticate(mine.raw, '203.0.113.1')).rejects.toMatchObject({
+      code: 'UNAUTHORIZED'
+    })
+    await expect(service.authenticate(other.raw, '203.0.113.1')).resolves.toBeDefined()
+  })
+
+  it('does not cache a key of the session read before invalidateSession and arrived after it', async () => {
+    const generated = generateApiKey()
+    const { service, findByHash, rows } = setup([
+      row({ keyHash: generated.hash, sessionId: 'shop' })
+    ])
+    let release: () => void = () => undefined
+    const stale = row({ keyHash: generated.hash, sessionId: 'shop' })
+    findByHash.mockImplementationOnce(
+      () =>
+        new Promise<ApiKey | null>(resolve => {
+          release = () => {
+            resolve(stale)
+          }
+        })
+    )
+
+    const pending = service.authenticate(generated.raw, '203.0.113.1')
+    service.invalidateSession('shop')
+    rows.splice(0, 1)
+    release()
+    await pending
+
+    await expect(service.authenticate(generated.raw, '203.0.113.1')).rejects.toMatchObject({
+      code: 'UNAUTHORIZED'
+    })
+  })
+
   it('keeps serving the cached row when another key is invalidated', async () => {
     const generated = generateApiKey()
     const { service, rows } = setup([row({ keyHash: generated.hash })])

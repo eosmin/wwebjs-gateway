@@ -26,8 +26,8 @@ raw key is shown once when it is created.
 | --- | --- |
 | `read` | every GET operation |
 | `send` | sending messages, reactions, typing and state, mark seen, inbound-hook sends |
-| `manage` | session lifecycle, chat, group, channel, profile and settings changes, send policy, suppressions |
-| `webhooks` | webhook and inbound-hook CRUD |
+| `manage` | session lifecycle, the QR code and the pairing code (a login credential), chat, group, channel, profile and settings changes, send policy, suppressions |
+| `webhooks` | webhook and inbound-hook CRUD; a webhook that names the `qr` or `code` event also needs `manage` |
 | `events` | Socket.IO `subscribe`, `replay` and `command` (a command also needs the scope of the operation it runs) |
 | `admin` | operations not tied to one session; **no key can hold it**, only admin keys pass |
 
@@ -85,6 +85,9 @@ live in the memory of the process (the gateway runs as a single instance), so a 
 
 A database key is read once and kept for at most 30 seconds, so a revoke or a rotation takes effect
 on a running gateway within that time, and at once when the operation calls `AuthService.invalidate`.
+Deleting a session deletes its keys, and the cache forgets them at once too (`invalidateSession`): the
+next request with one of them is `401`, not valid for up to 30 seconds. This holds even when a later
+step of the deletion fails.
 An unknown key is never cached, so each request with a wrong key costs one indexed lookup (keys have
 256 bits, so guessing is not feasible; the cost is load only). A row read while a revoke is running
 is not cached either. Throttling of failed authentication belongs to the rate limiter and is

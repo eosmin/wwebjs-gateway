@@ -17,7 +17,11 @@ import { CurrentPrincipal } from '../../common/decorators/auth.decorators.js'
 import type { ErrorCode } from '../../common/errors.js'
 import { type Principal, assertWebhookAccess } from '../../common/principal.js'
 import { WebhookDeliveriesService } from '../../services/webhook-deliveries.service.js'
-import { WebhookService, toWebhookDto } from '../../services/webhook.service.js'
+import {
+  WebhookService,
+  assertCredentialEventsAllowed,
+  toWebhookDto
+} from '../../services/webhook.service.js'
 import {
   CreateWebhookDto,
   CreatedWebhookDto,
@@ -89,7 +93,7 @@ export class WebhooksController {
     scope: 'webhooks',
     summary: 'Create a webhook',
     description:
-      'Events are POSTed to `url`, signed with the secret that this answer carries and no other ever will (rotate it to get a new one). Without `sessionId` the webhook receives the events of every session, which only an admin key can ask for. The URL must be public unless the gateway allows private targets. A session can have `WEBHOOKS_MAX_PER_SESSION` webhooks (so can the group of those of every session); one more is refused with `MAX_WEBHOOKS_REACHED`.',
+      'Events are POSTed to `url`, signed with the secret that this answer carries and no other ever will (rotate it to get a new one). Without `sessionId` the webhook receives the events of every session, which only an admin key can ask for. The URL must be public unless the gateway allows private targets. A session can have `WEBHOOKS_MAX_PER_SESSION` webhooks (so can the group of those of every session); one more is refused with `MAX_WEBHOOKS_REACHED`. `events` with `*` is every event but `qr` and `code`: a QR code or a pairing code links a device to the account, so a webhook may name them only with the `manage` scope as well.',
     errors: [...ON_WEBHOOK, 'MAX_WEBHOOKS_REACHED'],
     examples: {
       request: {
@@ -107,6 +111,7 @@ export class WebhooksController {
     @Body() body: CreateWebhookDto
   ): Promise<CreatedWebhookDto> {
     assertWebhookAccess(principal, body.sessionId ?? null)
+    assertCredentialEventsAllowed(principal, body.events)
     return this.webhooks.create(body)
   }
 
@@ -153,7 +158,7 @@ export class WebhooksController {
     scope: 'webhooks',
     summary: 'Change a webhook',
     description:
-      'Send only what changes. The session of a webhook never changes: delete it and create another. The deliveries already queued go to the new URL on their next attempt.',
+      'Send only what changes. The session of a webhook never changes: delete it and create another. The deliveries already queued go to the new URL on their next attempt. Changing a webhook that names `qr` or `code` (or making it name them) needs the `manage` scope too.',
     errors: ON_WEBHOOK,
     examples: { request: { enabled: false }, response: { ...WEBHOOK_EXAMPLE, enabled: false } },
     wwebjs: [],
@@ -164,7 +169,9 @@ export class WebhooksController {
     @Param() { id }: WebhookIdParamsDto,
     @Body() body: UpdateWebhookDto
   ): Promise<WebhookDto> {
-    await this.webhooks.requireFor(principal, id)
+    const current = await this.webhooks.requireFor(principal, id)
+    // What it listens to now counts too: its URL, or enabling it, decides who gets the QR code
+    assertCredentialEventsAllowed(principal, [...current.events, ...(body.events ?? [])])
     return this.webhooks.update(id, body)
   }
 
@@ -196,7 +203,7 @@ export class WebhooksController {
     scope: 'webhooks',
     summary: 'Rotate the secret of a webhook',
     description:
-      'Issues a new secret, in this answer only. The old one stops signing at once, and so does it for the deliveries that are waiting for a retry: the signature is made with the secret the webhook has at each attempt. Update the receiver first if it cannot accept both, or expect failed attempts until it does.',
+      'Issues a new secret, in this answer only (a webhook that names `qr` or `code` needs the `manage` scope too). The old one stops signing at once, and so does it for the deliveries that are waiting for a retry: the signature is made with the secret the webhook has at each attempt. Update the receiver first if it cannot accept both, or expect failed attempts until it does.',
     errors: ON_WEBHOOK,
     examples: {
       request: null,
@@ -209,7 +216,9 @@ export class WebhooksController {
     @CurrentPrincipal() principal: Principal,
     @Param() { id }: WebhookIdParamsDto
   ): Promise<CreatedWebhookDto> {
-    await this.webhooks.requireFor(principal, id)
+    const current = await this.webhooks.requireFor(principal, id)
+    // The secret signs what the receiver of the QR code trusts: whoever holds it can forge it
+    assertCredentialEventsAllowed(principal, current.events)
     return this.webhooks.rotateSecret(id)
   }
 

@@ -49,7 +49,7 @@ describe('WebhooksController access', () => {
       create: jest.fn(() => Promise.resolve({})),
       listFor: jest.fn(() => Promise.resolve([])),
       // The webhook of the id belongs to the session `requireFor` is told to allow
-      requireFor: jest.fn(() => Promise.resolve({ id: ID, sessionId: 'main' })),
+      requireFor: jest.fn(() => Promise.resolve({ id: ID, sessionId: 'main', events: ['*'] })),
       update: jest.fn(() => Promise.resolve({})),
       delete: jest.fn(() => Promise.resolve()),
       rotateSecret: jest.fn(() => Promise.resolve({}))
@@ -115,6 +115,44 @@ describe('WebhooksController access', () => {
     expect(deliveries.list).not.toHaveBeenCalled()
     expect(deliveries.retry).not.toHaveBeenCalled()
     expect(deliveries.retryFailed).not.toHaveBeenCalled()
+  })
+
+  it('refuses the qr and code events to a key without the manage scope, on create and update', async () => {
+    const { controller, webhooks } = setup()
+    const url = 'https://a.example.test'
+
+    await expect(
+      controller.create(sessionKey, { url, sessionId: 'main', events: ['qr'] })
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
+    await expect(
+      controller.update(sessionKey, { id: ID }, { events: ['code'] })
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
+    expect(webhooks.create).not.toHaveBeenCalled()
+    expect(webhooks.update).not.toHaveBeenCalled()
+
+    const manageKey = keyPrincipal('k', 'main', ['webhooks', 'manage'])
+    await controller.create(manageKey, { url, sessionId: 'main', events: ['qr'] })
+    expect(webhooks.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses any change of a webhook that already listens to qr or code to a key without manage', async () => {
+    const { controller, webhooks } = setup()
+    webhooks.requireFor.mockResolvedValue({ id: ID, sessionId: 'main', events: ['qr'] })
+
+    // The URL is where the QR code goes: moving it would hand the code to someone else
+    await expect(
+      controller.update(sessionKey, { id: ID }, { url: 'https://evil.example.test' })
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
+    expect(webhooks.update).not.toHaveBeenCalled()
+
+    await controller.update(
+      keyPrincipal('k', 'main', ['webhooks', 'manage']),
+      { id: ID },
+      {
+        url: 'https://ok.example.test'
+      }
+    )
+    expect(webhooks.update).toHaveBeenCalledTimes(1)
   })
 
   it('lists what the key may see', async () => {
