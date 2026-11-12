@@ -358,6 +358,24 @@ describe('SessionManager status machine', () => {
     expect(built.manager.status(ID)).toBe('pairing_code')
   })
 
+  it.each([
+    ['qr', { event: 'qr', data: { qr: 'q' } }],
+    ['pairing_code', { event: 'code', data: { code: 'ABCD-1234' } }],
+    ['authenticating', { event: 'authenticated', data: {} }]
+  ] as const)(
+    'clears the last error of an earlier failure once the session reaches %s',
+    async (status, event) => {
+      const built = build()
+      built.sessions.seed({ id: ID, lastError: 'initialize failed (WaOperationError)' })
+      const client = await startSession(built)
+      client.emit(event)
+      await flush()
+
+      expect(built.manager.status(ID)).toBe(status)
+      expect(built.sessions.rows.get(ID)?.lastError).toBeNull()
+    }
+  )
+
   it('stores the account on ready and clears the last error', async () => {
     const built = build()
     built.sessions.seed({ id: ID, lastError: 'old' })
@@ -691,6 +709,20 @@ describe('SessionManager reconnect', () => {
     expect(built.factory.clients).toHaveLength(before)
     await jest.advanceTimersByTimeAsync(1)
     expect(built.factory.clients).toHaveLength(before + 1)
+  })
+
+  it('counts a browser that went away apart from the restarts of the watchdog', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+    const client = await ready(built)
+    client.emit({ event: 'session_error', data: { code: 'BROWSER_DISCONNECTED', message: 'x' } })
+    await flush()
+
+    const recoveries = await built.metrics.metrics.browserRecoveries.get()
+    expect(recoveries.values).toEqual([
+      expect.objectContaining({ labels: { code: 'BROWSER_DISCONNECTED' }, value: 1 })
+    ])
+    expect((await built.metrics.metrics.watchdogRestarts.get()).values[0]?.value).toBe(0)
   })
 
   it('reconnects after a session_error', async () => {

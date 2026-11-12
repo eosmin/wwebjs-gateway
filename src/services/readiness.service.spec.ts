@@ -1,7 +1,12 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { Logger } from '@nestjs/common'
 import { HealthCheckService, TerminusModule } from '@nestjs/terminus'
 import { Test, type TestingModule } from '@nestjs/testing'
 
+import { APP_CONFIG } from '../config/config.module.js'
 import { PrismaService } from '../database/prisma.service.js'
 import { RedisService } from '../infra/redis/redis.service.js'
 
@@ -11,9 +16,11 @@ describe('ReadinessService', () => {
   const queryRaw = jest.fn()
   const ping = jest.fn()
   let moduleRef: TestingModule
+  let dataPath: string
   let service: ReadinessService
 
   beforeEach(async () => {
+    dataPath = await mkdtemp(join(tmpdir(), 'wwebjs-ready-'))
     queryRaw.mockReset().mockResolvedValue([{ secret: 'must not reach the result' }])
     ping.mockReset().mockResolvedValue('PONG')
     moduleRef = await Test.createTestingModule({
@@ -21,7 +28,8 @@ describe('ReadinessService', () => {
       providers: [
         ReadinessService,
         { provide: PrismaService, useValue: { $queryRaw: queryRaw } },
-        { provide: RedisService, useValue: { client: { ping } } }
+        { provide: RedisService, useValue: { client: { ping } } },
+        { provide: APP_CONFIG, useValue: { WWEBJS_DATA_PATH: dataPath } }
       ]
     }).compile()
     await moduleRef.init()
@@ -31,6 +39,7 @@ describe('ReadinessService', () => {
   afterEach(async () => {
     jest.useRealTimers()
     await moduleRef.close()
+    await rm(dataPath, { recursive: true, force: true })
   })
 
   it('is ok when both dependencies answer, and shows nothing the pings returned', async () => {
@@ -38,9 +47,24 @@ describe('ReadinessService', () => {
 
     expect(result).toMatchObject({
       status: 'ok',
-      details: { postgres: { status: 'up' }, redis: { status: 'up' } }
+      details: {
+        postgres: { status: 'up' },
+        redis: { status: 'up' },
+        dataPath: { status: 'up' }
+      }
     })
     expect(JSON.stringify(result)).not.toContain('must not reach the result')
+  })
+
+  it('names the folder of the saved logins when it is gone, and shows no path', async () => {
+    await rm(dataPath, { recursive: true, force: true })
+
+    const result = await service.readiness()
+
+    expect(result.status).toBe('error')
+    expect(result.error).toHaveProperty('dataPath')
+    expect(result.info).toHaveProperty('postgres')
+    expect(JSON.stringify(result)).not.toContain(dataPath)
   })
 
   it.each([

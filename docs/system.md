@@ -5,14 +5,15 @@ Probes, the metrics scrape and the system report. None of them needs a session.
 | Route | Auth | Answers |
 | --- | --- | --- |
 | `GET /health` | public | Liveness: `200` while the process runs. It does not look at Postgres or Redis, so an orchestrator does not restart a process that only needs its dependencies back, and it stays `200` during shutdown. |
-| `GET /ready` | public | Readiness: `200` when Postgres and Redis answer and the gateway is not shutting down, `503` otherwise. |
+| `GET /ready` | public | Readiness: `200` when Postgres and Redis answer, the folder of the saved logins (`WWEBJS_DATA_PATH`) is writable and the gateway is not shutting down, `503` otherwise. |
 | `GET /metrics` | `METRICS_TOKEN` bearer or an admin key | Prometheus text format; the series are listed in [metrics.md](metrics.md). |
 | `GET /v1/system/info` | admin key | Gateway, whatsapp-web.js and Node versions, uptime, the session count per status, and the status and WhatsApp Web version of each session. |
 
 ## Readiness
 
 Both probes are built on `@nestjs/terminus` and answer its result format. `/ready` pings Postgres
-(`SELECT 1`) and Redis (`PING`) on every call, each bounded to 2 seconds, and says which one failed:
+(`SELECT 1`) and Redis (`PING`) on every call, each bounded to 2 seconds, checks that the folder of the
+saved logins (`dataPath`) is writable, and says which one failed:
 
 ```json
 {
@@ -21,7 +22,8 @@ Both probes are built on `@nestjs/terminus` and answer its result format. `/read
   "error": { "redis": { "status": "down", "responseTime": 2001 } },
   "details": {
     "postgres": { "status": "up", "responseTime": 3 },
-    "redis": { "status": "down", "responseTime": 2001 }
+    "redis": { "status": "down", "responseTime": 2001 },
+    "dataPath": { "status": "up", "responseTime": 1 }
   }
 }
 ```
@@ -67,3 +69,13 @@ The versions are those of `package.json` (whatsapp-web.js is pinned to an exact 
 running Node. `byStatus` has every status, zero included. `items` lists every session; `wwebVersion` is
 read from the page of a session that is ready, and is `null` for any other (or when the page does not
 answer in time), so one stuck browser never fails the report. The pages are asked in parallel and each call is bounded by `WA_CALL_TIMEOUT_MS`, so the report takes at most that long. The `status` of a session that runs is the one in memory, which can be a moment ahead of the stored row.
+
+## Finding the cause of a `502 WHATSAPP_ERROR`
+
+The error an API client gets says only what failed (`sendMessage failed`): the text of the library can hold chat ids and numbers. The cause stays in the log, one line per failed call into whatsapp-web.js (every operation, `initialize` included), at `warn` level for the faults (`PAGE_ERROR`, `MAPPING`, `AFTER_DISPATCH`, `UNKNOWN`) and at `debug` for what a busy gateway makes routine (`TIMEOUT`, `BROWSER_GONE`, `GATEWAY_ERROR`, `CHAT_NOT_FOUND`):
+
+```
+sendMessage failed [PAGE_ERROR] (Error): Data passed to getter must include an id property
+```
+
+The line is `<operation> failed [<code>] (<error type>): <message>`, and the session is in the logger name (`WwebjsAdapter:<sessionId>`). The code does not change with the wording of the library: `PAGE_ERROR` (WhatsApp Web or the library failed), `TIMEOUT`, `BROWSER_GONE` (the browser or the page went away), `MAPPING` (our mapper could not read the answer), `AFTER_DISPATCH` (the library failed after the page sent the message, so the outcome is unknown), `GATEWAY_ERROR` (an error of the gateway itself) and `UNKNOWN`. In the message, chat ids are replaced by `[id]`, digit runs of 7 or more by `#`, long opaque tokens that mix letters and digits (a QR string, for one) by `[redacted]`, and it is cut at 200 characters; the text of a message is never logged.

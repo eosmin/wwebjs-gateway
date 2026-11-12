@@ -116,8 +116,14 @@ export const METRIC_DEFINITIONS = {
   watchdogRestarts: {
     name: 'gw_watchdog_restarts_total',
     type: 'counter',
-    help: 'Sessions the watchdog restarted.',
+    help: 'Sessions the watchdog restarted (a frozen browser, a start that never ended, memory). A browser that dies is not counted here: see gw_browser_recoveries_total.',
     labels: []
+  },
+  browserRecoveries: {
+    name: 'gw_browser_recoveries_total',
+    type: 'counter',
+    help: 'Sessions the adapter found with their browser or page gone (killed, crashed, closed) and sent to reconnect, by code (BROWSER_DISCONNECTED, PAGE_CLOSED, PAGE_CRASHED, other).',
+    labels: ['code']
   },
   policyDecisions: {
     name: 'gw_policy_decisions_total',

@@ -532,21 +532,45 @@ describe('calls', () => {
   it('tells a mapper that fails from a library that fails, in the error and in the log', async () => {
     const h = harness()
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
-    const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
     const getChats = stub(h.client, 'getChats')
     ready(h)
 
     // A chat whose data the mapper cannot read
     getChats.mockResolvedValueOnce([{ id: undefined }])
     await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaMappingError)
-    expect(warn).toHaveBeenCalledWith('getChats failed (TypeError)')
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/^getChats failed \[MAPPING\] \(TypeError\)/)
+    )
 
     // A TypeError that comes out of the library itself is not a mapper of ours
     warn.mockClear()
     getChats.mockRejectedValueOnce(new TypeError('x is undefined'))
     await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
-    expect(warn).not.toHaveBeenCalled()
-    expect(debug).toHaveBeenCalledWith('getChats failed (TypeError)')
+    expect(warn).toHaveBeenCalledWith('getChats failed [PAGE_ERROR] (TypeError): x is undefined')
+  })
+
+  it('logs the original cause of a failed send and of a failed createGroup, without ids', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    ready(h)
+
+    stub(h.client, 'sendMessage').mockRejectedValueOnce(
+      new Error('Data passed to getter must include an id property for 5215512345678@c.us')
+    )
+    await expect(
+      h.adapter.sendMessage('c@c.us', { type: 'text', body: 'secret text' })
+    ).rejects.toBeInstanceOf(WaOperationError)
+    stub(h.client, 'createGroup').mockRejectedValueOnce(new Error('addParticipants failed'))
+    await expect(h.adapter.createGroup('G', ['a@c.us'])).rejects.toBeInstanceOf(WaOperationError)
+
+    expect(warn).toHaveBeenCalledWith(
+      'sendMessage failed [PAGE_ERROR] (Error): Data passed to getter must include an id property for [id]'
+    )
+    expect(warn).toHaveBeenCalledWith(
+      'createGroup failed [PAGE_ERROR] (Error): addParticipants failed'
+    )
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret text')
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('5215512345678')
   })
 
   // WhatsApp took the message by the time the answer is mapped: it must read as an unknown outcome,
@@ -1216,7 +1240,9 @@ describe('sending', () => {
 
     expect(error).toBeInstanceOf(WaMappingError)
     expect(error).toMatchObject({ operation: 'sendMessage', details: { kind: 'mapping' } })
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sendMessage failed after the page'))
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('sendMessage failed [AFTER_DISPATCH]')
+    )
   })
 
   it('reads a send that answers nothing as an unknown outcome, not as a clean result', async () => {

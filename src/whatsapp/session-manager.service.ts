@@ -92,6 +92,13 @@ interface Runtime {
   unsubscribe: (() => void) | undefined
 }
 
+// The codes the adapter reports when its browser or page is gone; any other stays one label
+const BROWSER_RECOVERY_CODES: ReadonlySet<string> = new Set([
+  'BROWSER_DISCONNECTED',
+  'PAGE_CLOSED',
+  'PAGE_CRASHED'
+])
+
 const errorKind = (error: unknown): string => (error instanceof Error ? error.name : typeof error)
 
 const parseSettings = (settings: unknown): SessionSettings => {
@@ -572,19 +579,19 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
         runtime.initializeFailures = 0
         runtime.qr = event.data.qr
         runtime.phaseStartedAt = undefined
-        await this.transition(id, 'qr', {})
+        await this.transition(id, 'qr', { lastError: null })
         return
       case 'code':
         runtime.initializeFailures = 0
         runtime.phaseStartedAt = undefined
-        await this.transition(id, 'pairing_code', {})
+        await this.transition(id, 'pairing_code', { lastError: null })
         return
       case 'authenticated':
         runtime.initializeFailures = 0
         runtime.qr = undefined
         // The time a person took to scan the code is not the time the browser took to load
         runtime.phaseStartedAt = Date.now()
-        await this.transition(id, 'authenticating', {})
+        await this.transition(id, 'authenticating', { lastError: null })
         return
       case 'ready':
         await this.onReady(id, runtime)
@@ -601,6 +608,11 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
         }
         return
       case 'session_error':
+        // The watchdog's own session_error never comes through here, so this is the adapter finding
+        // its browser or page gone: counted apart from the restarts the watchdog decides
+        this.metrics.metrics.browserRecoveries.inc({
+          code: BROWSER_RECOVERY_CODES.has(event.data.code) ? event.data.code : 'other'
+        })
         await this.reconnect(id, runtime, `session error (${event.data.code})`)
         return
       case 'change_state':
