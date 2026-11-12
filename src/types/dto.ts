@@ -374,8 +374,8 @@ export const CallDto = dto('CallDto', {
   isVideo: z.boolean(),
   isGroup: z.boolean(),
   fromMe: z.boolean(),
-  canHandleLocally: z.boolean(),
-  webClientShouldHandle: z.boolean(),
+  canHandleLocally: z.boolean().optional(),
+  webClientShouldHandle: z.boolean().optional(),
   participants: opaque.optional()
 })
 export type CallDto = z.infer<typeof CallDto>

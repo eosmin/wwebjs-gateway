@@ -12,7 +12,7 @@ The routes under `/v1/sessions/:sessionId/calls` (TDD §6.11). Each one is a cal
 
 ## The `call` event
 
-`data` is a call: `{ id, from?, timestamp, isVideo, isGroup, fromMe, canHandleLocally, webClientShouldHandle, participants? }`. `from` is usually a `@lid` id, `timestamp` is the time the call arrived when WhatsApp gives none (it is 0 while the call rings), and outgoing calls arrive too (`fromMe` tells them apart). `participants` is not delivered for a group call yet (see TDD §2.5 and step 12.3).
+`data` is a call: `{ id, from?, timestamp, isVideo, isGroup, fromMe, canHandleLocally?, webClientShouldHandle?, participants? }`. `from` is usually a `@lid` id, `timestamp` is the time the call arrived when WhatsApp gives none (it is 0 while the call rings), and `fromMe` is `false` when WhatsApp Web gives no `outgoing` flag, which is the case for every incoming call seen so far. Do not rely on `fromMe` to ignore the account's own calls: how a call placed from the linked account reaches the gateway is not verified (plan F12b). `canHandleLocally` and `webClientShouldHandle` are no longer given by WhatsApp Web and are left out. Exactly one `call` event is emitted per call id, however often WhatsApp Web touches the call again (it repeats the offer a few seconds later and again when the caller hangs up).  `participants` is not delivered for a group call yet (see TDD §2.5 and step 12.3).
 
 ## What the other wwebjs symbols map to
 

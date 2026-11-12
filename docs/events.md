@@ -568,8 +568,8 @@ The data types that events carry. The others (contacts, channels, labels…) are
 | `isVideo` | boolean | yes |  |
 | `isGroup` | boolean | yes |  |
 | `fromMe` | boolean | yes |  |
-| `canHandleLocally` | boolean | yes |  |
-| `webClientShouldHandle` | boolean | yes |  |
+| `canHandleLocally` | boolean | no |  |
+| `webClientShouldHandle` | boolean | no |  |
 | `participants` | any JSON | no |  |
 
 ```json
@@ -577,9 +577,7 @@ The data types that events carry. The others (contacts, channels, labels…) are
   "id": "string",
   "isVideo": false,
   "isGroup": false,
-  "fromMe": false,
-  "canHandleLocally": false,
-  "webClientShouldHandle": false
+  "fromMe": false
 }
 ```
 
