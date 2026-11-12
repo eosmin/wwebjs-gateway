@@ -45,6 +45,9 @@ const FAILED_KEPT_SECONDS = 86_400
 const CLOSE_TIMEOUT_MS = 15_000
 // A job that makes way for an older one comes back after this long
 const STEP_ASIDE_MS = 1000
+// Putting a job aside is tried this many times, with a growing pause between the tries
+const PUT_ASIDE_ATTEMPTS = 3
+const PUT_ASIDE_RETRY_MS = 100
 // The ids of the waiting and delayed jobs the order check reads: more than any real backlog
 const ORDER_CHECK_IDS = 10_000
 
@@ -533,8 +536,18 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     delayMs: number,
     waitedMs?: number
   ): Promise<never> {
-    if (waitedMs !== undefined) await job.updateData({ ...job.data, waitedMs })
-    await job.moveToDelayed(Date.now() + delayMs, token)
+    // A job that never started is not failed for one failed command: the two writes are repeated, which
+    // is safe (the same data, the same delay)
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        if (waitedMs !== undefined) await job.updateData({ ...job.data, waitedMs })
+        await job.moveToDelayed(Date.now() + delayMs, token)
+        break
+      } catch (error: unknown) {
+        if (attempt >= PUT_ASIDE_ATTEMPTS) throw error
+        await new Promise(resolve => setTimeout(resolve, PUT_ASIDE_RETRY_MS * attempt))
+      }
+    }
     throw new DelayedError()
   }
 

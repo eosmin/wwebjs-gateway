@@ -578,16 +578,59 @@ describe('send queue (integration)', () => {
   })
 
   describe('a job the queue itself fails', () => {
-    it('is still announced as failed when putting it aside breaks during the shutdown', async () => {
+    it('puts a job that never started aside again when Redis fails once during the shutdown, and sends it after', async () => {
+      const first = await boot()
+      ready = false
+      await first.submit(text('atrapado'))
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const blip = jest
+        .spyOn(Job.prototype, 'moveToDelayed')
+        .mockRejectedValueOnce(new Error('redis blip'))
+      try {
+        await shutdown(first)
+      } finally {
+        blip.mockRestore()
+      }
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+
+      ready = true
+      await boot()
+      await until(() => sentBodies().includes('atrapado'))
+      expect(sentBodies()).toEqual(['atrapado'])
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+    })
+
+    it('keeps a cold send held by the policy when Redis fails once while it leaves the lane', async () => {
+      const service = await boot()
+      let held = false
+      policy.admit.mockImplementation(() => {
+        if (held) return Promise.resolve(ALLOW)
+        held = true
+        return Promise.resolve({ decision: 'delay', delayMs: 300, rule: 'quiet_hours' })
+      })
+      const blip = jest
+        .spyOn(Job.prototype, 'moveToDelayed')
+        .mockRejectedValueOnce(new Error('redis blip'))
+
+      await service.submit(text('frio'))
+      await until(() => sentBodies().includes('frio'))
+
+      blip.mockRestore()
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+    })
+
+    it('is still announced as failed when putting it aside keeps failing during the shutdown', async () => {
       const first = await boot()
       ready = false
       const { jobId } = await first.submit(text('atrapado', { idempotencyKey: 'k7' }))
       await new Promise(resolve => setTimeout(resolve, 200))
       const broken = jest
         .spyOn(Job.prototype, 'moveToDelayed')
-        .mockRejectedValueOnce(new Error('redis blip'))
+        .mockRejectedValue(new Error('redis blip'))
       try {
         await shutdown(first)
+        // Tried a few times before it gave up
+        expect(broken.mock.calls.length).toBeGreaterThan(1)
       } finally {
         broken.mockRestore()
       }
