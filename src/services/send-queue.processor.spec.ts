@@ -231,7 +231,10 @@ describe('SendJobProcessor', () => {
         const failure = await run(build(), job({ waitedMs: 1000 })).catch((error: unknown) => error)
 
         expect(failure).toBeInstanceOf(SendJobDelayed)
-        expect(failure).toMatchObject({ delayMs: 60_000, waitedMs: 61_000 })
+        expect(failure).toMatchObject({ delayMs: 60_000 })
+        // The time of the run itself (a few ms) is added to the 1000 ms already waited
+        expect((failure as SendJobDelayed).waitedMs).toBeGreaterThanOrEqual(61_000)
+        expect((failure as SendJobDelayed).waitedMs).toBeLessThan(62_000)
         expect(client.callsOf('sendMessage')).toHaveLength(0)
         expect(hooks.markDispatched).not.toHaveBeenCalled()
       }
