@@ -1,5 +1,5 @@
 diff --git a/src/Client.js b/src/Client.js
-index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f978c32ed2 100644
+index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77b77f15cf 100644
 --- a/src/Client.js
 +++ b/src/Client.js
 @@ -1127,30 +1127,69 @@ class Client extends EventEmitter {
@@ -122,11 +122,11 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
 +                { afterDispatch: true },
 +            );
 +        });
- 
--        return sentMsg ? new Message(this, sentMsg) : undefined;
++
 +        // null: the page found no chat and sent nothing. undefined: it sent, nothing came back
 +        if (sentMsg === null) return null;
-+
+ 
+-        return sentMsg ? new Message(this, sentMsg) : undefined;
 +        // The page has sent the message by now: a failure of this Node code must not read as "not sent"
 +        try {
 +            return sentMsg ? new Message(this, sentMsg) : undefined;
@@ -141,7 +141,42 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
      }
  
      /**
-@@ -1988,9 +2054,11 @@ class Client extends EventEmitter {
+@@ -1895,9 +1961,11 @@ class Client extends EventEmitter {
+      */
+     async acceptInvite(inviteCode) {
+         const res = await this.pupPage.evaluate(async (inviteCode) => {
+-            return await window
+-                .require('WAWebGroupInviteJob')
+-                .joinGroupViaInvite(inviteCode);
++            const inviteJob = await window.WWebJS.requireLazyModule(
++                'WAWebGroupInviteJob',
++                'WAWebCommunityFlowLoadable',
++            );
++            return await inviteJob.joinGroupViaInvite(inviteCode);
+         }, inviteCode);
+ 
+         return res.gid._serialized || res.gid.$1;
+@@ -1958,13 +2026,16 @@ class Client extends EventEmitter {
+     async demoteChannelAdmin(channelId, userId) {
+         return await this.pupPage.evaluate(
+             async (channelId, userId) => {
++                // outside the try: a module that is not there is not a refusal of the server
++                const demoteAction = await window.WWebJS.requireLazyModule(
++                    'WAWebDemoteNewsletterAdminAction',
++                    'WAWebGroupMembershipApprovalRequestsFlowLoadable',
++                );
+                 try {
+                     const userWid = window
+                         .require('WAWebWidFactory')
+                         .createWid(userId);
+-                    await window
+-                        .require('WAWebDemoteNewsletterAdminAction')
+-                        .demoteNewsletterAdmin(channelId, userWid);
++                    await demoteAction.demoteNewsletterAdmin(channelId, userWid);
+                     return true;
+                 } catch (err) {
+                     if (err.name === 'ServerStatusCodeError') return false;
+@@ -1988,9 +2059,11 @@ class Client extends EventEmitter {
          return this.pupPage.evaluate(async (inviteInfo) => {
              let { groupId, fromId, inviteCode, inviteCodeExp } = inviteInfo;
              let userWid = window.require('WAWebWidFactory').createWid(fromId);
@@ -156,7 +191,7 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
                      inviteCode,
                      String(inviteCodeExp),
                      groupId,
-@@ -2021,9 +2089,11 @@ class Client extends EventEmitter {
+@@ -2021,9 +2094,11 @@ class Client extends EventEmitter {
          const couldSet = await this.pupPage.evaluate(async (displayName) => {
              if (!window.require('WAWebConnModel').Conn.canSetMyPushname())
                  return false;
@@ -171,7 +206,7 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
              return true;
          }, displayName);
  
-@@ -2415,8 +2485,13 @@ class Client extends EventEmitter {
+@@ -2415,8 +2490,13 @@ class Client extends EventEmitter {
                          .createWid(parentGroupId));
  
                  try {
@@ -187,7 +222,7 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
                          .createGroup(
                              {
                                  addressingModeOverride: 'lid',
-@@ -2434,8 +2509,13 @@ class Client extends EventEmitter {
+@@ -2434,8 +2514,13 @@ class Client extends EventEmitter {
                              },
                              participantWids,
                          );
@@ -203,7 +238,27 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
                  }
  
                  for (const participant of createGroupResult.participants) {
-@@ -2875,9 +2955,11 @@ class Client extends EventEmitter {
+@@ -2658,10 +2743,16 @@ class Client extends EventEmitter {
+                         .NewsletterMetadataCollection.update(channel.id);
+                 }
+ 
++                // outside the try: a module that is not there must not read as "false"
++                const ownerAction = await window.WWebJS.requireLazyModule(
++                    'WAWebChangeNewsletterOwnerAction',
++                    'WAWebGroupMembershipApprovalRequestsFlowLoadable',
++                );
+                 try {
+-                    await window
+-                        .require('WAWebChangeNewsletterOwnerAction')
+-                        .changeNewsletterOwnerAction(channel, newOwner);
++                    await ownerAction.changeNewsletterOwnerAction(
++                        channel,
++                        newOwner,
++                    );
+ 
+                     if (options.shouldDismissSelfAsAdmin) {
+                         const meContact = window
+@@ -2875,9 +2966,11 @@ class Client extends EventEmitter {
              if (!msg.id.fromMe || !msg.id.remote.isStatus())
                  throw 'Invalid usage! Can only revoke the message its from own status broadcast';
  
@@ -218,7 +273,7 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
          }, messageId);
      }
  
-@@ -3275,9 +3357,14 @@ class Client extends EventEmitter {
+@@ -3275,9 +3368,14 @@ class Client extends EventEmitter {
  
          return await this.pupPage.evaluate(
              async (startTimeTs, callType) => {
@@ -236,6 +291,26 @@ index 62de539540764a88242b243dd8e403166e45c137..0a4e467f5ce307d7247d7558873649f9
                  return response ?? '';
              },
              startTime,
+diff --git a/src/structures/GroupChat.js b/src/structures/GroupChat.js
+index 6bc64ff4cce181344785b63d6777328fde75a991..06997b24f98bf98b159e3bbf63791ff993ad207d 100644
+--- a/src/structures/GroupChat.js
++++ b/src/structures/GroupChat.js
+@@ -577,10 +577,12 @@ class GroupChat extends Chat {
+      */
+     async getInviteCode() {
+         const codeRes = await this.client.pupPage.evaluate(async (chatId) => {
++            const fetchJob = await window.WWebJS.requireLazyModule(
++                'WAWebMexFetchGroupInviteCodeJob',
++                'WAWebCommunityFlowLoadable',
++            );
+             try {
+-                return await window
+-                    .require('WAWebMexFetchGroupInviteCodeJob')
+-                    .fetchMexGroupInviteCode(chatId);
++                return await fetchJob.fetchMexGroupInviteCode(chatId);
+             } catch (err) {
+                 if (err.name === 'ServerStatusCodeError') return undefined;
+                 throw err;
 diff --git a/src/structures/Message.js b/src/structures/Message.js
 index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40526f6345 100644
 --- a/src/structures/Message.js
@@ -250,13 +325,40 @@ index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..800afbbec985804a0d1a713c3cf2f2235bf7cc82 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fcad986bbd 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
-@@ -110,6 +110,46 @@ exports.LoadUtils = () => {
+@@ -110,6 +110,73 @@ exports.LoadUtils = () => {
          },
      );
  
++    // WhatsApp Web 2.3000.1054320313 removed `canCheckStatusRankingPosterGating`; without it a status
++    // is posted as a message that can be ranked (the default of the model)
++    window.WWebJS.cannotBeRanked = () => {
++        const gating = window.require('WAWebStatusGatingUtils');
++        return !!(
++            gating &&
++            typeof gating.canCheckStatusRankingPosterGating === 'function' &&
++            gating.canCheckStatusRankingPosterGating()
++        );
++    };
++
++    // `getRoleByIdentifier` moved from WAWebNewsletterModelUtils to WAWebNewsletterRoleIdentifier
++    window.WWebJS.getRoleByIdentifier = (inviteCode) => {
++        for (const name of [
++            'WAWebNewsletterRoleIdentifier',
++            'WAWebNewsletterModelUtils',
++        ]) {
++            const module = window.require(name);
++            if (module && typeof module.getRoleByIdentifier === 'function')
++                return module.getRoleByIdentifier(inviteCode);
++        }
++        const build = (window.Debug && window.Debug.VERSION) || 'unknown';
++        throw new Error(
++            `[lazy-module] getRoleByIdentifier is not available in WhatsApp Web ${build}`,
++        );
++    };
++
 +    /**
 +     * WhatsApp Web loads some modules lazily: until the bundle of the screen that uses them is loaded,
 +     * window.require(name) answers undefined (or null). Loads the bundle through its Loadable and
@@ -300,7 +402,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..800afbbec985804a0d1a713c3cf2f223
      window.WWebJS.forwardMessage = async (chatId, msgId) => {
          const msg =
              window.require('WAWebCollections').Msg.get(msgId) ||
-@@ -119,7 +159,11 @@ exports.LoadUtils = () => {
+@@ -119,7 +186,11 @@ exports.LoadUtils = () => {
                      .Msg.getMessagesById([msgId])
              )?.messages?.[0];
          const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
@@ -313,7 +415,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..800afbbec985804a0d1a713c3cf2f223
              chat: chat,
              msgs: [msg],
              multicast: true,
-@@ -269,9 +313,11 @@ exports.LoadUtils = () => {
+@@ -269,9 +340,11 @@ exports.LoadUtils = () => {
                  eventJoinLink:
                      eventSendOptions.callType === 'none'
                          ? null
@@ -328,7 +430,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..800afbbec985804a0d1a713c3cf2f223
                                    startTimeTs,
                                    eventSendOptions.callType,
                                ),
-@@ -508,35 +554,40 @@ exports.LoadUtils = () => {
+@@ -508,35 +581,40 @@ exports.LoadUtils = () => {
              chat.msgs.add(msg);
              chat.t = msg.t;
  
@@ -397,7 +499,18 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..800afbbec985804a0d1a713c3cf2f223
              return msg;
          }
  
-@@ -568,13 +619,18 @@ exports.LoadUtils = () => {
+@@ -552,9 +630,7 @@ exports.LoadUtils = () => {
+                     messageSecret: window.crypto.getRandomValues(
+                         new Uint8Array(32),
+                     ),
+-                    cannotBeRanked: window
+-                        .require('WAWebStatusGatingUtils')
+-                        .canCheckStatusRankingPosterGating(),
++                    cannotBeRanked: window.WWebJS.cannotBeRanked(),
+                 },
+             );
+ 
+@@ -568,13 +644,18 @@ exports.LoadUtils = () => {
                  text: msg.body,
              };
  
@@ -423,7 +536,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..800afbbec985804a0d1a713c3cf2f223
  
              return msg;
          }
-@@ -584,7 +640,14 @@ exports.LoadUtils = () => {
+@@ -584,7 +665,14 @@ exports.LoadUtils = () => {
              .addAndSendMsgToChat(chat, message);
          await msgPromise;
  
@@ -439,6 +552,17 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..800afbbec985804a0d1a713c3cf2f223
  
          return window
              .require('WAWebCollections')
+@@ -890,9 +978,7 @@ exports.LoadUtils = () => {
+     };
+ 
+     window.WWebJS.getChannelMetadata = async (inviteCode) => {
+-        const role = window
+-            .require('WAWebNewsletterModelUtils')
+-            .getRoleByIdentifier(inviteCode);
++        const role = window.WWebJS.getRoleByIdentifier(inviteCode);
+         const response = await window
+             .require('WAWebNewsletterMetadataQueryJob')
+             .queryNewsletterMetadataByInviteCode(inviteCode, role);
 diff --git a/src/util/Puppeteer.js b/src/util/Puppeteer.js
 index 54df7005b474f00cd4e290eecd941e40caaf434e..5b495a954b844e4a81fd9066cf7d556279225402 100644
 --- a/src/util/Puppeteer.js
