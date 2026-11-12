@@ -192,6 +192,9 @@ export const envSchema = z
     SESSION_INITIALIZE_MAX_ATTEMPTS: count(5, { min: 1 }).describe(
       'Consecutive failed browser starts of a session before it is marked failed'
     ),
+    SESSION_AUTH_QUARANTINE_TTL_DAYS: count(7, { min: 1 }).describe(
+      'Days a saved login that the gateway moved aside (WWEBJS_DATA_PATH/.quarantine) is kept before it is deleted for good'
+    ),
     WATCHDOG_INTERVAL_MS: count(30000, { min: 1 }).describe(
       'Milliseconds between health checks of each session'
     ),

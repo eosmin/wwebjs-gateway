@@ -125,6 +125,12 @@ export const METRIC_DEFINITIONS = {
     help: 'Sessions the adapter found with their browser or page gone (killed, crashed, closed) and sent to reconnect, by code (BROWSER_DISCONNECTED, PAGE_CLOSED, PAGE_CRASHED, other).',
     labels: ['code']
   },
+  authQuarantined: {
+    name: 'gw_auth_quarantined_total',
+    type: 'counter',
+    help: 'Saved logins the gateway moved to quarantine on its own because WhatsApp refused them (the account was unlinked while the gateway was stopped).',
+    labels: []
+  },
   policyDecisions: {
     name: 'gw_policy_decisions_total',
     type: 'counter',

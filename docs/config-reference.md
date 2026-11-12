@@ -45,6 +45,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `SESSION_START_TIMEOUT_MS` | integer, 1 or more | no | `180000` | Milliseconds a session may take to become ready |
 | `SESSION_RECONNECT_MAX_ATTEMPTS` | integer, 0 or more | no | `0` | Reconnection attempts after a disconnect; 0 means unlimited |
 | `SESSION_INITIALIZE_MAX_ATTEMPTS` | integer, 1 or more | no | `5` | Consecutive failed browser starts of a session before it is marked failed |
+| `SESSION_AUTH_QUARANTINE_TTL_DAYS` | integer, 1 or more | no | `7` | Days a saved login that the gateway moved aside (WWEBJS_DATA_PATH/.quarantine) is kept before it is deleted for good |
 | `WATCHDOG_INTERVAL_MS` | integer, 1 or more | no | `30000` | Milliseconds between health checks of each session |
 | `WATCHDOG_MAX_FAILURES` | integer, 1 or more | no | `3` | Consecutive failed health checks before a session is restarted |
 | `MEMORY_RESTART_THRESHOLD_MB` | integer, 0 or more | no | `0` | Resident memory in MB of the gateway process plus the browsers of its sessions, above which the largest idle session is restarted; 0 disables the check |

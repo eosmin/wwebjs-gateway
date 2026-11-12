@@ -44,6 +44,12 @@ export function isPuppeteerFailure(error: unknown): boolean {
   return PUPPETEER_FAILURE_PATTERNS.some(pattern => pattern.test(message))
 }
 
+// The wait of `Client.initialize` that gives up (a Puppeteer TimeoutError from `waitForFunction`): it
+// covers both a page that never loaded and a connection that never left its opening state, which the
+// caller tells apart by looking at the page
+export const isPageWaitTimeout = (error: unknown): boolean =>
+  error instanceof Error && error.name === 'TimeoutError' && /Waiting failed/i.test(error.message)
+
 // The patch of `Client.sendMessage` marks a failure of the library's own Node code that ran after the
 // page had sent the message. An error from before that point, or from the page, is never marked, and
 // the marker belongs to that patch alone: nothing else may set it.

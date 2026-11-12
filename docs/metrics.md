@@ -25,6 +25,7 @@ an admin key is also accepted, and when `METRICS_TOKEN` is unset only an admin k
 | `gw_wa_call_errors_total` | counter | `op`, `type` | Failed calls into whatsapp-web.js, by operation and error type. |
 | `gw_watchdog_restarts_total` | counter | - | Sessions the watchdog restarted (a frozen browser, a start that never ended, memory). A browser that dies is not counted here: see gw_browser_recoveries_total. |
 | `gw_browser_recoveries_total` | counter | `code` | Sessions the adapter found with their browser or page gone (killed, crashed, closed) and sent to reconnect, by code (BROWSER_DISCONNECTED, PAGE_CLOSED, PAGE_CRASHED, other). |
+| `gw_auth_quarantined_total` | counter | - | Saved logins the gateway moved to quarantine on its own because WhatsApp refused them (the account was unlinked while the gateway was stopped). |
 | `gw_policy_decisions_total` | counter | `rule`, `decision` | Decisions of the send policy that are not a plain allow at enqueue, by rule (`none` for an allow) and decision (allow, delay, reject). |
 | `gw_policy_delay_seconds` | histogram | - | Seconds the send policy asked a job to wait. |
 | `gw_suppressed_chats` | gauge | - | Chats on the suppression lists of all sessions. |
