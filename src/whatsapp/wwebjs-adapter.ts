@@ -366,6 +366,10 @@ export class WwebjsAdapter implements WhatsAppClientPort {
         this.logger.warn(
           'A message came with a timestamp that is not a date; dated by its arrival'
         ),
+      onUnreadableMessage: fields =>
+        this.logger.warn(
+          `[${this.sessionId}] The last message of a chat does not fit its schema (${fields}); left out of the chat`
+        ),
       includeRaw: this.config.INCLUDE_RAW,
       rawMaxFieldBytes: this.config.RAW_MAX_FIELD_BYTES,
       mediaUrl: messageId =>
