@@ -263,7 +263,10 @@ describe('assertPublicHttpUrl', () => {
     // IPv4-translated (SIIT) form of the metadata address
     'http://[::ffff:0:a9fe:a9fe]/',
     // The metadata service of Alibaba Cloud
-    'http://100.100.100.200/'
+    'http://100.100.100.200/',
+    // The WireServer of Azure, a public address
+    'http://168.63.129.16/machine/?comp=goalstate',
+    'http://[::ffff:168.63.129.16]/'
   ])(
     'keeps the metadata addresses blocked even when private targets are allowed: %s',
     async url => {
@@ -310,6 +313,23 @@ describe('isValidAllowlistEntry', () => {
 })
 
 describe('the addresses no switch and no allowlist opens', () => {
+  // A public address, so it is closed by being listed, not by a private range
+  it.each(['http://168.63.129.16/', 'http://[::ffff:a83f:8110]/'])(
+    'refuses the WireServer of Azure (%s) with the default policy and with its address allowlisted',
+    async url => {
+      await expect(assertPublicHttpUrl(url, policy({}))).rejects.toBeInstanceOf(ValidationError)
+      await expect(
+        assertPublicHttpUrl(url, policy({ privateHostAllowlist: ['168.63.129.16'] }))
+      ).rejects.toBeInstanceOf(ValidationError)
+    }
+  )
+
+  it('still takes the addresses next to it', async () => {
+    await expect(assertPublicHttpUrl('http://168.63.129.17/', policy({}))).resolves.toHaveProperty(
+      'addresses'
+    )
+  })
+
   // The security review of the webhooks: an allowlisted range must not open the other metadata services
   it.each([
     ['100.100.100.200', '100.64.0.0/10'],
