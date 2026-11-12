@@ -20,6 +20,8 @@ import type {
 } from '../types/sessions.dto.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
 
+import { AuthService } from './auth.service.js'
+
 // Pixels per module and quiet zone of the PNG: large enough for a phone to scan from a monitor
 const QR_PNG_SCALE = 8
 const QR_PNG_MARGIN = 2
@@ -55,7 +57,8 @@ export class SessionsService {
 
   constructor(
     @Inject(SessionsRepository) private readonly sessions: SessionsRepository,
-    @Inject(SessionManager) private readonly manager: SessionManager
+    @Inject(SessionManager) private readonly manager: SessionManager,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   async list(): Promise<SessionListDto> {
@@ -100,8 +103,14 @@ export class SessionsService {
     return toSessionDto(await this.manager.logout(id))
   }
 
-  remove(id: string): Promise<void> {
-    return this.manager.remove(id)
+  // The keys of the session are deleted with it; the cache of the guard must forget them now, also
+  // when a later step of the deletion fails, because the rows are already gone by then
+  async remove(id: string): Promise<void> {
+    try {
+      await this.manager.remove(id)
+    } finally {
+      this.auth.invalidateSession(id)
+    }
   }
 
   async resetState(id: string): Promise<void> {

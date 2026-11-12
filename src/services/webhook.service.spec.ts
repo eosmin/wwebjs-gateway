@@ -5,7 +5,12 @@ import type { Webhook } from '../database/models.js'
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import type { WebhooksRepository } from '../database/repositories/webhooks.repository.js'
 
-import { WebhookService, receivesEvent, toWebhookDto } from './webhook.service.js'
+import {
+  WebhookService,
+  assertCredentialEventsAllowed,
+  receivesEvent,
+  toWebhookDto
+} from './webhook.service.js'
 
 const ID = '7f0c3f4e-2b1a-4c55-9a52-0c1c3f6f2d10'
 
@@ -114,7 +119,13 @@ describe('receivesEvent', () => {
     [['*'], 'message', true],
     [['message'], 'message', true],
     [['message'], 'ready', false],
-    [['ready', 'message'], 'message', true]
+    [['ready', 'message'], 'message', true],
+    // The wildcard never carries a login credential: qr and code are asked for by name
+    [['*'], 'qr', false],
+    [['*'], 'code', false],
+    [['qr'], 'qr', true],
+    [['code', 'ready'], 'code', true],
+    [['qr'], 'code', false]
   ])('%j and %s is %s', (events, event, expected) => {
     expect(receivesEvent({ events }, event)).toBe(expected)
   })
@@ -131,6 +142,16 @@ describe('WebhookService.create', () => {
       expect.objectContaining({ secret: created.secret })
     )
     expect((await service.get(ID)) as object).not.toHaveProperty('secret')
+  })
+
+  it('keeps qr and code named next to a wildcard, which never carries them', async () => {
+    const { service, webhooks } = setup()
+
+    await service.create({ url: PUBLIC_URL, events: ['*', 'qr', 'message', 'code', 'qr'] })
+
+    expect(webhooks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ events: ['*', 'qr', 'code'] })
+    )
   })
 
   it('collapses a wildcard to ["*"]', async () => {
@@ -283,6 +304,23 @@ describe('WebhookService.forEvent', () => {
     expect(forMessage.map(w => w.id)).toEqual(['all', 'msg'])
     expect(forReady.map(w => w.id)).toEqual(['all', 'ready'])
     expect(webhooks.listEnabledFor).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives qr and code only to the webhook that names them, not to a wildcard', async () => {
+    const { service, webhooks } = setup()
+    webhooks.listEnabledFor.mockResolvedValue([
+      row({ id: 'all', events: ['*'] }),
+      row({ id: 'named', events: ['*', 'qr'] }),
+      row({ id: 'msg', events: ['message'] })
+    ])
+
+    expect((await service.forEvent('main', 'qr')).map(w => w.id)).toEqual(['named'])
+    expect((await service.forEvent('main', 'code')).map(w => w.id)).toEqual([])
+    expect((await service.forEvent('main', 'message')).map(w => w.id)).toEqual([
+      'all',
+      'named',
+      'msg'
+    ])
   })
 
   it.each([
@@ -470,5 +508,39 @@ describe('the limit of webhooks per session', () => {
     webhooks.countFor.mockResolvedValue(99)
 
     await expect(service.update(ID, { enabled: false })).resolves.toBeDefined()
+  })
+})
+
+describe('assertCredentialEventsAllowed', () => {
+  const webhooksKey = keyPrincipal('k', 'main', ['webhooks'])
+  const manageKey = keyPrincipal('k', 'main', ['webhooks', 'manage'])
+
+  it.each([['qr'], ['code']])('refuses a key without manage that asks for %s', event => {
+    let thrown: unknown
+    try {
+      assertCredentialEventsAllowed(webhooksKey, [event, 'message'])
+    } catch (error: unknown) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(ForbiddenError)
+    expect(thrown).toMatchObject({ code: 'INSUFFICIENT_SCOPE', details: { scope: 'manage' } })
+  })
+
+  it('lets a key with manage, and an admin, ask for them', () => {
+    expect(() => {
+      assertCredentialEventsAllowed(manageKey, ['qr', 'code'])
+    }).not.toThrow()
+    expect(() => {
+      assertCredentialEventsAllowed(adminPrincipal('k'), ['qr'])
+    }).not.toThrow()
+  })
+
+  it('lets any key ask for the rest, the wildcard and nothing', () => {
+    expect(() => {
+      assertCredentialEventsAllowed(webhooksKey, ['*', 'message', 'ready'])
+    }).not.toThrow()
+    expect(() => {
+      assertCredentialEventsAllowed(webhooksKey, undefined)
+    }).not.toThrow()
   })
 })

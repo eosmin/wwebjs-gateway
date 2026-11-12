@@ -3,12 +3,13 @@ import { Inject, Injectable } from '@nestjs/common'
 import { ConflictError, NotFoundError, ValidationError } from '../common/errors.js'
 import { generateWebhookSecret } from '../common/lib/crypto.js'
 import { assertPublicHttpUrl } from '../common/lib/ssrf.js'
-import { type Principal, assertWebhookAccess } from '../common/principal.js'
+import { type Principal, assertScope, assertWebhookAccess } from '../common/principal.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { Webhook } from '../database/models.js'
 import { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import { WebhooksRepository } from '../database/repositories/webhooks.repository.js'
+import { CREDENTIAL_EVENTS } from '../types/events.js'
 import type {
   CreatedWebhookDto,
   CreateWebhookDto,
@@ -30,8 +31,23 @@ export function toWebhookDto(row: Webhook): WebhookDto {
   }
 }
 
+// `*` is every event but the credential ones (qr, code): those are delivered only to a webhook that
+// names them, and only a key with the `manage` scope may name them
 export function receivesEvent(webhook: Pick<Webhook, 'events'>, event: string): boolean {
-  return webhook.events.includes('*') || webhook.events.includes(event)
+  if (webhook.events.includes(event)) return true
+  return webhook.events.includes('*') && !CREDENTIAL_EVENTS.includes(event)
+}
+
+export const listensToCredentials = (events: readonly string[] | undefined): boolean =>
+  events?.some(event => CREDENTIAL_EVENTS.includes(event)) === true
+
+// A QR code or a pairing code lets whoever receives it link a device to the account, so a webhook
+// that gets them is a `manage` matter, not a `webhooks` one
+export function assertCredentialEventsAllowed(
+  principal: Principal,
+  events: readonly string[] | undefined
+): void {
+  if (listensToCredentials(events)) assertScope(principal, 'manage')
 }
 
 // What the webhooks routes do, and the list of enabled webhooks the dispatcher reads for every
@@ -213,8 +229,11 @@ export class WebhookService {
 }
 
 // "*" already means every event, so it replaces any other entry
+// A wildcard replaces the other names, except the credential ones: `*` does not carry them
 const normalizeEvents = (values: string[]): string[] =>
-  values.includes('*') ? ['*'] : [...new Set(values)]
+  values.includes('*')
+    ? ['*', ...new Set(values.filter(value => CREDENTIAL_EVENTS.includes(value)))]
+    : [...new Set(values)]
 
 const webhookNotFound = (id: string): NotFoundError =>
   new NotFoundError('NOT_FOUND', `Webhook "${id}" does not exist`)

@@ -69,6 +69,16 @@ export class AuthService {
     }
   }
 
+  // The keys of a session go with it (cascade), so the cache must not keep them for the TTL
+  invalidateSession(sessionId: string): void {
+    this.generation += 1
+    for (const [hash, cached] of this.cache) {
+      if (cached.row.sessionId !== sessionId) continue
+      this.lastStamped.delete(cached.row.id)
+      this.cache.delete(hash)
+    }
+  }
+
   private async find(keyHash: string): Promise<CachedKey | null> {
     const hit = this.cache.get(keyHash)
     if (hit !== undefined && hit.cachedUntil > Date.now()) return hit

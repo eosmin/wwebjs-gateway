@@ -3,6 +3,7 @@ import type { Session } from '../database/models.js'
 import type { SessionsRepository } from '../database/repositories/sessions.repository.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
 
+import type { AuthService } from './auth.service.js'
 import { SessionsService, toSessionDto } from './sessions.service.js'
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -67,9 +68,11 @@ describe('SessionsService', () => {
     requireReady: jest.fn(),
     requireLinking: jest.fn()
   }
+  const auth = { invalidateSession: jest.fn() }
   const service = new SessionsService(
     repository as unknown as SessionsRepository, // reason: only the methods above are called
-    manager as unknown as SessionManager // reason: only the methods above are called
+    manager as unknown as SessionManager, // reason: only the methods above are called
+    auth as unknown as AuthService // reason: same
   )
 
   beforeEach(() => {
@@ -206,6 +209,17 @@ describe('SessionsService', () => {
       await service.remove('main')
 
       expect(manager.remove).toHaveBeenCalledWith('main')
+    })
+
+    it('drops the cached keys of the session once it is deleted, even when the deletion fails after the row went', async () => {
+      manager.remove.mockResolvedValueOnce(undefined)
+      await service.remove('main')
+      expect(auth.invalidateSession).toHaveBeenCalledWith('main')
+
+      auth.invalidateSession.mockClear()
+      manager.remove.mockRejectedValueOnce(new Error('a listener failed'))
+      await expect(service.remove('main')).rejects.toThrow('a listener failed')
+      expect(auth.invalidateSession).toHaveBeenCalledWith('main')
     })
   })
 

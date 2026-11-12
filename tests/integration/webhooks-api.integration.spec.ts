@@ -282,6 +282,44 @@ describe('webhooks API (integration)', () => {
       expect((await deliveries?.findById(deliveryId))?.status).toBe('failed')
     })
 
+    it('keeps the qr and code events for a key with the manage scope', async () => {
+      const keyWith = async (scopes: string[]): Promise<Record<string, string>> => {
+        const response = await application().inject({
+          method: 'POST',
+          url: '/v1/api-keys',
+          headers: ADMIN,
+          payload: { name: 'cred', sessionId: mine, scopes }
+        })
+        return { 'x-api-key': response.json<{ key: string }>().key }
+      }
+      const plain = await keyWith(['webhooks'])
+      const manager = await keyWith(['webhooks', 'manage'])
+
+      for (const event of ['qr', 'code']) {
+        const refused = await call(
+          'POST',
+          '',
+          { url: URL_OK, sessionId: mine, events: [event] },
+          plain
+        )
+        expect(refused.statusCode).toBe(403)
+        expect(refused.json()).toMatchObject({
+          error: { code: 'INSUFFICIENT_SCOPE', details: { scope: 'manage' } }
+        })
+      }
+      const named = await createWebhook({ sessionId: mine, events: ['qr', 'message'] }, manager)
+      // Moving the URL of a webhook that gets the QR code would send the code elsewhere
+      const moved = await call('PATCH', `/${named.id}`, { url: 'https://8.8.4.4/x' }, plain)
+      expect(moved.statusCode).toBe(403)
+      expect((await call('GET', `/${named.id}`)).json()).toMatchObject({ url: URL_OK })
+      // Widening another one to the credentials is refused too; `*` and the rest are not
+      const wide = await createWebhook({ sessionId: mine, events: ['message'] }, plain)
+      const widen = await call('PATCH', `/${wide.id}`, { events: ['message', 'code'] }, plain)
+      expect(widen.statusCode).toBe(403)
+      const star = await call('PATCH', `/${wide.id}`, { events: ['*'] }, plain)
+      expect(star.statusCode).toBe(200)
+    })
+
     it('refuses a key without the webhooks scope', async () => {
       const response = await application().inject({
         method: 'POST',

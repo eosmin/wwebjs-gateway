@@ -249,6 +249,32 @@ describe('sessions API (integration)', () => {
     }
   })
 
+  it.each(['read', 'send', 'webhooks', 'events'])(
+    'refuses the QR code, the PNG and the pairing code to a key whose only scope is %s',
+    async scope => {
+      const key = await keyFor(id, [scope])
+
+      for (const [method, route] of [
+        ['GET', 'qr'],
+        ['GET', 'qr.png'],
+        ['POST', 'pairing-code'],
+        ['DELETE', 'pairing-code']
+      ] as const) {
+        const response = await send(
+          method,
+          `/v1/sessions/${id}/${route}`,
+          method === 'POST' ? { phoneNumber: '5215500000001' } : undefined,
+          key.headers
+        )
+        expect(response.statusCode).toBe(403)
+        expect(response.json()).toMatchObject({
+          error: { code: 'INSUFFICIENT_SCOPE', details: { scope: 'manage' } }
+        })
+        expect(response.body).not.toContain(QR_TEXT)
+      }
+    }
+  )
+
   it('keeps the QR code out of the session row and out of every Redis key of the session', async () => {
     const row = await repository().findById(id)
     expect(
@@ -384,10 +410,13 @@ describe('sessions API (integration)', () => {
 
   describe('the life of a running session', () => {
     let keyId: string
+    let keyHeaders: Record<string, string>
 
     beforeAll(async () => {
       expect((await send('POST', '/v1/sessions', { id: second })).statusCode).toBe(201)
-      keyId = (await keyFor(second, ['read'])).id
+      const key = await keyFor(second, ['read'])
+      keyId = key.id
+      keyHeaders = key.headers
       expect((await send('POST', `/v1/sessions/${second}/start`)).statusCode).toBe(200)
       newClient(second).emit({ event: 'ready', data: {} })
       await reach(second, 'ready')
@@ -430,9 +459,18 @@ describe('sessions API (integration)', () => {
       client.emit({ event: 'ready', data: {} })
       await reach(second, 'ready')
 
+      // The guard caches the key for a while: using it now puts it there
+      expect((await send('GET', `/v1/sessions/${second}`, undefined, keyHeaders)).statusCode).toBe(
+        200
+      )
+
       const response = await send('DELETE', `/v1/sessions/${second}`)
 
       expect(response.statusCode).toBe(204)
+      // The key went with the session, and the cache did not keep it: no waiting for the TTL
+      const afterwards = await send('GET', `/v1/sessions/${second}`, undefined, keyHeaders)
+      expect(afterwards.statusCode).toBe(401)
+      expect(afterwards.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } })
       expect(client.callsOf('logout')).toHaveLength(1)
       expect(client.callsOf('destroy')).toHaveLength(1)
       expect(await repository().findById(second)).toBeNull()
