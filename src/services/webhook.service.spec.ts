@@ -249,6 +249,39 @@ describe('WebhookService.update', () => {
   })
 })
 
+describe('WebhookService.invalidate', () => {
+  it('makes the next dispatch read the enabled webhooks again, as a webhook write does', async () => {
+    const { service, webhooks } = setup()
+
+    await service.forEvent('main', 'message')
+    await service.forEvent('main', 'message')
+    expect(webhooks.listEnabledFor).toHaveBeenCalledTimes(1)
+
+    // The webhooks of a session go with it (cascade); the cache must not keep them
+    webhooks.listEnabledFor.mockResolvedValueOnce([])
+    service.invalidate()
+
+    expect(await service.forEvent('main', 'message')).toEqual([])
+    expect(webhooks.listEnabledFor).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let a read that began before it fill the cache with its stale answer', async () => {
+    const { service, webhooks } = setup()
+    let release: (rows: Webhook[]) => void = () => undefined
+    webhooks.listEnabledFor.mockImplementationOnce(
+      () => new Promise<Webhook[]>(resolve => (release = resolve))
+    )
+
+    const pending = service.forEvent('main', 'message')
+    service.invalidate()
+    release([row()])
+    await pending
+    await service.forEvent('main', 'message')
+
+    expect(webhooks.listEnabledFor).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('WebhookService.rotateSecret', () => {
   it('returns a new secret and stores it', async () => {
     const { service, webhooks } = setup()

@@ -214,7 +214,9 @@ export class WebhookService {
     }
   }
 
-  private invalidate(): void {
+  // Drops the cache of enabled webhooks. A write here does it; whoever deletes webhooks from outside
+  // (a session goes with its webhooks, by cascade) must call it too.
+  invalidate(): void {
     this.generation += 1
     this.enabledBySession.clear()
   }
