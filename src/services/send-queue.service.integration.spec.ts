@@ -993,6 +993,28 @@ describe('send queue (integration)', () => {
       await until(async () => (await depthOf(sessionId)) === 0, 3000)
     })
 
+    it('answers a send that is already queued even when the depth count after the add never returns', async () => {
+      const service = await boot()
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the queue as `this` below
+      const realCounts = Queue.prototype.getJobCounts
+      // The first call is the room check before the add; the one after the add hangs
+      jest
+        .spyOn(Queue.prototype, 'getJobCounts')
+        .mockImplementationOnce(function (this: Queue, ...args: Parameters<Queue['getJobCounts']>) {
+          return realCounts.apply(this, args)
+        })
+        .mockImplementation(() => new Promise(() => undefined))
+
+      const answered = await Promise.race([
+        service.submit(text('x'), { waitMs: 3000 }),
+        new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 1500))
+      ])
+
+      expect(answered).not.toBe('hung')
+      expect(answered).toMatchObject({ outcome: { ok: true } })
+      expect(sentBodies()).toEqual(['x'])
+    })
+
     it('answers 503 not queued, and gives the place back, when Redis fails while the room is counted', async () => {
       const service = await boot({ SEND_QUEUE_MAX_PER_SESSION: '1' })
       jest

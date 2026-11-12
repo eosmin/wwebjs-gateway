@@ -154,7 +154,9 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.releaseReservation(job.sessionId)
     }
-    await this.refreshDepth(lane)
+    // The job is in Redis already: a gauge that cannot be read must not hold the answer back (a caller
+    // that was kept waiting would be told it failed, and a retry would send the message twice)
+    void this.refreshDepth(lane)
     const outcome = await waiting
     return outcome === undefined ? { jobId } : { jobId, outcome }
   }
