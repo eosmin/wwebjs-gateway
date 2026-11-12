@@ -159,7 +159,7 @@ export class WebhooksController {
     summary: 'Change a webhook',
     description:
       'Send only what changes. The session of a webhook never changes: delete it and create another. The deliveries already queued go to the new URL on their next attempt. Changing a webhook that names `qr` or `code` (or making it name them) needs the `manage` scope too.',
-    errors: ON_WEBHOOK,
+    errors: [...ON_WEBHOOK, 'WEBHOOK_CHANGED'],
     examples: { request: { enabled: false }, response: { ...WEBHOOK_EXAMPLE, enabled: false } },
     wwebjs: [],
     gateway: true
@@ -169,10 +169,11 @@ export class WebhooksController {
     @Param() { id }: WebhookIdParamsDto,
     @Body() body: UpdateWebhookDto
   ): Promise<WebhookDto> {
-    const current = await this.webhooks.requireFor(principal, id)
-    // What it listens to now counts too: its URL, or enabling it, decides who gets the QR code
-    assertCredentialEventsAllowed(principal, [...current.events, ...(body.events ?? [])])
-    return this.webhooks.update(id, body)
+    await this.webhooks.requireFor(principal, id)
+    // The `manage` check for the QR and pairing code events is made by the service, against the row
+    // it writes: what the webhook listens to now counts too (its URL, or enabling it, decides who
+    // gets the QR code)
+    return this.webhooks.update(principal, id, body)
   }
 
   @Delete(':id')
@@ -204,7 +205,7 @@ export class WebhooksController {
     summary: 'Rotate the secret of a webhook',
     description:
       'Issues a new secret, in this answer only (a webhook that names `qr` or `code` needs the `manage` scope too). The old one stops signing at once, and so does it for the deliveries that are waiting for a retry: the signature is made with the secret the webhook has at each attempt. Update the receiver first if it cannot accept both, or expect failed attempts until it does.',
-    errors: ON_WEBHOOK,
+    errors: [...ON_WEBHOOK, 'WEBHOOK_CHANGED'],
     examples: {
       request: null,
       response: { ...WEBHOOK_EXAMPLE, secret: SECRET_EXAMPLE }
@@ -216,10 +217,8 @@ export class WebhooksController {
     @CurrentPrincipal() principal: Principal,
     @Param() { id }: WebhookIdParamsDto
   ): Promise<CreatedWebhookDto> {
-    const current = await this.webhooks.requireFor(principal, id)
-    // The secret signs what the receiver of the QR code trusts: whoever holds it can forge it
-    assertCredentialEventsAllowed(principal, current.events)
-    return this.webhooks.rotateSecret(id)
+    await this.webhooks.requireFor(principal, id)
+    return this.webhooks.rotateSecret(principal, id)
   }
 
   @Post(':id/test')

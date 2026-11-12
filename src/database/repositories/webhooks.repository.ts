@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { isForeignKeyViolation, nullIfMissing } from '../db-errors.js'
+import { isForeignKeyViolation } from '../db-errors.js'
 import type { Webhook, WebhookMediaMode } from '../models.js'
 import { PrismaService } from '../prisma.service.js'
 
@@ -64,8 +64,19 @@ export class WebhooksRepository {
     })
   }
 
-  update(id: string, patch: WebhookPatch): Promise<Webhook | null> {
-    return nullIfMissing(this.prisma.webhook.update({ where: { id }, data: patch }))
+  // A compare-and-set: changes the webhook only while its events are still `expectedEvents`, the
+  // ones a permission check was made against. Null when it does not exist or its events changed, so
+  // a check made on a stale read can never be applied to a different webhook.
+  async updateIfEvents(
+    id: string,
+    expectedEvents: string[],
+    patch: WebhookPatch
+  ): Promise<Webhook | null> {
+    const { count } = await this.prisma.webhook.updateMany({
+      where: { id, events: { equals: expectedEvents } },
+      data: patch
+    })
+    return count === 0 ? null : this.findById(id)
   }
 
   // Cascades to its deliveries; false when it did not exist

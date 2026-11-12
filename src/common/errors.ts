@@ -14,6 +14,7 @@ export const ErrorCode = {
   SESSION_ALREADY_EXISTS: 'SESSION_ALREADY_EXISTS',
   MAX_SESSIONS_REACHED: 'MAX_SESSIONS_REACHED',
   MAX_WEBHOOKS_REACHED: 'MAX_WEBHOOKS_REACHED',
+  WEBHOOK_CHANGED: 'WEBHOOK_CHANGED',
   SESSION_NOT_READY: 'SESSION_NOT_READY',
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   RATE_LIMITED: 'RATE_LIMITED',
@@ -87,6 +88,11 @@ export const ERROR_DEFINITIONS = {
     status: HttpStatus.CONFLICT,
     meaning:
       'The session already has WEBHOOKS_MAX_PER_SESSION webhooks (the webhooks of every session have the same limit); delete one first.'
+  },
+  WEBHOOK_CHANGED: {
+    status: HttpStatus.CONFLICT,
+    meaning:
+      'The webhook was changed by another request while this one was being applied; read it again and retry.'
   },
   SESSION_NOT_READY: {
     status: HttpStatus.CONFLICT,

@@ -13,6 +13,7 @@ import {
 } from './webhook.service.js'
 
 const ID = '7f0c3f4e-2b1a-4c55-9a52-0c1c3f6f2d10'
+const ADMIN = adminPrincipal(null)
 
 function row(overrides: Partial<Webhook> = {}): Webhook {
   return {
@@ -36,8 +37,9 @@ function setup(config: Partial<AppConfig> = {}) {
     create: jest.fn<Promise<Webhook | null>, [Record<string, unknown>]>(data =>
       Promise.resolve(row(data as Partial<Webhook>))
     ),
-    update: jest.fn<Promise<Webhook | null>, [string, Record<string, unknown>]>((_id, patch) =>
-      Promise.resolve(row(patch as Partial<Webhook>))
+    // The write that only goes through while the events are the ones the check read
+    updateIfEvents: jest.fn<Promise<Webhook | null>, [string, string[], Record<string, unknown>]>(
+      (_id, _events, patch) => Promise.resolve(row(patch as Partial<Webhook>))
     ),
     delete: jest.fn<Promise<boolean>, [string]>(() => Promise.resolve(true)),
     listEnabledFor: jest.fn<Promise<Webhook[]>, [string]>(() => Promise.resolve([row()])),
@@ -80,14 +82,16 @@ describe('includeRaw while INCLUDE_RAW is off', () => {
   it('refuses to change a webhook to ask for it', async () => {
     const { service, webhooks } = setup(off)
 
-    await expect(service.update(ID, { includeRaw: true })).rejects.toBeInstanceOf(ValidationError)
-    expect(webhooks.update).not.toHaveBeenCalled()
+    await expect(service.update(ADMIN, ID, { includeRaw: true })).rejects.toBeInstanceOf(
+      ValidationError
+    )
+    expect(webhooks.updateIfEvents).not.toHaveBeenCalled()
   })
 
   it('says why', async () => {
     const { service } = setup(off)
 
-    await expect(service.update(ID, { includeRaw: true })).rejects.toThrow(/INCLUDE_RAW/)
+    await expect(service.update(ADMIN, ID, { includeRaw: true })).rejects.toThrow(/INCLUDE_RAW/)
   })
 
   it('still takes a webhook that follows INCLUDE_RAW or turns the raw data off', async () => {
@@ -95,7 +99,7 @@ describe('includeRaw while INCLUDE_RAW is off', () => {
 
     await expect(service.create({ url: PUBLIC_URL })).resolves.toBeDefined()
     await expect(service.create({ url: PUBLIC_URL, includeRaw: false })).resolves.toBeDefined()
-    await expect(service.update(ID, { includeRaw: null })).resolves.toBeDefined()
+    await expect(service.update(ADMIN, ID, { includeRaw: null })).resolves.toBeDefined()
   })
 
   it('takes a webhook that asks for the raw data while INCLUDE_RAW is on', async () => {
@@ -158,10 +162,14 @@ describe('WebhookService.create', () => {
     const { service, webhooks } = setup()
 
     await service.create({ url: PUBLIC_URL, events: ['message', '*'] })
-    await service.update(ID, { events: ['ready', '*', 'ready'] })
+    await service.update(ADMIN, ID, { events: ['ready', '*', 'ready'] })
 
     expect(webhooks.create).toHaveBeenCalledWith(expect.objectContaining({ events: ['*'] }))
-    expect(webhooks.update).toHaveBeenCalledWith(ID, expect.objectContaining({ events: ['*'] }))
+    expect(webhooks.updateIfEvents).toHaveBeenCalledWith(
+      ID,
+      ['*'],
+      expect.objectContaining({ events: ['*'] })
+    )
   })
 
   it('stores a global webhook with a null session and de-duplicates the events', async () => {
@@ -223,13 +231,16 @@ describe('WebhookService.update', () => {
   it('checks a new url and leaves the rest alone', async () => {
     const { service, webhooks } = setup()
 
-    await expect(service.update(ID, { url: 'http://127.0.0.1/x' })).rejects.toBeInstanceOf(
+    await expect(service.update(ADMIN, ID, { url: 'http://127.0.0.1/x' })).rejects.toBeInstanceOf(
       ValidationError
     )
-    await service.update(ID, { enabled: false })
+    await service.update(ADMIN, ID, { enabled: false })
 
-    expect(webhooks.update).toHaveBeenCalledTimes(1)
-    expect(webhooks.update).toHaveBeenCalledWith(ID, { enabled: false, events: undefined })
+    expect(webhooks.updateIfEvents).toHaveBeenCalledTimes(1)
+    expect(webhooks.updateIfEvents).toHaveBeenCalledWith(ID, ['*'], {
+      enabled: false,
+      events: undefined
+    })
   })
 
   it('answers not found before resolving a new url', async () => {
@@ -237,15 +248,110 @@ describe('WebhookService.update', () => {
     webhooks.findById.mockResolvedValueOnce(null)
 
     // Resolving the url would throw a ValidationError for the entry above
-    await expect(service.update(ID, { url: PUBLIC_URL })).rejects.toBeInstanceOf(NotFoundError)
-    expect(webhooks.update).not.toHaveBeenCalled()
+    await expect(service.update(ADMIN, ID, { url: PUBLIC_URL })).rejects.toBeInstanceOf(
+      NotFoundError
+    )
+    expect(webhooks.updateIfEvents).not.toHaveBeenCalled()
   })
 
   it('answers not found for a missing webhook', async () => {
     const { service, webhooks } = setup()
-    webhooks.update.mockResolvedValueOnce(null)
+    webhooks.findById.mockResolvedValueOnce(null)
 
-    await expect(service.update(ID, { enabled: false })).rejects.toBeInstanceOf(NotFoundError)
+    await expect(service.update(ADMIN, ID, { enabled: false })).rejects.toBeInstanceOf(
+      NotFoundError
+    )
+  })
+})
+
+// The `manage` check for qr and code reads the webhook; the write must only go through while the
+// webhook still is what the check read, or a key without `manage` could change the URL of a webhook
+// that another key has just made listen to the QR code
+describe('WebhookService, a webhook that changes between the check and the write', () => {
+  const WEBHOOKS_ONLY = keyPrincipal('k', 'main', ['webhooks'])
+  const MANAGER = keyPrincipal('k2', 'main', ['webhooks', 'manage'])
+
+  it.each([
+    ['update', (s: WebhookService) => s.update(WEBHOOKS_ONLY, ID, { enabled: false })],
+    ['rotateSecret', (s: WebhookService) => s.rotateSecret(WEBHOOKS_ONLY, ID)]
+  ])(
+    'refuses %s when the events that were read changed and now name the QR code',
+    async (_name, act) => {
+      const { service, webhooks } = setup()
+      webhooks.findById
+        .mockResolvedValueOnce(row({ events: ['message'] }))
+        .mockResolvedValueOnce(row({ events: ['message', 'qr'] }))
+      // The compare-and-set finds the events changed
+      webhooks.updateIfEvents.mockResolvedValueOnce(null)
+
+      await expect(act(service)).rejects.toBeInstanceOf(ForbiddenError)
+      expect(webhooks.updateIfEvents).toHaveBeenCalledTimes(1)
+      expect(webhooks.updateIfEvents.mock.calls[0]?.[1]).toEqual(['message'])
+    }
+  )
+
+  it('refuses a key without manage that names qr or code, or changes a webhook that does', async () => {
+    const { service, webhooks } = setup()
+
+    await expect(service.update(WEBHOOKS_ONLY, ID, { events: ['code'] })).rejects.toMatchObject({
+      code: 'INSUFFICIENT_SCOPE'
+    })
+    webhooks.findById.mockResolvedValue(row({ events: ['qr'] }))
+    // The URL is where the QR code goes: moving it would hand the code to someone else
+    await expect(service.update(WEBHOOKS_ONLY, ID, { enabled: false })).rejects.toMatchObject({
+      code: 'INSUFFICIENT_SCOPE'
+    })
+    // The secret signs what the receiver of the QR code trusts: whoever holds it can forge it
+    await expect(service.rotateSecret(WEBHOOKS_ONLY, ID)).rejects.toMatchObject({
+      code: 'INSUFFICIENT_SCOPE'
+    })
+    expect(webhooks.updateIfEvents).not.toHaveBeenCalled()
+  })
+
+  it('writes against the events it read, so the database can refuse a change in between', async () => {
+    const { service, webhooks } = setup()
+    webhooks.findById.mockResolvedValue(row({ events: ['message', 'qr'] }))
+
+    await service.update(MANAGER, ID, { enabled: false })
+    await service.rotateSecret(MANAGER, ID)
+
+    expect(webhooks.updateIfEvents).toHaveBeenNthCalledWith(1, ID, ['message', 'qr'], {
+      enabled: false,
+      events: undefined
+    })
+    expect(webhooks.updateIfEvents.mock.calls[1]?.[1]).toEqual(['message', 'qr'])
+  })
+
+  it('reads again and goes through when the change was harmless', async () => {
+    const { service, webhooks } = setup()
+    webhooks.findById
+      .mockResolvedValueOnce(row({ events: ['message'] }))
+      .mockResolvedValueOnce(row({ events: ['ready'] }))
+    webhooks.updateIfEvents.mockResolvedValueOnce(null)
+
+    await expect(service.update(WEBHOOKS_ONLY, ID, { enabled: false })).resolves.toBeDefined()
+    expect(webhooks.updateIfEvents.mock.calls.map(call => call[1])).toEqual([
+      ['message'],
+      ['ready']
+    ])
+  })
+
+  it('gives up with a conflict when the webhook keeps changing under the write', async () => {
+    const { service, webhooks } = setup()
+    webhooks.updateIfEvents.mockResolvedValue(null)
+
+    await expect(service.update(WEBHOOKS_ONLY, ID, { enabled: false })).rejects.toBeInstanceOf(
+      ConflictError
+    )
+    expect(webhooks.updateIfEvents).toHaveBeenCalledTimes(3)
+  })
+
+  it('answers not found when the webhook is deleted between the read and the write', async () => {
+    const { service, webhooks } = setup()
+    webhooks.updateIfEvents.mockResolvedValueOnce(null)
+    webhooks.findById.mockResolvedValueOnce(row()).mockResolvedValueOnce(null)
+
+    await expect(service.rotateSecret(ADMIN, ID)).rejects.toBeInstanceOf(NotFoundError)
   })
 })
 
@@ -286,18 +392,18 @@ describe('WebhookService.rotateSecret', () => {
   it('returns a new secret and stores it', async () => {
     const { service, webhooks } = setup()
 
-    const rotated = await service.rotateSecret(ID)
+    const rotated = await service.rotateSecret(ADMIN, ID)
 
     expect(rotated.secret).toMatch(/^whsec_/)
     expect(rotated.secret).not.toBe('whsec_stored')
-    expect(webhooks.update).toHaveBeenCalledWith(ID, { secret: rotated.secret })
+    expect(webhooks.updateIfEvents).toHaveBeenCalledWith(ID, ['*'], { secret: rotated.secret })
   })
 
   it('answers not found for a missing webhook', async () => {
     const { service, webhooks } = setup()
-    webhooks.update.mockResolvedValueOnce(null)
+    webhooks.findById.mockResolvedValueOnce(null)
 
-    await expect(service.rotateSecret(ID)).rejects.toBeInstanceOf(NotFoundError)
+    await expect(service.rotateSecret(ADMIN, ID)).rejects.toBeInstanceOf(NotFoundError)
   })
 })
 
@@ -358,8 +464,8 @@ describe('WebhookService.forEvent', () => {
 
   it.each([
     ['create', (s: WebhookService) => s.create({ url: PUBLIC_URL })],
-    ['update', (s: WebhookService) => s.update(ID, { enabled: false })],
-    ['rotateSecret', (s: WebhookService) => s.rotateSecret(ID)],
+    ['update', (s: WebhookService) => s.update(ADMIN, ID, { enabled: false })],
+    ['rotateSecret', (s: WebhookService) => s.rotateSecret(ADMIN, ID)],
     ['delete', (s: WebhookService) => s.delete(ID)]
   ])('reads again after %s', async (_name, write) => {
     const { service, webhooks } = setup()
@@ -374,9 +480,13 @@ describe('WebhookService.forEvent', () => {
   it('drops the cache even when the write fails', async () => {
     const { service, webhooks } = setup()
     await service.forEvent('main', 'message')
-    webhooks.update.mockResolvedValueOnce(null)
+    // The write finds nothing to change, and the webhook is gone when it is read again
+    webhooks.updateIfEvents.mockResolvedValueOnce(null)
+    webhooks.findById.mockResolvedValueOnce(row()).mockResolvedValueOnce(null)
 
-    await expect(service.update(ID, { enabled: false })).rejects.toBeInstanceOf(NotFoundError)
+    await expect(service.update(ADMIN, ID, { enabled: false })).rejects.toBeInstanceOf(
+      NotFoundError
+    )
     await service.forEvent('main', 'message')
 
     expect(webhooks.listEnabledFor).toHaveBeenCalledTimes(2)
@@ -385,9 +495,9 @@ describe('WebhookService.forEvent', () => {
   it('drops the cache when the write throws after it may have committed', async () => {
     const { service, webhooks } = setup()
     await service.forEvent('main', 'message')
-    webhooks.update.mockRejectedValueOnce(new Error('connection reset'))
+    webhooks.updateIfEvents.mockRejectedValueOnce(new Error('connection reset'))
 
-    await expect(service.rotateSecret(ID)).rejects.toThrow('connection reset')
+    await expect(service.rotateSecret(ADMIN, ID)).rejects.toThrow('connection reset')
     await service.forEvent('main', 'message')
 
     expect(webhooks.listEnabledFor).toHaveBeenCalledTimes(2)
@@ -540,7 +650,7 @@ describe('the limit of webhooks per session', () => {
     const { service, webhooks } = setup()
     webhooks.countFor.mockResolvedValue(99)
 
-    await expect(service.update(ID, { enabled: false })).resolves.toBeDefined()
+    await expect(service.update(ADMIN, ID, { enabled: false })).resolves.toBeDefined()
   })
 })
 

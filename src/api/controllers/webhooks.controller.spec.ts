@@ -117,42 +117,30 @@ describe('WebhooksController access', () => {
     expect(deliveries.retryFailed).not.toHaveBeenCalled()
   })
 
-  it('refuses the qr and code events to a key without the manage scope, on create and update', async () => {
+  it('refuses the qr and code events to a key without the manage scope on create', async () => {
     const { controller, webhooks } = setup()
     const url = 'https://a.example.test'
 
     await expect(
       controller.create(sessionKey, { url, sessionId: 'main', events: ['qr'] })
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
-    await expect(
-      controller.update(sessionKey, { id: ID }, { events: ['code'] })
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
     expect(webhooks.create).not.toHaveBeenCalled()
-    expect(webhooks.update).not.toHaveBeenCalled()
 
     const manageKey = keyPrincipal('k', 'main', ['webhooks', 'manage'])
     await controller.create(manageKey, { url, sessionId: 'main', events: ['qr'] })
     expect(webhooks.create).toHaveBeenCalledTimes(1)
   })
 
-  it('refuses any change of a webhook that already listens to qr or code to a key without manage', async () => {
+  // The `manage` check of an update or a rotation is made by the service, against the row it writes
+  // (a check here would run on a read that another request can change before the write)
+  it('hands the key to the service, which checks the qr and code events on the row it writes', async () => {
     const { controller, webhooks } = setup()
-    webhooks.requireFor.mockResolvedValue({ id: ID, sessionId: 'main', events: ['qr'] })
 
-    // The URL is where the QR code goes: moving it would hand the code to someone else
-    await expect(
-      controller.update(sessionKey, { id: ID }, { url: 'https://evil.example.test' })
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
-    expect(webhooks.update).not.toHaveBeenCalled()
+    await controller.update(sessionKey, { id: ID }, { url: 'https://ok.example.test' })
+    await controller.rotateSecret(sessionKey, { id: ID })
 
-    await controller.update(
-      keyPrincipal('k', 'main', ['webhooks', 'manage']),
-      { id: ID },
-      {
-        url: 'https://ok.example.test'
-      }
-    )
-    expect(webhooks.update).toHaveBeenCalledTimes(1)
+    expect(webhooks.update).toHaveBeenCalledWith(sessionKey, ID, { url: 'https://ok.example.test' })
+    expect(webhooks.rotateSecret).toHaveBeenCalledWith(sessionKey, ID)
   })
 
   it('lists what the key may see', async () => {
