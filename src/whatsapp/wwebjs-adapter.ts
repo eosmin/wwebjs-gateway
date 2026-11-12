@@ -16,6 +16,7 @@ import wwebjs, {
 import { z } from 'zod'
 
 import { LONG_CALL_TIMEOUT_MS } from '../common/lib/call-limits.js'
+import { withTimeout } from '../common/lib/timeout.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { processTreeRssBytes } from '../infra/process/process-memory.js'
 import type {
@@ -65,6 +66,7 @@ import { releaseProfileLock } from './profile-lock.js'
 import {
   type CauseCode,
   describeCause,
+  isPageWaitTimeout,
   isPuppeteerFailure,
   mapping,
   notReady,
@@ -72,6 +74,7 @@ import {
 } from './wa-call.js'
 import {
   WaChatNotFoundError,
+  WaAuthStalledError,
   WaDisconnectedError,
   WaMappingError,
   WaOperationError,
@@ -184,6 +187,7 @@ const LONG_CALLS: ReadonlySet<string> = new Set([
 // `page.goto` of wwebjs has no timeout of its own, so initialize gets one; the watchdog still guards
 // the status
 const INITIALIZE_TIMEOUT_MS = 180_000
+const PAGE_PROBE_TIMEOUT_MS = 5000
 
 // Calls that work while the browser is down: they are how a session comes back or goes away
 const WORKS_WHEN_NOT_READY: ReadonlySet<string> = new Set([
@@ -774,15 +778,40 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     if (this.destroyRequested) throw new WaDisconnectedError('initialize', false)
     const starting = this.client.initialize()
     this.starting = starting
-    await runWaCall(
-      'initialize',
-      Math.max(this.config.WA_CALL_TIMEOUT_MS, INITIALIZE_TIMEOUT_MS),
-      () => starting,
-      error => {
-        this.logCause('initialize', error)
-      }
-    )
+    let waitTimedOut = false
+    try {
+      await runWaCall(
+        'initialize',
+        Math.max(this.config.WA_CALL_TIMEOUT_MS, INITIALIZE_TIMEOUT_MS),
+        () => starting,
+        error => {
+          this.logCause('initialize', error)
+          waitTimedOut = isPageWaitTimeout(error)
+        }
+      )
+    } catch (error: unknown) {
+      // A page that loaded and a connection that did not open: the manager decides what that means
+      if (waitTimedOut && (await this.pageLoaded())) throw new WaAuthStalledError()
+      throw error
+    }
     this.guardBrowser()
+  }
+
+  // Read-only: has WhatsApp Web itself loaded in the page (its build number is defined)? False when
+  // there is no page or it does not answer in time.
+  private async pageLoaded(): Promise<boolean> {
+    const page = this.client.pupPage
+    if (!page) return false
+    try {
+      const loaded: unknown = await withTimeout(
+        page.evaluate('window.Debug?.VERSION !== undefined'),
+        PAGE_PROBE_TIMEOUT_MS,
+        'page probe'
+      )
+      return loaded === true
+    } catch {
+      return false
+    }
   }
 
   // Where LocalAuth keeps the profile of this session (the folder it names `session-<clientId>`)

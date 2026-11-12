@@ -335,7 +335,9 @@ describe('SendJobProcessor', () => {
       // Raised inside the adapter and always translated by runWaCall; it never reaches a worker
       MapperFailure: { make: undefined, code: undefined },
       // Raised only by `initialize`, before any browser runs; no send can meet it
-      WaProfileLockedError: { make: undefined, code: undefined }
+      WaProfileLockedError: { make: undefined, code: undefined },
+      // Raised only by `initialize`, when the page loaded and the saved login never connected; no send can meet it
+      WaAuthStalledError: { make: undefined, code: undefined }
     } as const
 
     it('has a decided send outcome for every error class of wa-errors.ts', () => {

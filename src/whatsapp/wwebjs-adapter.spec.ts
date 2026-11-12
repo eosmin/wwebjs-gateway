@@ -14,6 +14,7 @@ import { WA_EVENTS, type WaEventName } from '../types/events.js'
 
 import { releaseProfileLock } from './profile-lock.js'
 import {
+  WaAuthStalledError,
   WaChatNotFoundError,
   WaDisconnectedError,
   WaMappingError,
@@ -1218,6 +1219,92 @@ describe('deadlines', () => {
       Promise.reject('auth timeout')
     )
     await expect(thrown.adapter.initialize()).rejects.toBeInstanceOf(WaOperationError)
+  })
+
+  describe('a saved login that never connects', () => {
+    const evaluates = new Map<unknown, jest.Mock>()
+    const waitTimeout = (): Error =>
+      Object.assign(new Error('Waiting failed: 30000ms exceeded'), { name: 'TimeoutError' })
+
+    // The page answers the one expression the adapter asks: is the build number of WhatsApp Web defined
+    const withPage = (h: ReturnType<typeof harness>, loaded: boolean, fails = false): void => {
+      const evaluate = jest.fn((_expression: string) =>
+        fails ? Promise.reject(new Error('Target closed')) : Promise.resolve(loaded)
+      )
+      Object.assign(h.client, { pupPage: { evaluate, on: jest.fn() } })
+      evaluates.set(h, evaluate)
+    }
+
+    it('says so when the wait timed out and WhatsApp Web itself had loaded', async () => {
+      const h = harness()
+      withPage(h, true)
+      stub(h.client, 'initialize').mockRejectedValue(waitTimeout())
+
+      await expect(h.adapter.initialize()).rejects.toBeInstanceOf(WaAuthStalledError)
+      // It asked only whether the build number of WhatsApp Web is defined
+      expect(evaluates.get(h)).toHaveBeenCalledTimes(1)
+      expect((evaluates.get(h)?.mock.calls[0] as unknown[] | undefined)?.[0]).toBe(
+        'window.Debug?.VERSION !== undefined'
+      )
+    })
+
+    it('stays a plain failure when the page does not answer in time', async () => {
+      jest.useFakeTimers()
+      try {
+        const h = harness()
+        const hang = jest.fn(() => new Promise(() => undefined))
+        Object.assign(h.client, { pupPage: { evaluate: hang, on: jest.fn() } })
+        stub(h.client, 'initialize').mockRejectedValue(waitTimeout())
+        const result = h.adapter.initialize().catch((e: unknown) => e)
+        await jest.advanceTimersByTimeAsync(6000)
+        const error = await result
+        expect(error).toBeInstanceOf(WaOperationError)
+        expect(error).not.toBeInstanceOf(WaAuthStalledError)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('does not look at the page for a timeout that is not the wait of initialize', async () => {
+      const h = harness()
+      withPage(h, true)
+      const navigation = Object.assign(new Error('Navigation timeout of 30000 ms exceeded'), {
+        name: 'TimeoutError'
+      })
+      stub(h.client, 'initialize').mockRejectedValue(navigation)
+
+      await expect(h.adapter.initialize()).rejects.not.toBeInstanceOf(WaAuthStalledError)
+      expect(evaluates.get(h)).not.toHaveBeenCalled()
+    })
+
+    it('stays a plain failure when WhatsApp Web never loaded (network, build)', async () => {
+      const h = harness()
+      withPage(h, false)
+      stub(h.client, 'initialize').mockRejectedValue(waitTimeout())
+
+      const error: unknown = await h.adapter.initialize().catch((e: unknown) => e)
+      expect(error).toBeInstanceOf(WaOperationError)
+      expect(error).not.toBeInstanceOf(WaAuthStalledError)
+    })
+
+    it('stays a plain failure when there is no page or the page does not answer', async () => {
+      const noPage = harness()
+      stub(noPage.client, 'initialize').mockRejectedValue(waitTimeout())
+      await expect(noPage.adapter.initialize()).rejects.not.toBeInstanceOf(WaAuthStalledError)
+
+      const dead = harness()
+      withPage(dead, true, true)
+      stub(dead.client, 'initialize').mockRejectedValue(waitTimeout())
+      await expect(dead.adapter.initialize()).rejects.not.toBeInstanceOf(WaAuthStalledError)
+    })
+
+    it('does not read any other failure of initialize as a stalled login', async () => {
+      const h = harness()
+      withPage(h, true)
+      stub(h.client, 'initialize').mockRejectedValue(new Error('net::ERR_INTERNET_DISCONNECTED'))
+
+      await expect(h.adapter.initialize()).rejects.not.toBeInstanceOf(WaAuthStalledError)
+    })
   })
 })
 

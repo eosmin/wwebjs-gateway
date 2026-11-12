@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+
 import {
   Inject,
   Injectable,
@@ -24,7 +26,14 @@ import { SESSION_STATUSES, type SessionStatus } from '../types/dto.js'
 
 import { ACCOUNT_SETTING_CALLS } from './account-settings.js'
 import { EventPipelineService } from './event-pipeline.service.js'
-import { WaProfileLockedError } from './wa-errors.js'
+import {
+  DAY_MS,
+  hasSavedLogin,
+  purgeExpiredQuarantine,
+  quarantineSavedLogin,
+  wasQuarantinedWithin
+} from './saved-login.js'
+import { WaAuthStalledError, WaProfileLockedError } from './wa-errors.js'
 import {
   WHATSAPP_CLIENT_FACTORY,
   type ClientEvent,
@@ -39,6 +48,27 @@ const CALL_TIMEOUT_MS = 15_000
 const REDIS_TIMEOUT_MS = 5000
 const DB_TIMEOUT_MS = 5000
 const SCAN_COUNT = 200
+// How long a browser on a clean profile gets to show a QR code
+const PROBE_TIMEOUT_MS = 60_000
+// A login is moved aside by the gateway on its own once per session in this time; the next one needs a
+// person
+const AUTO_QUARANTINE_WINDOW_MS = DAY_MS
+const AUTH_QUARANTINED = 'AUTH_QUARANTINED'
+const LOGIN_NOT_MOVED_MESSAGE =
+  'the account was forgotten but the saved login could not be moved to quarantine and is still in the data folder; move or delete WWEBJS_DATA_PATH/session-<id> by hand before starting the session'
+type QuarantineOutcome = { kind: 'moved' } | { kind: 'shutdown' } | { kind: 'kept'; why: string }
+const kept = (why: string): QuarantineOutcome => ({ kind: 'kept', why })
+
+// A session that is no longer linked to an account, and does not start on its own
+const FORGOTTEN_ACCOUNT: SessionPatch = {
+  autoStart: false,
+  phoneNumber: null,
+  pushName: null,
+  linkedAt: null,
+  lastError: null
+}
+const QUARANTINED_MESSAGE =
+  'the saved login was rejected by WhatsApp (the account was probably unlinked from the phone while the gateway was stopped); it was moved to quarantine, not deleted; start the session and scan the QR code'
 
 // What the manager reads of `Session.settings`; the rest of the object belongs to other services
 const SessionSettings = z.looseObject({
@@ -88,6 +118,8 @@ interface Runtime {
   reconnectAttempts: number
   // Browser starts that failed one after another; any sign of life (QR, code, login) clears it
   initializeFailures: number
+  // Of those, the ones in a row that were a page that loaded and a connection that never opened
+  authStalls: number
   reconnectTimer: NodeJS.Timeout | undefined
   unsubscribe: (() => void) | undefined
 }
@@ -119,6 +151,8 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   private readonly chains = new Map<string, Promise<void>>()
   private readonly removedListeners = new Set<(sessionId: string) => Promise<void>>()
   private shuttingDown = false
+  // Ends the probe browser that waits for a QR code (as "no"), so a shutdown does not wait for it
+  private abortProbe: (() => void) | undefined
   private restoreTimer: NodeJS.Timeout | undefined
   private wakeRestore: (() => void) | undefined
   // The read of every session row into `statuses`, shared by the boot and `whenLoaded`; cleared on a
@@ -146,6 +180,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   // Destroys every client without logging out, so the next boot finds the sessions linked
   async beforeApplicationShutdown(): Promise<void> {
     this.shuttingDown = true
+    this.abortProbe?.()
     clearTimeout(this.restoreTimer)
     this.wakeRestore?.()
     // Through the queue of each session, behind a start or a drop that is in flight
@@ -357,7 +392,11 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
 
   // Tells the consumers before the session moves, so `session_error` comes before the new status.
   // A failure to tell is logged and never stops the remedy.
-  private async announceError(id: string, code: WatchdogCode, message: string): Promise<void> {
+  private async announceError(
+    id: string,
+    code: WatchdogCode | typeof AUTH_QUARANTINED,
+    message: string
+  ): Promise<void> {
     try {
       await withTimeout(
         this.pipeline.publish(id, 'session_error', { code, message }),
@@ -426,16 +465,25 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   // that a browser did come up (a QR code, a pairing code, a login).
   private async initializeFailed(id: string, runtime: Runtime, error: unknown): Promise<void> {
     runtime.initializeFailures++
+    runtime.authStalls = error instanceof WaAuthStalledError ? runtime.authStalls + 1 : 0
     // The message of our own lock error says what to do; any other text of a library stays out
     const detail = error instanceof WaProfileLockedError ? `: ${error.message}` : ''
     const reason = `initialize failed (${errorKind(error)})${detail}`
     const max = this.config.SESSION_INITIALIZE_MAX_ATTEMPTS
     if (runtime.initializeFailures >= max) {
       this.logger.error(`[${id}] The browser did not start ${max} times in a row; giving up`)
+      // Every failure of the run was a login that never connected: maybe it is dead
+      const outcome =
+        runtime.authStalls >= max ? await this.quarantineStaleLogin(id, runtime) : undefined
+      if (outcome?.kind === 'moved' || outcome?.kind === 'shutdown') return
+      const hint =
+        outcome?.kind === 'kept'
+          ? `; the saved login was kept (${outcome.why}); if the account was unlinked from the phone, log the session out to move it to quarantine`
+          : ''
       await this.fail(
         id,
         runtime,
-        `the browser did not start ${max} times in a row (last: ${reason}); check the browser, the data folder and the saved login, then start the session again`
+        `the browser did not start ${max} times in a row (last: ${reason}); check the browser, the data folder and the saved login, then start the session again${hint}`
       )
       return
     }
@@ -520,13 +568,115 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     return this.requireRow(id)
   }
 
+  // A session that is ready is logged out at WhatsApp, and its login (dead now) is deleted. Any other
+  // session has no connection to log out of: what the person asks is to forget the account, so the run
+  // ends and the saved login goes to quarantine (a login that is dead cannot be told from one that is
+  // not while the browser does not load, so it is never deleted here).
   private async unlink(id: string): Promise<Session> {
     const client = this.runtimes.get(id)?.client
-    if (!client) {
-      throw new ConflictError('SESSION_NOT_READY', `Session ${id} has no client to log out`)
+    if (this.statuses.get(id) === 'ready' && client) {
+      await withTimeout(client.logout(), CALL_TIMEOUT_MS, 'logout')
+      return this.markLoggedOut(id, client)
     }
-    await withTimeout(client.logout(), CALL_TIMEOUT_MS, 'logout')
-    return this.markLoggedOut(id, client)
+    const session = await this.halt(id, 'created', FORGOTTEN_ACCOUNT)
+    try {
+      await quarantineSavedLogin(this.config.WWEBJS_DATA_PATH, id)
+    } catch (error: unknown) {
+      this.logger.warn(`[${id}] Moving the saved login to quarantine failed (${errorKind(error)})`)
+      // The login is still where it was: the person is told, the next start would reuse it
+      await this.transition(id, 'created', { lastError: LOGIN_NOT_MOVED_MESSAGE })
+      return this.requireRow(id)
+    }
+    return session
+  }
+
+  // After SESSION_INITIALIZE_MAX_ATTEMPTS starts that all stalled on the login: if a browser on a clean
+  // profile does reach the QR code, the browser, the network and WhatsApp Web are fine and the saved
+  // login is what WhatsApp refuses, so it goes to quarantine and the session waits for a scan. In any
+  // other case it stays where it is.
+  private async quarantineStaleLogin(id: string, runtime: Runtime): Promise<QuarantineOutcome> {
+    const dataPath = this.config.WWEBJS_DATA_PATH
+    try {
+      const row = await this.sessions.findById(id)
+      if (!row?.linkedAt) return kept('the session was never linked')
+      if (!(await hasSavedLogin(dataPath, id))) return kept('there is no saved login')
+      if (await wasQuarantinedWithin(dataPath, id, AUTO_QUARANTINE_WINDOW_MS)) {
+        return kept('it was already moved to quarantine in the last 24 hours')
+      }
+      // The browser that failed goes first, then the probe gets the machine to itself
+      await this.teardown(id, runtime)
+      const reached = await this.reachesQr()
+      if (this.shuttingDown) return { kind: 'shutdown' }
+      if (!reached) {
+        return kept(
+          'a browser on a clean profile did not reach the QR code either, so the browser or WhatsApp Web is at fault'
+        )
+      }
+      await quarantineSavedLogin(dataPath, id)
+      await this.purgeQuarantine()
+    } catch (error: unknown) {
+      this.logger.error(`[${id}] Quarantining the saved login failed (${errorKind(error)})`)
+      return kept('it could not be moved')
+    }
+    this.logger.warn(`[${id}] The saved login was rejected by WhatsApp; moved to quarantine`)
+    this.metrics.metrics.authQuarantined.inc()
+    await this.announceError(id, AUTH_QUARANTINED, QUARANTINED_MESSAGE)
+    await this.halt(id, 'created', { ...FORGOTTEN_ACCOUNT, lastError: QUARANTINED_MESSAGE })
+    return { kind: 'moved' }
+  }
+
+  // Starts a browser on a throwaway profile (a session id of its own, nothing published, nothing kept)
+  // and waits for the QR code. A failure of any kind is "no".
+  private async reachesQr(): Promise<boolean> {
+    const probeId = `probe-${randomBytes(6).toString('hex')}`
+    const client = this.createClient(probeId, {})
+    let timer: NodeJS.Timeout | undefined
+    let unsubscribe: (() => void) | undefined
+    try {
+      return await new Promise<boolean>(resolve => {
+        this.abortProbe = () => {
+          resolve(false)
+        }
+        unsubscribe = client.onEvent(event => {
+          if (event.event === 'qr') resolve(true)
+        })
+        timer = setTimeout(() => {
+          resolve(false)
+        }, PROBE_TIMEOUT_MS)
+        client.initialize().then(
+          () => undefined,
+          () => {
+            resolve(false)
+          }
+        )
+      })
+    } finally {
+      this.abortProbe = undefined
+      clearTimeout(timer)
+      unsubscribe?.()
+      try {
+        await withTimeout(client.destroy(), CALL_TIMEOUT_MS, 'destroy')
+      } catch (error: unknown) {
+        this.logger.warn(`Destroying the probe browser failed (${errorKind(error)})`)
+      }
+      try {
+        await withTimeout(client.discardAuth(), CALL_TIMEOUT_MS, 'discardAuth')
+      } catch (error: unknown) {
+        this.logger.warn(`Deleting the probe profile failed (${errorKind(error)})`)
+      }
+    }
+  }
+
+  // Deletes the logins that have been in quarantine for longer than SESSION_AUTH_QUARANTINE_TTL_DAYS
+  private async purgeQuarantine(): Promise<void> {
+    try {
+      await purgeExpiredQuarantine(
+        this.config.WWEBJS_DATA_PATH,
+        this.config.SESSION_AUTH_QUARANTINE_TTL_DAYS * DAY_MS
+      )
+    } catch (error: unknown) {
+      this.logger.warn(`Cleaning the quarantine failed (${errorKind(error)})`)
+    }
   }
 
   private async logoutBestEffort(id: string, runtime: Runtime): Promise<void> {
@@ -545,13 +695,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     id: string,
     client: WhatsAppClientPort | undefined
   ): Promise<Session> {
-    const session = await this.halt(id, 'created', {
-      autoStart: false,
-      phoneNumber: null,
-      pushName: null,
-      linkedAt: null,
-      lastError: null
-    })
+    const session = await this.halt(id, 'created', FORGOTTEN_ACCOUNT)
     try {
       await withTimeout(client?.discardAuth() ?? Promise.resolve(), CALL_TIMEOUT_MS, 'discardAuth')
     } catch (error: unknown) {
@@ -577,17 +721,20 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     switch (event.event) {
       case 'qr':
         runtime.initializeFailures = 0
+        runtime.authStalls = 0
         runtime.qr = event.data.qr
         runtime.phaseStartedAt = undefined
         await this.transition(id, 'qr', { lastError: null })
         return
       case 'code':
         runtime.initializeFailures = 0
+        runtime.authStalls = 0
         runtime.phaseStartedAt = undefined
         await this.transition(id, 'pairing_code', { lastError: null })
         return
       case 'authenticated':
         runtime.initializeFailures = 0
+        runtime.authStalls = 0
         runtime.qr = undefined
         // The time a person took to scan the code is not the time the browser took to load
         runtime.phaseStartedAt = Date.now()
@@ -633,6 +780,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     runtime.phaseStartedAt = undefined
     runtime.reconnectAttempts = 0
     runtime.initializeFailures = 0
+    runtime.authStalls = 0
     const patch: SessionPatch = { lastConnectedAt: new Date(), lastError: null }
     try {
       const info = await withTimeout(client.getClientInfo(), CALL_TIMEOUT_MS, 'getClientInfo')
@@ -671,6 +819,8 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   // run. The gap between starts keeps the browsers from launching together.
   private async restore(): Promise<void> {
     const rows = await this.loadRows()
+    // Not awaited: cleaning old files must not delay the sessions
+    void this.purgeQuarantine()
     const toStart = rows.filter(row => row.autoStart && row.linkedAt)
     await this.settleStaleStatuses(rows.filter(row => !toStart.includes(row)))
     for (const [index, row] of toStart.entries()) {
@@ -759,6 +909,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       pairingPhoneNumber,
       reconnectAttempts: 0,
       initializeFailures: 0,
+      authStalls: 0,
       reconnectTimer: undefined,
       unsubscribe: undefined
     }

@@ -60,6 +60,15 @@ export class WaProfileLockedError extends WhatsAppError {
   }
 }
 
+// The page of WhatsApp Web loaded, but the connection never left its opening state: what a login that
+// WhatsApp revoked (the account was unlinked from the phone while the gateway was down) looks like. A
+// slow network or a changed build of WhatsApp Web look the same, so this is a hint, never a proof.
+export class WaAuthStalledError extends WaOperationError {
+  constructor() {
+    super('initialize', 'initialize: WhatsApp Web loaded but the saved login never connected')
+  }
+}
+
 // The call ran, but our own code could not read what WhatsApp answered (a field the mappers did not
 // expect), or the library's Node code failed after the page sent a message. It answers like
 // WaOperationError, yet WhatsApp Web did not fail, so it is told apart to be logged loudly and, for a

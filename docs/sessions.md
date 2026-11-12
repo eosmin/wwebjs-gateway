@@ -67,12 +67,26 @@ A client that was replaced is ignored: whatever it still emits is dropped.
 
 A failed `initialize` is retried like any drop, but only `SESSION_INITIALIZE_MAX_ATTEMPTS` times (default 5) **in a row**. The count starts again at any sign that a browser did come up (`qr`, `code`, `authenticated`, `ready`). When it is spent the session ends in `failed` and `lastError` says `the browser did not start 5 times in a row (last: initialize failed (<kind>)…); check the browser, the data folder and the saved login, then start the session again`. A manual `start` begins a new count. This holds with `SESSION_RECONNECT_MAX_ATTEMPTS=0` too, since that limit counts the drops of a browser that ran.
 
-Two causes have their own treatment:
+These causes have their own treatment:
 
-- **Unlinked from the phone.** On `disconnected` with `LOGOUT` the gateway deletes the folder of the session in `WWEBJS_DATA_PATH` (`session-<id>`) once its browser is gone. Without that, WhatsApp Web refused to load on the dead login (`initialize failed`, never reaching the QR code). The same deletion runs on `POST /logout`.
+- **Unlinked from the phone.** On `disconnected` with `LOGOUT` the gateway deletes the folder of the session in `WWEBJS_DATA_PATH` (`session-<id>`) once its browser is gone. Without that, WhatsApp Web refused to load on the dead login (`initialize failed`, never reaching the QR code). The same deletion runs on `POST /logout` of a `ready` session (see below for the others).
 - **A browser left by a gateway that died** (`kill -9`, a crash, the OOM killer). Chromium holds the profile with `SingletonLock -> <host>-<pid>` and never removes it. Before each browser start the adapter reads that lock: if the process is dead, was started for another profile (the pid was reused), or the lock comes from another host (a container that was replaced), it removes the lock files; if the process is alive, **was started with this session's own `--user-data-dir`, and was orphaned (its parent is init)**, it is closed (SIGTERM, then SIGKILL after 5 s) and the lock removed. A live browser of this profile that is not an orphan is never touched (one that is a child of this gateway is still closing: the start fails and is retried): the start fails with `lastError` `the browser profile is locked by process <pid> (<reason>); end that process and start the session again`, and counts toward the limit above. A gateway that runs as PID 1 never closes anything, since an orphan cannot predate it.
 
-A session that is already `failed` because of a login that is corrupt (not unlinked through the gateway) is not repaired by `start`: stop the gateway for that session and delete `WWEBJS_DATA_PATH/session-<id>` by hand; the next start asks for a QR code.
+- **Unlinked from the phone while the gateway was stopped.** No `LOGOUT` event is seen, so the saved login on disk is still there but WhatsApp refuses it: the page loads and the connection never opens (`initialize failed`, `TimeoutError`, never a QR code). The adapter tells that case apart (`WaAuthStalledError`: the page of WhatsApp Web had loaded, its build number is defined) from a browser, network or lock failure. When **every** one of the `SESSION_INITIALIZE_MAX_ATTEMPTS` failed starts of the run was of that kind, the session had been linked, and the login folder exists, the gateway starts **one browser on a throwaway profile** (`session-probe-<random>`, deleted afterwards; nothing is published) and waits up to 60 s for its QR code:
+  - it reaches the QR code: the browser, the network and WhatsApp Web are fine, so the saved login is what WhatsApp refuses. The folder is **moved, never deleted**, to `WWEBJS_DATA_PATH/.quarantine/session-<id>-<ms since epoch>`; `session_error` `AUTH_QUARANTINED` is published, then the session goes to `created` with `autoStart=false`, no phone number and `lastError` `the saved login was rejected by WhatsApp ... moved to quarantine, not deleted; start the session and scan the QR code`. It does not start again by itself. `gw_auth_quarantined_total` counts it;
+  - it does not (or the 60 s pass): the browser or a new build of WhatsApp Web is at fault, not the login. The login stays where it is and the session ends in `failed` with `lastError` saying so.
+
+  The device stays linked on the phone until it is removed there, since no logout is sent. The gateway moves a login on its own **once per session per 24 hours** (a quarantine made by `POST /logout` counts too) (read from the quarantine folder names, so it survives a restart); the next time ends in `failed` and needs a person. Entries older than `SESSION_AUTH_QUARANTINE_TTL_DAYS` (default 7) are deleted at boot and at each quarantine; nothing else in the data folder is ever deleted by this.
+- **`POST /v1/sessions/:id/logout` on a session that is not `ready`** (`starting`, `qr`, `disconnected`, `failed`, `stopped`, `created`...): there is no connection to log out of, so the gateway does not ask WhatsApp (that was the `502 ... reading 'Socket'` of a page that never loaded, or the `409` of a session without a client). It ends the run, forgets the account (`created`, `autoStart=false`) and moves the saved login to quarantine. It answers `200` for a session that has no login too. On a `ready` session it logs out at WhatsApp first, as before, and a failing logout keeps the login.
+
+To **restore a quarantined login** (a false positive: the account was not unlinked), stop the session (`POST /stop`), move the folder back by hand, then start it:
+
+```sh
+# inside WWEBJS_DATA_PATH; <ms> is the stamp of the quarantine to undo
+mv .quarantine/session-<id>-<ms> session-<id>
+```
+
+Do it with the session stopped and before the TTL passes. If `session-<id>` exists already (a new QR was scanned since), remove or move that one first; the restored login replaces it. The session row was reset to `created` without a phone number: after the start the first `ready` links it again. The shutdown of the gateway ends a probe at once. A `restore-auth` operation is tracked in the plan (10.4).
 
 ## Checking an upgrade of whatsapp-web.js with a real account
 
@@ -132,7 +146,7 @@ Every route is under `/v1/sessions` and needs an API key ([authentication](authe
 | `GET /v1/sessions/:sessionId` | `read` | The row: configuration and status. |
 | `PATCH /v1/sessions/:sessionId` | `manage` | `name`, `autoStart` and `settings`. It does not restart the session: a running one reads the new settings at its next start. |
 | `DELETE /v1/sessions/:sessionId` | `manage` | `remove`. `204`. |
-| `POST /v1/sessions/:sessionId/start` `/stop` `/restart` `/logout` | `manage` | The commands above; they answer the session. |
+| `POST /v1/sessions/:sessionId/start` `/stop` `/restart` `/logout` | `manage` | The commands above; they answer the session. `logout` outside `ready` forgets the account and quarantines the saved login (see "A browser that does not start"). |
 | `POST /v1/sessions/:sessionId/reset-state` | `manage` | `resetState`. `204`; `409 SESSION_NOT_READY` unless the session is ready. |
 | `GET /v1/sessions/:sessionId/qr` | `manage` | `{ qr, status }`: the text WhatsApp encodes. `404` when the session shows no QR code. |
 | `GET /v1/sessions/:sessionId/qr.png` | `manage` | The same QR code as a PNG (`image/png`). |
