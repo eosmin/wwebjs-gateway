@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runInNewContext } from 'node:vm'
 
-// The patch in patches/whatsapp-web.js@1.34.7.patch (TDD §2.5) is what makes the library work with
+// The patch in patches/whatsapp-web.js@1.34.8.patch (TDD §2.5) is what makes the library work with
 // the current WhatsApp Web. These tests fail when a dependency refresh drops it. The library is
 // read as files, not imported: only the adapter may import it.
 const libraryRoot = join(process.cwd(), 'node_modules/whatsapp-web.js/src')
@@ -10,17 +10,18 @@ const libraryRoot = join(process.cwd(), 'node_modules/whatsapp-web.js/src')
 describe('the patched whatsapp-web.js', () => {
   const source = (file: string): string => readFileSync(join(libraryRoot, file), 'utf8')
 
-  // `Client.getPollVotes` still reads `msg.id._serialized`: that message was built in Node, where the
-  // patch put `_serialized` back
-  it('never reads _serialized from a key inside the page without a fallback', () => {
+  // 1.34.8 reads the key of a message as `_serialized || $1` everywhere (upstream #201832), which is
+  // what our own fallback did in 1.34.7. The patch keeps only the one spot upstream missed, so these
+  // tests fail when a refresh brings back a bare `_serialized` read on a key from the page
+  it('never reads _serialized from a key inside the page without the $1 fallback', () => {
     const unguarded: Record<string, RegExp[]> = {
       'util/Injected/Utils.js': [
-        /newMsgKey\._serialized(?! \?\?)/,
-        /\bmsg\.id\._serialized(?! \?\?)/,
-        /lastReceivedKey\._serialized(?! \?\?)/
+        /newMsgKey\._serialized(?! \|\| )/,
+        /\bmsg\.id\._serialized(?! \|\| | == null)/,
+        /lastReceivedKey\._serialized(?! \|\| )/
       ],
-      'Client.js': [/parentMsgKey\._serialized(?! \?\?)/],
-      'structures/Message.js': [/\bmsg\.id\._serialized(?! \?\?)/]
+      'Client.js': [/parentMsgKey\._serialized(?! \|\| )/],
+      'structures/Message.js': [/\bmsg\.id\._serialized(?! \|\| )/]
     }
 
     for (const [file, patterns] of Object.entries(unguarded)) {
@@ -28,34 +29,89 @@ describe('the patched whatsapp-web.js', () => {
     }
   })
 
-  // The copy of the key must not depend on `remote` being an object: a key whose `remote` is
-  // already a string would reach Node without `_serialized` too
-  it('keeps _serialized on the message id it copies out of the page, whatever its remote', () => {
-    expect(source('util/Injected/Utils.js')).toMatch(
-      /msg\.id = Object\.assign\(\{\}, msg\.id, \{\s*\.\.\.\(typeof msg\.id\.remote === 'object'\s*\? \{ remote: msg\.id\.remote\._serialized \}\s*: \{\}\),\s*_serialized: \(msg\.id\._serialized \?\? String\(msg\.id\)\),\s*\}\);/
+  // The peer of an incoming call (#42) is the one fallback of ours left in Client.js
+  it('keeps the peer fallback of the incoming call hook', () => {
+    expect(
+      source('Client.js').match(/peer\._serialized \?\? peer\.\$1 \?\? String\(peer\)/g)
+    ).toHaveLength(1)
+  })
+
+  // `Message.js` edits an event message: the id of the page message has `$1` and may lack `_serialized`
+  it('reads the edited event message by its $1 key too', () => {
+    expect(source('structures/Message.js')).toMatch(
+      /Msg\.get\(\(msg\.id\._serialized \|\| msg\.id\.\$1\)\)/
     )
   })
 
-  // Coarse tripwire next to the per-site patterns above: a dependency refresh that renames the
-  // key variables would slip past them but not past the count of fallbacks the patch wrote
-  it('carries every fallback the patch writes', () => {
-    const fallbacks = (file: string): number =>
-      (source(file).match(/_serialized \?\? String\(/g) ?? []).length
+  // WhatsApp Web loads the module of `createGroup` lazily (F9, upstream PR #201950 is open). The page
+  // code cannot run in Jest, so `Client.createGroup` runs here with a fake `window`
+  describe('Client.createGroup', () => {
+    type CreateGroup = (
+      this: unknown,
+      title: string,
+      participants: string[],
+      options: object
+    ) => Promise<unknown>
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const { prototype } = require(join(libraryRoot, 'Client.js')) as {
+      prototype: { createGroup: CreateGroup }
+    }
+    const created = {
+      title: 'g',
+      wid: { _serialized: 'g@g.us' },
+      participants: [],
+      subject: 'g'
+    }
+    // Runs the function the library hands to `pupPage.evaluate` with `window` replaced
+    const create = async (modules: Record<string, unknown>): Promise<unknown> => {
+      const target = globalThis as { window?: unknown }
+      const before = target.window
+      target.window = { require: (name: string) => modules[name], WWebJS: {} }
+      try {
+        const evaluate = (fn: (...args: unknown[]) => unknown, ...args: unknown[]): unknown =>
+          fn(...args)
+        return await prototype.createGroup.call({ pupPage: { evaluate } }, 'g', [], {})
+      } finally {
+        target.window = before
+      }
+    }
 
-    expect(fallbacks('util/Injected/Utils.js')).toBe(5)
-    expect(fallbacks('Client.js')).toBe(3)
-    expect(fallbacks('structures/Message.js')).toBe(1)
-  })
+    it('loads the lazy bundle before it asks for the module that creates the group', async () => {
+      const modules: Record<string, unknown> = {}
+      const requireBundle = jest.fn(() => {
+        modules.WAWebGroupCreateJob = { createGroup: () => Promise.resolve(created) }
+        return Promise.resolve()
+      })
+      modules.WAWebNewGroupFlowLoadable = { requireBundle }
 
-  // The three fallbacks of Client.js are two defects, counted apart so that losing one cannot be
-  // hidden by the other: the poll parent key (#40, two) and the peer of an incoming call (#42, one)
-  it('keeps the poll parent key and the call peer fallbacks of Client.js apart', () => {
-    const client = source('Client.js')
+      await expect(create(modules)).resolves.toMatchObject({ title: 'g' })
+      expect(requireBundle).toHaveBeenCalledTimes(1)
+    })
 
-    expect(
-      client.match(/parentMsgKey\._serialized \?\? String\(parentMsgKey\)/g) ?? []
-    ).toHaveLength(2)
-    expect(client.match(/peer\._serialized \?\? String\(peer\)/g) ?? []).toHaveLength(1)
+    it('does not load the bundle when the module is already there', async () => {
+      const requireBundle = jest.fn()
+      const modules = {
+        WAWebGroupCreateJob: { createGroup: () => Promise.resolve(created) },
+        WAWebNewGroupFlowLoadable: { requireBundle }
+      }
+
+      await create(modules)
+
+      expect(requireBundle).not.toHaveBeenCalled()
+    })
+
+    it('keeps the cause of a failure in the text it answers, not only the library generic', async () => {
+      const modules = {
+        WAWebNewGroupFlowLoadable: {
+          requireBundle: () => Promise.reject(new Error('bundle offline'))
+        }
+      }
+
+      const answer = await create(modules)
+
+      expect(answer).toEqual(expect.stringContaining('CreateGroupError'))
+      expect(answer).toEqual(expect.stringContaining('bundle offline'))
+    })
   })
 
   // The tests run the real Client.sendMessage with a page we control: the library builds its Message

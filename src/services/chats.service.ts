@@ -220,7 +220,7 @@ export class ChatsService implements OnModuleDestroy {
     }
   }
 
-  // `unarchiveChat` and `unpinChat` of wwebjs 1.34.7 end in `return false` even when WhatsApp Web did
+  // `unarchiveChat` and `unpinChat` of wwebjs 1.34.8 end in `return false` even when WhatsApp Web did
   // it, so their answer says nothing. The state of the chat afterwards does: the call succeeded when
   // the flag is off (also when it already was: undoing what is not done is not an error).
   private async undone(

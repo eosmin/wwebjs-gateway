@@ -1028,7 +1028,7 @@ describe('the other mappers produce DTOs that pass their own schema', () => {
     expect(dto).toMatchObject({ interactedAtTs: 99, parentMessageId: 'poll1' })
   })
 
-  // wwebjs 1.34.7 types `voter` as a string and the options as `{ id, name }`, but PollVote.js
+  // wwebjs 1.34.8 types `voter` as a string and the options as `{ id, name }`, but PollVote.js
   // assigns the Wid object of the sender and `{ name, localId }`
   it('poll vote as wwebjs really builds it: a wid voter and options with localId', () => {
     const dto = mapPollVote({

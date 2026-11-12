@@ -277,7 +277,7 @@ const toIdLike = (value: unknown): IdLike =>
 const toIdLikeOrNull = (value: unknown): IdLike | null =>
   value === null || value === undefined ? null : toIdLike(value)
 
-// The result of `addParticipants` is typed wrongly in wwebjs 1.34.7 (`{ [id]: { [id]: … } }`); this is
+// The result of `addParticipants` is typed wrongly in wwebjs 1.34.8 (`{ [id]: { [id]: … } }`); this is
 // what WhatsApp answers
 const ParticipantOutcomes = z.record(
   z.string(),
@@ -1063,7 +1063,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   ): Promise<MessageDto | null> {
     return this.run('editScheduledEvent', async () => {
       const message = await this.messageById('editScheduledEvent', messageId)
-      // The typings of wwebjs 1.34.7 ask for the DOM `Event`; the method reads a ScheduledEvent
+      // The typings of wwebjs 1.34.8 ask for the DOM `Event`; the method reads a ScheduledEvent
       const scheduled = this.toEvent(event) as unknown as Parameters<
         Message['editScheduledEvent']
       >[0]

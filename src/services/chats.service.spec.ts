@@ -239,7 +239,7 @@ describe('ChatsService', () => {
       expect(fn).toHaveBeenCalledWith(CHAT)
     })
 
-    // wwebjs 1.34.7 answers false from both even when WhatsApp Web did it, so the chat is re-read
+    // wwebjs 1.34.8 answers false from both even when WhatsApp Web did it, so the chat is re-read
     it.each([
       ['unarchive', 'unarchiveChat', 'archived'],
       ['unpin', 'unpinChat', 'pinned']

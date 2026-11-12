@@ -13,7 +13,7 @@ import { WHATSAPP_CLIENT_FACTORY } from './whatsapp-client.port.js'
 
 type PortMethod = keyof WhatsAppClientPort
 
-// Members of whatsapp-web.js 1.34.7 (TDD §6.12) that keep their name in the port
+// Members of whatsapp-web.js 1.34.8 (TDD §6.12) that keep their name in the port
 const CLIENT_MEMBERS = [
   'acceptInvite',
   'acceptChannelAdminInvite',

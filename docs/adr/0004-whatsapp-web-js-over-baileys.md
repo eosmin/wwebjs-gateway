@@ -21,7 +21,7 @@ Business Cloud API is a non-goal.
 
 ## Decision
 
-Wrap `whatsapp-web.js`, pinned to an exact version (1.34.7 at the start). Only
+Wrap `whatsapp-web.js`, pinned to an exact version (1.34.8 at the start). Only
 `src/whatsapp/wwebjs-adapter.ts` may import it; everything else depends on the
 `WhatsAppClientPort` and the gateway's own DTOs. The parity test reads the library's type
 declarations and fails when a symbol is neither mapped to an operation nor listed as unsupported

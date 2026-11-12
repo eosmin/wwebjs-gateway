@@ -19,7 +19,7 @@ import type {
 } from '../types/dto.js'
 import type { WaEventName, WaEventPayloadMap } from '../types/events.js'
 
-// The only WhatsApp abstraction the rest of the app sees. It mirrors the whatsapp-web.js 1.34.7
+// The only WhatsApp abstraction the rest of the app sees. It mirrors the whatsapp-web.js 1.34.8
 // surface (TDD §6.12) with our DTOs in and out, and it never mentions a wwebjs type, so that
 // `wwebjs-adapter.ts` stays the single file that imports the library. Ids are WhatsApp ids such as
 // `5215512345678@c.us`; phone numbers are resolved before they get here. Every method rejects with
