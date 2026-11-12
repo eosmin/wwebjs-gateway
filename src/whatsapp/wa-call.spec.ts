@@ -346,4 +346,23 @@ describe('describeCause', () => {
     expect(message).toContain('WAWebCollectionsChatCollection')
     expect(message).toContain('[redacted]')
   })
+
+  // F14: the build of WhatsApp Web is the first thing to know when a module goes missing
+  it('keeps the build number of WhatsApp Web, and still masks a phone number next to it', () => {
+    const { message } = describeCause(
+      new Error(
+        '[lazy-module] WAWebChatForwardMessage is not available in WhatsApp Web 2.3000.1054303363 for 5215512345678'
+      )
+    )
+
+    expect(message).toContain('WAWebChatForwardMessage')
+    expect(message).toContain('WhatsApp Web 2.3000.1054303363')
+    expect(message).not.toContain('5215512345678')
+  })
+
+  it('masks a long number that only looks like it follows a build', () => {
+    const { message } = describeCause(new Error('x 1.2024.5215512345678'))
+
+    expect(message).not.toContain('5215512345678')
+  })
 })

@@ -9,7 +9,7 @@ overrides:
   glob@<14.0.2: 14.0.2
 
 patchedDependencies:
-  whatsapp-web.js@1.34.8: 192e2c2cd8f65cc8fdb6835a871cbeace8e3aae178313d8f322cfcbcfd9d02df
+  whatsapp-web.js@1.34.8: d8ec2c1961ebaf1f41bb8dea1c11e803bc935676c51a645952ead410703a0575
 
 importers:
 
@@ -104,7 +104,7 @@ importers:
         version: 7.8.2
       whatsapp-web.js:
         specifier: 1.34.8
-        version: 1.34.8(patch_hash=192e2c2cd8f65cc8fdb6835a871cbeace8e3aae178313d8f322cfcbcfd9d02df)(supports-color@8.1.1)(typescript@5.9.3)
+        version: 1.34.8(patch_hash=d8ec2c1961ebaf1f41bb8dea1c11e803bc935676c51a645952ead410703a0575)(supports-color@8.1.1)(typescript@5.9.3)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -8576,7 +8576,7 @@ snapshots:
 
   webidl-conversions@3.0.1: {}
 
-  whatsapp-web.js@1.34.8(patch_hash=192e2c2cd8f65cc8fdb6835a871cbeace8e3aae178313d8f322cfcbcfd9d02df)(supports-color@8.1.1)(typescript@5.9.3):
+  whatsapp-web.js@1.34.8(patch_hash=d8ec2c1961ebaf1f41bb8dea1c11e803bc935676c51a645952ead410703a0575)(supports-color@8.1.1)(typescript@5.9.3):
     dependencies:
       fluent-ffmpeg: 2.1.3
       mime: 3.0.0
