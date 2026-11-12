@@ -1,8 +1,5 @@
 import { closeQueue, closeWorker, REDIS_DOWN_CLOSE_MS } from './bullmq-close.js'
 
-// The timers are fake, but a loaded machine can still starve the test of its 5 s
-jest.setTimeout(30_000)
-
 const never = (): Promise<void> => new Promise(() => undefined)
 
 describe('closeWorker', () => {

@@ -37,9 +37,10 @@ describe('processTreeRssBytes', () => {
     await expect(processTreeRssBytes(100, () => Promise.resolve(table))).resolves.toBe(5 * 1024)
   })
 
+  // Real `ps -A` of the whole table, the call production makes; a busy machine makes it slow, so 5 s is little
   it('measures this very process with the real ps', async () => {
     const bytes = await processTreeRssBytes(process.pid)
 
     expect(bytes).toBeGreaterThan(1024 * 1024)
-  })
+  }, 20_000)
 })

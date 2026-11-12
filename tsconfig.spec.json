@@ -4,6 +4,7 @@
     "module": "commonjs",
     "moduleResolution": "node10",
     "verbatimModuleSyntax": false,
-    "types": ["jest", "node"]
+    "types": ["jest", "node"],
+    "isolatedModules": true
   }
 }

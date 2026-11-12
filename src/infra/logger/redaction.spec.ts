@@ -147,14 +147,16 @@ describe('redactSensitive', () => {
 
 describe('scrubText limits', () => {
   it('does not stall on long runs of key-like text', () => {
-    const started = Date.now()
+    // CPU time of this process, not the wall clock: waiting for a busy machine does not count
+    const started = process.cpuUsage()
 
     scrubText('token'.repeat(20000))
     scrubText('a-'.repeat(50000) + 'secret')
     scrubText('a'.repeat(15000) + '://')
     scrubText('token'.repeat(3000))
 
-    expect(Date.now() - started).toBeLessThan(150)
+    const { user, system } = process.cpuUsage(started)
+    expect((user + system) / 1000).toBeLessThan(150)
   })
 
   it('truncates what is past the length limit', () => {

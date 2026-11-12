@@ -36,8 +36,8 @@ class ProbeController {
   }
 
   @Get('slow')
-  slow(): Promise<{ ok: true }> {
-    return new Promise(resolve => setTimeout(() => resolve({ ok: true }), 80))
+  slow(): { ok: true } {
+    return { ok: true }
   }
 
   @Get('guarded')
@@ -72,6 +72,17 @@ describe('HttpMetricsHook', () => {
     }).compile()
     app = moduleRef.createNestApplication<NestFastifyApplication>(createFastifyAdapter())
     app.useLogger(false)
+    // Fastify reports the milliseconds a request took and the hook turns them into seconds. For one
+    // route the report is fixed, so no clock (and no machine load) is part of the test.
+    app
+      .getHttpAdapter()
+      .getInstance()
+      .addHook('onRequest', (request, reply, done) => {
+        if (request.url === '/probe/slow') {
+          Object.defineProperty(reply, 'elapsedTime', { get: () => 80 })
+        }
+        done()
+      })
     await app.init()
     await app.getHttpAdapter().getInstance().ready()
     metrics = moduleRef.get(MetricsService)
@@ -107,13 +118,13 @@ describe('HttpMetricsHook', () => {
   })
 
   it('measures the duration in seconds', async () => {
+    // The request is reported to take 80 ms (see the hook added in beforeAll)
     await app.inject({ method: 'GET', url: '/probe/slow' })
 
     const body = await metrics.scrape()
     const sum =
       /gw_http_request_duration_seconds_sum\{method="GET",route="\/probe\/slow"\} (\S+)/.exec(body)
-    expect(Number(sum?.[1])).toBeGreaterThanOrEqual(0.07)
-    expect(Number(sum?.[1])).toBeLessThan(5)
+    expect(Number(sum?.[1])).toBeCloseTo(0.08, 5)
   })
 
   it('counts a request a guard rejects', async () => {
