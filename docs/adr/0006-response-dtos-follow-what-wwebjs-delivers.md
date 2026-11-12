@@ -49,6 +49,21 @@ Kept required: every `id`, `MessageDto.from/to/body/deviceType` (always set by `
 - Booleans and numbers that wwebjs copies without a default were not part of the audit: see the
   follow-up in `docs/IMPLEMENTATION_PLAN.md`.
 
+## Addendum (F11, H-F9B-01): flags and counters of contacts, chats, groups, channels
+
+A real address book (201 contacts, wwebjs 1.34.8) answered `GET contacts` with 500: `isEnterprise` is
+absent on every non-business contact and `statusMute` on about half; `verifiedLevel` is a number (the
+typings say string) and `number` can be `null`. The business profile's link flag is `isProfileLinked`
+at runtime (typings: `ifProfileLinked`).
+
+- The mappers fill what "absent" means: a missing flag is `false`, a missing count is `0`
+  (`isGroup` of a chat falls back to the `@g.us` server). The DTOs keep them required, so clients
+  never see them missing.
+- `verifiedLevel` is delivered as a string, `number: null` is left out, `profileOptions` is optional,
+  `categories` defaults to `[]`. `BusinessProfileDto.ifProfileLinked` keeps its name (no API break) and
+  reads `isProfileLinked` first.
+- A response that still fails its schema logs the failing paths and issue codes (never values).
+
 ## Alternatives considered
 
 - **Keep the strict schemas and fix each field as a real account breaks it.** Rejected: every miss is a

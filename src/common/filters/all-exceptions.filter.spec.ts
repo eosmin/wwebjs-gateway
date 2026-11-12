@@ -1,8 +1,8 @@
-import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, Logger, Post } from '@nestjs/common'
 import { APP_FILTER } from '@nestjs/core'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import { Test } from '@nestjs/testing'
-import { ZodValidationPipe, createZodDto } from 'nestjs-zod'
+import { ZodSerializationException, ZodValidationPipe, createZodDto } from 'nestjs-zod'
 import { z } from 'zod'
 
 import { APP_CONFIG } from '../../config/config.module.js'
@@ -50,6 +50,13 @@ class ProbeController {
     throw new Error('unreachable')
   }
 
+  @Get('serialization')
+  serialization(): never {
+    const result = z.object({ isEnterprise: z.boolean() }).safeParse({ pushname: 'Secret Name' })
+    if (result.success) throw new Error('unreachable')
+    throw new ZodSerializationException(result.error)
+  }
+
   @Get('http-exception')
   httpException(): never {
     throw new BadRequestException('bad shape')
@@ -89,6 +96,7 @@ describe('AllExceptionsFilter', () => {
   }
 
   afterEach(async () => {
+    jest.restoreAllMocks()
     await app.close()
   })
 
@@ -151,6 +159,18 @@ describe('AllExceptionsFilter', () => {
 
       expect(response.statusCode).toBe(504)
       expect(response.json<ErrorBody>().error).not.toHaveProperty('details')
+    })
+
+    it('logs the fields a response broke its schema at, never their values', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+      // restored by the afterEach below even when an expect fails
+
+      const response = await get('/probe/serialization')
+
+      expect(response.statusCode).toBe(500)
+      const lines = logged.mock.calls.map(call => String(call[0]))
+      expect(lines).toContain('A response failed its schema at: isEnterprise [invalid_type]')
+      expect(lines.join(' ')).not.toContain('Secret Name')
     })
 
     it('treats a ZodError nobody mapped as a failure of the gateway, not of the caller', async () => {

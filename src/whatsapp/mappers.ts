@@ -600,41 +600,73 @@ export function mapPollVote(source: PollVoteSource): PollVoteDto {
 
 // ---- Contact -----------------------------------------------------------------------------------
 
-export type ContactSource = WithIds<ContactDto, 'id'>
+// WhatsApp Web's contact model does not always carry the flags (`isEnterprise` and `statusMute` are
+// copied from it as they come), and a missing flag means the contact is not that: false
+type ContactFlag =
+  | 'isBusiness'
+  | 'isEnterprise'
+  | 'isGroup'
+  | 'isMe'
+  | 'isMyContact'
+  | 'isUser'
+  | 'isWAContact'
+  | 'isBlocked'
+  | 'statusMute'
+
+// `verifiedLevel` is a number at runtime (the typings say string) and `number` can be null
+export type ContactSource = Omit<
+  WithIds<ContactDto, 'id'>,
+  ContactFlag | 'verifiedLevel' | 'number'
+> &
+  Partial<Pick<ContactDto, ContactFlag>> & {
+    verifiedLevel?: string | number | null
+    number?: string | null
+  }
 
 const CONTACT_FIELDS = [
   'number',
-  'isBusiness',
-  'isEnterprise',
-  'isGroup',
-  'isMe',
-  'isMyContact',
-  'isUser',
-  'isWAContact',
-  'isBlocked',
   'labels',
   'name',
   'pushname',
   'sectionHeader',
   'shortName',
-  'statusMute',
   'type',
-  'verifiedLevel',
   'verifiedName'
 ] as const satisfies readonly (keyof ContactSource)[]
 
 export function mapContact(source: ContactSource): ContactDto {
-  return { ...(pick(source, CONTACT_FIELDS) as ContactDto), id: serializeId(source.id) }
+  return {
+    ...(pick(source, CONTACT_FIELDS) as ContactDto),
+    id: serializeId(source.id),
+    ...(source.verifiedLevel !== undefined &&
+      source.verifiedLevel !== null && { verifiedLevel: String(source.verifiedLevel) }),
+    isBusiness: source.isBusiness ?? false,
+    isEnterprise: source.isEnterprise ?? false,
+    isGroup: source.isGroup ?? false,
+    isMe: source.isMe ?? false,
+    isMyContact: source.isMyContact ?? false,
+    isUser: source.isUser ?? false,
+    isWAContact: source.isWAContact ?? false,
+    isBlocked: source.isBlocked ?? false,
+    statusMute: source.statusMute ?? false
+  }
 }
 
+// The runtime key is `isProfileLinked`; the typings (and our DTO) spell it `ifProfileLinked`
 export interface BusinessContactSource extends ContactSource {
-  businessProfile: WithIds<BusinessContactDto['businessProfile'], 'id'>
+  businessProfile: Omit<
+    WithIds<BusinessContactDto['businessProfile'], 'id'>,
+    'ifProfileLinked' | 'categories'
+  > & {
+    isProfileLinked?: boolean | null
+    ifProfileLinked?: boolean | null
+    categories?: BusinessContactDto['businessProfile']['categories'] | null
+  }
 }
 
 const BUSINESS_PROFILE_FIELDS = [
   'tag',
   'description',
-  'categories',
   'profileOptions',
   'email',
   'website',
@@ -643,7 +675,6 @@ const BUSINESS_PROFILE_FIELDS = [
   'businessHours',
   'address',
   'fbPage',
-  'ifProfileLinked',
   'coverPhoto'
 ] as const satisfies readonly (keyof BusinessContactSource['businessProfile'])[]
 
@@ -655,7 +686,10 @@ export function mapBusinessContact(source: BusinessContactSource): BusinessConta
         source.businessProfile,
         BUSINESS_PROFILE_FIELDS
       ) as BusinessContactDto['businessProfile']),
-      id: serializeId(source.businessProfile.id)
+      id: serializeId(source.businessProfile.id),
+      categories: source.businessProfile.categories ?? [],
+      ifProfileLinked:
+        source.businessProfile.isProfileLinked ?? source.businessProfile.ifProfileLinked ?? false
     }
   }
 }
@@ -664,10 +698,23 @@ export function mapBusinessContact(source: BusinessContactSource): BusinessConta
 
 export interface ChatSource extends Omit<
   ChatDto,
-  'id' | 'lastMessage' | 'archived' | 'isReadOnly' | 'isLocked' | 'timestamp'
+  | 'id'
+  | 'lastMessage'
+  | 'archived'
+  | 'isReadOnly'
+  | 'isLocked'
+  | 'timestamp'
+  | 'isGroup'
+  | 'isMuted'
+  | 'unreadCount'
+  | 'pinned'
 > {
   id: IdLike
-  // WhatsApp leaves these out of some chats
+  // WhatsApp leaves these out of some chats; a missing flag is false and a missing count is 0
+  isGroup?: boolean | null
+  isMuted?: boolean | null
+  unreadCount?: number | null
+  pinned?: boolean | null
   archived?: boolean | null
   isReadOnly?: boolean | null
   isLocked?: boolean | null
@@ -675,19 +722,17 @@ export interface ChatSource extends Omit<
   lastMessage?: MessageSource | null
 }
 
-const CHAT_FIELDS = [
-  'isGroup',
-  'isMuted',
-  'muteExpiration',
-  'name',
-  'unreadCount',
-  'pinned'
-] as const satisfies readonly (keyof ChatSource)[]
+const CHAT_FIELDS = ['muteExpiration', 'name'] as const satisfies readonly (keyof ChatSource)[]
 
 export function mapChat(source: ChatSource, options: MessageMapOptions): ChatDto {
   const chat: ChatDto = {
     ...(pick(source, CHAT_FIELDS) as ChatDto),
     id: serializeId(source.id),
+    // a group chat id is on the g.us server, so a missing flag is still known
+    isGroup: source.isGroup ?? serializeId(source.id).endsWith('@g.us'),
+    isMuted: source.isMuted ?? false,
+    unreadCount: source.unreadCount ?? 0,
+    pinned: source.pinned ?? false,
     archived: source.archived ?? false,
     isReadOnly: source.isReadOnly ?? false,
     isLocked: source.isLocked ?? false,
@@ -701,7 +746,11 @@ export interface GroupChatSource extends Omit<ChatSource, never> {
   owner?: IdLike | null
   createdAt: Date | number
   description?: string | null
-  participants: WithIds<GroupChatDto['participants'][number], 'id'>[]
+  participants: (Omit<GroupChatDto['participants'][number], 'id' | 'isAdmin' | 'isSuperAdmin'> & {
+    id: IdLike
+    isAdmin?: boolean | null
+    isSuperAdmin?: boolean | null
+  })[]
 }
 
 export function mapGroupChat(source: GroupChatSource, options: MessageMapOptions): GroupChatDto {
@@ -712,33 +761,42 @@ export function mapGroupChat(source: GroupChatSource, options: MessageMapOptions
     description: source.description ?? null,
     participants: source.participants.map(participant => ({
       id: serializeId(participant.id),
-      isAdmin: participant.isAdmin,
-      isSuperAdmin: participant.isSuperAdmin
+      isAdmin: participant.isAdmin ?? false,
+      isSuperAdmin: participant.isSuperAdmin ?? false
     }))
   }
 }
 
-export interface ChannelSource extends Omit<ChannelDto, 'id' | 'lastMessage'> {
+export interface ChannelSource extends Omit<
+  ChannelDto,
+  'id' | 'lastMessage' | 'isChannel' | 'isGroup' | 'isReadOnly' | 'unreadCount' | 'isMuted'
+> {
   id: IdLike
+  // a missing flag is false and a missing count is 0; every id of a channel is a newsletter
+  isChannel?: boolean | null
+  isGroup?: boolean | null
+  isReadOnly?: boolean | null
+  unreadCount?: number | null
+  isMuted?: boolean | null
   lastMessage?: MessageSource | null
 }
 
 const CHANNEL_FIELDS = [
   'name',
   'description',
-  'isChannel',
-  'isGroup',
-  'isReadOnly',
-  'unreadCount',
   'timestamp',
-  'isMuted',
   'muteExpiration'
 ] as const satisfies readonly (keyof ChannelSource)[]
 
 export function mapChannel(source: ChannelSource, options: MessageMapOptions): ChannelDto {
   const channel: ChannelDto = {
     ...(pick(source, CHANNEL_FIELDS) as ChannelDto),
-    id: serializeId(source.id)
+    id: serializeId(source.id),
+    isChannel: source.isChannel ?? true,
+    isGroup: source.isGroup ?? false,
+    isReadOnly: source.isReadOnly ?? false,
+    unreadCount: source.unreadCount ?? 0,
+    isMuted: source.isMuted ?? false
   }
   if (source.lastMessage) channel.lastMessage = mapMessage(source.lastMessage, options)
   return channel
