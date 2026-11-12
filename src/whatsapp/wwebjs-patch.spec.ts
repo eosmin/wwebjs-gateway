@@ -158,11 +158,21 @@ describe('the patched whatsapp-web.js', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
     const { prototype } = require(join(libraryRoot, 'Client.js')) as {
       prototype: Record<
-        'acceptGroupV4Invite' | 'setDisplayName' | 'revokeStatusMessage' | 'createCallLink',
+        | 'acceptGroupV4Invite'
+        | 'setDisplayName'
+        | 'revokeStatusMessage'
+        | 'createCallLink'
+        | 'acceptInvite'
+        | 'demoteChannelAdmin'
+        | 'transferChannelOwnership',
         (...args: unknown[]) => Promise<unknown>
       >
     }
     const evaluate = { pupPage: { evaluate: evaluateHere } }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const groupChat = require(join(libraryRoot, 'structures/GroupChat.js')) as {
+      prototype: { getInviteCode: (this: unknown) => Promise<unknown> }
+    }
 
     interface LazyCase {
       method: string
@@ -171,6 +181,8 @@ describe('the patched whatsapp-web.js', () => {
       // the other modules the page code needs, and the call of the library
       others: Record<string, unknown>
       action: string
+      // what the action answers when the library reads it (default 'done')
+      answer?: unknown
       call: () => Promise<unknown>
     }
     const cases: LazyCase[] = [
@@ -232,6 +244,48 @@ describe('the patched whatsapp-web.js', () => {
         others: {},
         action: 'createEventCallLink',
         call: () => prototype.createCallLink.call(evaluate, new Date(), 'video')
+      },
+      // F14b: the same drift in the group invite, the channel admin and the channel owner modules
+      {
+        method: 'acceptInvite',
+        module: 'WAWebGroupInviteJob',
+        loadable: 'WAWebCommunityFlowLoadable',
+        others: {},
+        action: 'joinGroupViaInvite',
+        answer: { gid: { _serialized: 'g@g.us' } },
+        call: () => prototype.acceptInvite.call(evaluate, 'code')
+      },
+      {
+        method: 'getInviteCode',
+        module: 'WAWebMexFetchGroupInviteCodeJob',
+        loadable: 'WAWebCommunityFlowLoadable',
+        others: {},
+        action: 'fetchMexGroupInviteCode',
+        answer: { code: 'abc' },
+        call: () =>
+          groupChat.prototype.getInviteCode.call({
+            client: evaluate,
+            id: { _serialized: 'g@g.us' }
+          })
+      },
+      {
+        method: 'demoteChannelAdmin',
+        module: 'WAWebDemoteNewsletterAdminAction',
+        loadable: 'WAWebGroupMembershipApprovalRequestsFlowLoadable',
+        others: { WAWebWidFactory: { createWid: (id: string) => id } },
+        action: 'demoteNewsletterAdmin',
+        call: () => prototype.demoteChannelAdmin.call(evaluate, 'c@newsletter', 'u@c.us')
+      },
+      {
+        method: 'transferChannelOwnership',
+        module: 'WAWebChangeNewsletterOwnerAction',
+        loadable: 'WAWebGroupMembershipApprovalRequestsFlowLoadable',
+        others: { WAWebCollections: { Contact: { get: () => ({}) } } },
+        action: 'changeNewsletterOwnerAction',
+        call: () => {
+          pageOf().WWebJS.getChat = () => Promise.resolve({ id: 'c', newsletterMetadata: {} })
+          return prototype.transferChannelOwnership.call(evaluate, 'c@newsletter', 'u@c.us')
+        }
       }
     ]
 
@@ -240,7 +294,7 @@ describe('the patched whatsapp-web.js', () => {
       c: LazyCase,
       state: { present: boolean; bundle: 'loads' | 'does-nothing' | 'absent' | 'throws' }
     ): { action: jest.Mock; requireBundle: jest.Mock; result: Promise<unknown> } => {
-      const action = jest.fn(() => Promise.resolve('done'))
+      const action = jest.fn(() => Promise.resolve(c.answer ?? 'done'))
       const lazy = { [c.action]: action }
       const modules: Record<string, unknown> = { ...c.others }
       if (state.present) modules[c.module] = lazy
@@ -363,6 +417,85 @@ describe('the patched whatsapp-web.js', () => {
       expect(source('util/Injected/Utils.js')).toMatch(
         /requireLazyModule\(\s*'WAWebGenerateEventCallLink',?\s*\)/
       )
+    })
+  })
+
+  // F14b: WhatsApp Web 2.3000.1054320313 removed `canCheckStatusRankingPosterGating` from
+  // WAWebStatusGatingUtils (posting a status failed with "is not a function") and moved
+  // `getRoleByIdentifier` from WAWebNewsletterModelUtils to WAWebNewsletterRoleIdentifier. The
+  // library reads both inside the page, so the patch asks through helpers that survive a rename
+  describe('members that WhatsApp Web moved or removed', () => {
+    type Helper = (...args: unknown[]) => unknown
+    const helper = (name: string): Helper => pageOf().WWebJS[name] as Helper
+
+    describe('cannotBeRanked (a status posted by the account)', () => {
+      it('answers what WhatsApp Web says while the gating function exists', async () => {
+        const modules = {
+          WAWebStatusGatingUtils: { canCheckStatusRankingPosterGating: () => true }
+        }
+
+        await expect(
+          withPage(modules, () => Promise.resolve(helper('cannotBeRanked')()))
+        ).resolves.toBe(true)
+      })
+
+      it.each([
+        ['the function was removed', { WAWebStatusGatingUtils: {} }],
+        ['the module is not there', {}],
+        ['the module is null', { WAWebStatusGatingUtils: null }]
+      ])('answers false and does not throw when %s', async (_name, modules) => {
+        await expect(
+          withPage(modules, () => Promise.resolve(helper('cannotBeRanked')()))
+        ).resolves.toBe(false)
+      })
+
+      it('is what sendMessage passes for a status, never a direct call of the removed function', () => {
+        const utils = source('util/Injected/Utils.js')
+
+        expect(utils).toMatch(/cannotBeRanked:\s*window\.WWebJS\.cannotBeRanked\(\)/)
+        expect(utils.match(/\.canCheckStatusRankingPosterGating\(\)/g)).toHaveLength(1)
+      })
+    })
+
+    describe('getRoleByIdentifier (the metadata of a channel by its invite)', () => {
+      const role = (modules: Record<string, unknown>): Promise<unknown> =>
+        withPage(modules, () => Promise.resolve(helper('getRoleByIdentifier')('code')))
+
+      it('asks the module it moved to', async () => {
+        await expect(
+          role({
+            WAWebNewsletterRoleIdentifier: { getRoleByIdentifier: (c: string) => `new:${c}` }
+          })
+        ).resolves.toBe('new:code')
+      })
+
+      it('still asks the old module on a build that did not move it', async () => {
+        await expect(
+          role({ WAWebNewsletterModelUtils: { getRoleByIdentifier: (c: string) => `old:${c}` } })
+        ).resolves.toBe('old:code')
+      })
+
+      it('prefers the new module when both have it', async () => {
+        await expect(
+          role({
+            WAWebNewsletterRoleIdentifier: { getRoleByIdentifier: () => 'new' },
+            WAWebNewsletterModelUtils: { getRoleByIdentifier: () => 'old' }
+          })
+        ).resolves.toBe('new')
+      })
+
+      it('fails naming the member and the build when neither module has it', async () => {
+        await expect(role({ WAWebNewsletterModelUtils: {} })).rejects.toThrow(
+          `[lazy-module] getRoleByIdentifier is not available in WhatsApp Web ${VERSION}`
+        )
+      })
+
+      it('is what getChannelMetadata asks', () => {
+        const utils = source('util/Injected/Utils.js')
+
+        expect(utils).toMatch(/window\.WWebJS\.getRoleByIdentifier\(inviteCode\)/)
+        expect(utils).not.toMatch(/require\('WAWebNewsletterModelUtils'\)\s*\.getRoleByIdentifier/)
+      })
     })
   })
 
