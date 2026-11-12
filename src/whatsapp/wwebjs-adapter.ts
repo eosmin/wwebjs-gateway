@@ -66,6 +66,7 @@ import { releaseProfileLock } from './profile-lock.js'
 import {
   type CauseCode,
   describeCause,
+  sanitize,
   isPageWaitTimeout,
   isPuppeteerFailure,
   mapping,
@@ -344,6 +345,27 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     // busy gateway keeps the faults: the library failing, a mapper of ours, an unknown outcome
     if (QUIET_CAUSES.has(code)) this.logger.debug(line)
     else this.logger.warn(line)
+  }
+
+  // The library answers a text instead of throwing, and the text can quote ids, numbers or the names
+  // the caller sent (subject, title, description): it is masked (the names too, which the masking
+  // cannot know) before it is logged or reaches the client and the webhooks
+  private refusedReason(operation: string, text: string, names: readonly string[] = []): string {
+    let unnamed = text.slice(0, 2000)
+    for (const name of names) {
+      const literal = name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      // Whole words only, any case: a one-letter name must not mangle the rest of the text. Names go
+      // first, before the cap of `sanitize` could cut one in half
+      if (literal) {
+        unnamed = unnamed.replace(
+          new RegExp(`(?<![\\p{L}\\p{N}_])${literal}(?![\\p{L}\\p{N}_])`, 'giu'),
+          '[name]'
+        )
+      }
+    }
+    const reason = sanitize(unnamed)
+    this.logger.warn(`${operation} refused: ${reason}`)
+    return reason
   }
 
   // WhatsApp accepted the message by the time it is mapped: a failure here is an unknown outcome and
@@ -1452,7 +1474,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   ): Promise<CreateGroupResult | string> {
     return this.run('createGroup', async () => {
       const result = await this.client.createGroup(title, participantIds, { ...options })
-      if (typeof result === 'string') return result
+      if (typeof result === 'string') return this.refusedReason('createGroup', result, [title])
       return { title: result.title, gid: result.gid._serialized, participants: result.participants }
     })
   }
@@ -1465,7 +1487,9 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('addParticipants', async () => {
       const group = await this.groupById('addParticipants', groupId)
       const result: unknown = await group.addParticipants(participantIds, { ...options })
-      return typeof result === 'string' ? result : ParticipantOutcomes.parse(result)
+      return typeof result === 'string'
+        ? this.refusedReason('addParticipants', result)
+        : ParticipantOutcomes.parse(result)
     })
   }
 
@@ -1633,7 +1657,9 @@ export class WwebjsAdapter implements WhatsAppClientPort {
         description: options?.description,
         picture
       })
-      if (typeof result === 'string') return result
+      if (typeof result === 'string') {
+        return this.refusedReason('createChannel', result, [title, options?.description ?? ''])
+      }
       return {
         title: result.title,
         nid: result.nid._serialized,

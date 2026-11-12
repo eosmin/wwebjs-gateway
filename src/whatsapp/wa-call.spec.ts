@@ -1,4 +1,11 @@
-import { describeCause, isPuppeteerFailure, mapping, notReady, runWaCall } from './wa-call.js'
+import {
+  describeCause,
+  isPuppeteerFailure,
+  mapping,
+  notReady,
+  runWaCall,
+  sanitize
+} from './wa-call.js'
 import {
   MapperFailure,
   WaChatNotFoundError,
@@ -364,5 +371,23 @@ describe('describeCause', () => {
     const { message } = describeCause(new Error('x 1.2024.5215512345678'))
 
     expect(message).not.toContain('5215512345678')
+  })
+})
+
+describe('sanitize', () => {
+  it('masks numbers written with separators, keeps the WhatsApp Web build', () => {
+    const out = sanitize(
+      'call +52 55 1234 5678, 55-1234-5678, (55) 1234-5678 and +52.55.1234.5678 on 2.3000.1054303363'
+    )
+
+    expect(out).not.toMatch(/1234|5678|\b55\b/)
+    expect(out).toContain('2.3000.1054303363')
+  })
+
+  it('drops what is past the scanned length before the patterns run', () => {
+    const out = sanitize('x '.repeat(1500) + '5215512345678@c.us')
+
+    expect(out).not.toContain('5215512345678')
+    expect(out.length).toBeLessThanOrEqual(200)
   })
 })
