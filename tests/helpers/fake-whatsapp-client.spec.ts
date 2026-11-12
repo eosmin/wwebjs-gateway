@@ -23,6 +23,7 @@ const LIFECYCLE = [
   'initialize',
   'destroy',
   'logout',
+  'discardAuth',
   'resetState',
   'getState',
   'getWWebVersion',

@@ -45,6 +45,21 @@ export class WaOperationError extends WhatsAppError {
   }
 }
 
+// The browser profile of a session is held by a process that is not ours to close, so no browser can
+// start on it. The message is ours (a pid and a reason, no path) and reaches `lastError`.
+export class WaProfileLockedError extends WhatsAppError {
+  constructor(
+    readonly pid: number,
+    reason: string
+  ) {
+    super(
+      'WHATSAPP_ERROR',
+      `the browser profile is locked by process ${pid} (${reason}); end that process and start the session again`,
+      { operation: 'initialize' }
+    )
+  }
+}
+
 // The call ran, but our own code could not read what WhatsApp answered (a field the mappers did not
 // expect), or the library's Node code failed after the page sent a message. It answers like
 // WaOperationError, yet WhatsApp Web did not fail, so it is told apart to be logged loudly and, for a

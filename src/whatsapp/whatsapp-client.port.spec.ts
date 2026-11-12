@@ -208,7 +208,7 @@ const RENAMED = {
 // What the port offers that no wwebjs member of the inventory names (ClientInfo has fields only)
 type GatewayOnlyMethod = Extract<
   PortMethod,
-  'getBatteryStatus' | 'getBrowserMemoryBytes' | 'onSkipped'
+  'getBatteryStatus' | 'getBrowserMemoryBytes' | 'onSkipped' | 'discardAuth'
 >
 
 // Fails to compile when the port has a method that nothing in the inventory maps to

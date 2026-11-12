@@ -1,4 +1,8 @@
+import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { hostname, tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { Logger } from '@nestjs/common'
 import wwebjs, { type Message } from 'whatsapp-web.js'
@@ -8,11 +12,13 @@ import { parseEnv } from '../config/env.schema.js'
 import { MessageDto } from '../types/dto.js'
 import { WA_EVENTS, type WaEventName } from '../types/events.js'
 
+import { releaseProfileLock } from './profile-lock.js'
 import {
   WaChatNotFoundError,
   WaDisconnectedError,
   WaMappingError,
   WaOperationError,
+  WaProfileLockedError,
   WaTimeoutError
 } from './wa-errors.js'
 import type { ClientEvent } from './whatsapp-client.port.js'
@@ -67,10 +73,13 @@ interface Harness {
   events: ClientEvent[]
 }
 
-function harness(overrides: Record<string, string> = {}): Harness {
+function harness(
+  overrides: Record<string, string> = {},
+  releaseLock: typeof releaseProfileLock = () => Promise.resolve('free')
+): Harness {
   jest.spyOn(Logger.prototype, 'debug').mockImplementation()
   const client = new Client({ authStrategy: new NoAuth() })
-  const adapter = new WwebjsAdapter('support-line', client, config(overrides))
+  const adapter = new WwebjsAdapter('support-line', client, config(overrides), releaseLock)
   const events: ClientEvent[] = []
   adapter.onEvent(event => events.push(event))
   return { client, adapter, events }
@@ -1004,6 +1013,93 @@ describe('session ending', () => {
     expect(browser.listenerCount('disconnected')).toBe(1)
   })
 
+  describe('the saved login and the profile lock', () => {
+    let dataPath = ''
+    beforeEach(() => {
+      dataPath = mkdtempSync(join(tmpdir(), 'wwebjs-adapter-'))
+    })
+    afterEach(() => {
+      rmSync(dataPath, { recursive: true, force: true })
+    })
+
+    it('deletes the login of its own session and nothing else', async () => {
+      const h = harness({ WWEBJS_DATA_PATH: dataPath }, releaseProfileLock)
+      const own = join(dataPath, 'session-support-line')
+      const other = join(dataPath, 'session-other')
+      for (const dir of [own, other]) mkdirSync(join(dir, 'Default'), { recursive: true })
+      writeFileSync(join(own, 'Default', 'Cookies'), 'x')
+
+      await h.adapter.discardAuth()
+      await h.adapter.discardAuth() // nothing left is not an error
+
+      expect(existsSync(own)).toBe(false)
+      expect(existsSync(other)).toBe(true)
+    })
+
+    it('clears the lock of a browser that is gone before it starts', async () => {
+      const h = harness({ WWEBJS_DATA_PATH: dataPath }, releaseProfileLock)
+      const dir = join(dataPath, 'session-support-line')
+      mkdirSync(dir, { recursive: true })
+      // pid 2^22 is above the default limit of Linux and macOS: no such process
+      symlinkSync(`${hostname()}-4194304`, join(dir, 'SingletonLock'))
+      stub(h.client, 'initialize').mockResolvedValue(undefined)
+
+      await h.adapter.initialize()
+
+      expect(() => symlinkSync('x', join(dir, 'SingletonLock'))).not.toThrow()
+    })
+
+    it('does not start a browser when a destroy came while the lock was being cleared', async () => {
+      let release: () => void = () => undefined
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      const h = harness({ WWEBJS_DATA_PATH: dataPath }, async () => {
+        await gate
+        return 'free'
+      })
+      const initialize = stub(h.client, 'initialize').mockResolvedValue(undefined)
+      stub(h.client, 'destroy').mockResolvedValue(undefined)
+
+      const starting = h.adapter.initialize().catch((e: unknown) => e)
+      await h.adapter.destroy()
+      release()
+
+      expect(await starting).toBeInstanceOf(WaDisconnectedError)
+      expect(initialize).not.toHaveBeenCalled()
+    })
+
+    it('stops the start when a live browser of this profile is still running under this process', async () => {
+      const h = harness({ WWEBJS_DATA_PATH: dataPath }, releaseProfileLock)
+      const dir = join(dataPath, 'session-support-line')
+      mkdirSync(dir, { recursive: true })
+      // A live child of this process whose command line names the profile, as Chromium's does
+      const browser = spawn(
+        process.execPath,
+        [
+          '-e',
+          "console.log('up'); setTimeout(() => undefined, 30000)",
+          '--',
+          `--user-data-dir=${dir}`
+        ],
+        { stdio: ['ignore', 'pipe', 'ignore'] }
+      )
+      try {
+        // Until the child has started, `ps` still shows the command line of the process it forked from
+        await new Promise(resolve => browser.stdout.once('data', resolve))
+        symlinkSync(`${hostname()}-${browser.pid}`, join(dir, 'SingletonLock'))
+        const initialize = stub(h.client, 'initialize').mockResolvedValue(undefined)
+
+        await expect(h.adapter.initialize()).rejects.toBeInstanceOf(WaProfileLockedError)
+        expect(initialize).not.toHaveBeenCalled()
+        // Not ours to close: it is still running
+        expect(() => process.kill(browser.pid ?? 0, 0)).not.toThrow()
+      } finally {
+        browser.kill('SIGKILL')
+      }
+    })
+  })
+
   it('attaches to the browser that initialize created', async () => {
     const h = harness()
     const browser = new EventEmitter()
@@ -1033,7 +1129,7 @@ describe('session ending', () => {
     )
     const initializing = h.adapter.initialize().catch((e: unknown) => e)
     // let initialize register, then abandon it at its deadline by destroying the session
-    await Promise.resolve()
+    await new Promise(resolve => setImmediate(resolve))
 
     await expect(h.adapter.destroy()).rejects.toBeInstanceOf(WaTimeoutError)
     expect(kill).toHaveBeenCalledWith('SIGKILL')

@@ -24,6 +24,7 @@ import { SESSION_STATUSES, type SessionStatus } from '../types/dto.js'
 
 import { ACCOUNT_SETTING_CALLS } from './account-settings.js'
 import { EventPipelineService } from './event-pipeline.service.js'
+import { WaProfileLockedError } from './wa-errors.js'
 import {
   WHATSAPP_CLIENT_FACTORY,
   type ClientEvent,
@@ -85,6 +86,8 @@ interface Runtime {
   qr: string | undefined
   pairingPhoneNumber: string | undefined
   reconnectAttempts: number
+  // Browser starts that failed one after another; any sign of life (QR, code, login) clears it
+  initializeFailures: number
   reconnectTimer: NodeJS.Timeout | undefined
   unsubscribe: (() => void) | undefined
 }
@@ -401,13 +404,35 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       void client.initialize().catch((error: unknown) => {
         this.run(id, 'Reconnecting after a failed initialize', () =>
           runtime.generation === generation
-            ? this.reconnect(id, runtime, `initialize failed (${errorKind(error)})`)
+            ? this.initializeFailed(id, runtime, error)
             : Promise.resolve()
         )
       })
     } catch (error: unknown) {
       await this.reconnect(id, runtime, `start failed (${errorKind(error)})`)
     }
+  }
+
+  // A browser that does not start is retried like any drop, but only so many times in a row: what
+  // makes it fail (a profile that cannot be used, a lock held by a foreign process, no Chrome) does not
+  // go away by waiting, and a session that retries for ever hides it. The count restarts at any sign
+  // that a browser did come up (a QR code, a pairing code, a login).
+  private async initializeFailed(id: string, runtime: Runtime, error: unknown): Promise<void> {
+    runtime.initializeFailures++
+    // The message of our own lock error says what to do; any other text of a library stays out
+    const detail = error instanceof WaProfileLockedError ? `: ${error.message}` : ''
+    const reason = `initialize failed (${errorKind(error)})${detail}`
+    const max = this.config.SESSION_INITIALIZE_MAX_ATTEMPTS
+    if (runtime.initializeFailures >= max) {
+      this.logger.error(`[${id}] The browser did not start ${max} times in a row; giving up`)
+      await this.fail(
+        id,
+        runtime,
+        `the browser did not start ${max} times in a row (last: ${reason}); check the browser, the data folder and the saved login, then start the session again`
+      )
+      return
+    }
+    await this.reconnect(id, runtime, reason)
   }
 
   // The way back from a drop: destroy the client, wait, start again. Gives up as `failed` when
@@ -494,7 +519,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       throw new ConflictError('SESSION_NOT_READY', `Session ${id} has no client to log out`)
     }
     await withTimeout(client.logout(), CALL_TIMEOUT_MS, 'logout')
-    return this.markLoggedOut(id)
+    return this.markLoggedOut(id, client)
   }
 
   private async logoutBestEffort(id: string, runtime: Runtime): Promise<void> {
@@ -506,14 +531,26 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     }
   }
 
-  private markLoggedOut(id: string): Promise<Session> {
-    return this.halt(id, 'created', {
+  // Ends the run, then deletes the saved login with the client that ran it (it needs no browser, and
+  // the browser must be gone first). A login that cannot be deleted is logged: the next start then
+  // fails at the cap, with the reason in `lastError`.
+  private async markLoggedOut(
+    id: string,
+    client: WhatsAppClientPort | undefined
+  ): Promise<Session> {
+    const session = await this.halt(id, 'created', {
       autoStart: false,
       phoneNumber: null,
       pushName: null,
       linkedAt: null,
       lastError: null
     })
+    try {
+      await withTimeout(client?.discardAuth() ?? Promise.resolve(), CALL_TIMEOUT_MS, 'discardAuth')
+    } catch (error: unknown) {
+      this.logger.warn(`[${id}] Deleting the saved login failed (${errorKind(error)})`)
+    }
+    return session
   }
 
   // ---- Client events ---------------------------------------------------------------------------
@@ -532,15 +569,18 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   private async handleEvent(id: string, runtime: Runtime, event: ClientEvent): Promise<void> {
     switch (event.event) {
       case 'qr':
+        runtime.initializeFailures = 0
         runtime.qr = event.data.qr
         runtime.phaseStartedAt = undefined
         await this.transition(id, 'qr', {})
         return
       case 'code':
+        runtime.initializeFailures = 0
         runtime.phaseStartedAt = undefined
         await this.transition(id, 'pairing_code', {})
         return
       case 'authenticated':
+        runtime.initializeFailures = 0
         runtime.qr = undefined
         // The time a person took to scan the code is not the time the browser took to load
         runtime.phaseStartedAt = Date.now()
@@ -554,7 +594,8 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
         return
       case 'disconnected':
         if (event.data.reason === 'LOGOUT') {
-          await this.markLoggedOut(id)
+          // The login on disk is dead too: a browser started on it never reaches the QR code
+          await this.markLoggedOut(id, runtime.client)
         } else {
           await this.reconnect(id, runtime, `disconnected (${event.data.reason})`)
         }
@@ -579,6 +620,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     runtime.qr = undefined
     runtime.phaseStartedAt = undefined
     runtime.reconnectAttempts = 0
+    runtime.initializeFailures = 0
     const patch: SessionPatch = { lastConnectedAt: new Date(), lastError: null }
     try {
       const info = await withTimeout(client.getClientInfo(), CALL_TIMEOUT_MS, 'getClientInfo')
@@ -704,6 +746,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       qr: undefined,
       pairingPhoneNumber,
       reconnectAttempts: 0,
+      initializeFailures: 0,
       reconnectTimer: undefined,
       unsubscribe: undefined
     }

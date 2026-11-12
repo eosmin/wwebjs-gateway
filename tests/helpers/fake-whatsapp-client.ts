@@ -42,6 +42,7 @@ const WORKS_WHEN_DISCONNECTED: ReadonlySet<PortMethod> = new Set([
   'initialize',
   'destroy',
   'logout',
+  'discardAuth',
   'resetState',
   'getState',
   'getWWebVersion',
@@ -185,6 +186,7 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
   readonly logout = this.stub('logout', () => {
     this.connected = false
   })
+  readonly discardAuth = this.stub('discardAuth', () => undefined)
   readonly resetState = this.stub('resetState', () => undefined)
   readonly getState = this.stub('getState', () => (this.connected ? 'CONNECTED' : null))
   readonly getWWebVersion = this.stub('getWWebVersion', () => '2.3000.0')

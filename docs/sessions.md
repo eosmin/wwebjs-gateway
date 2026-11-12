@@ -35,7 +35,7 @@ The `gw_sessions{status}` gauge counts the sessions of each status.
 | `authenticated`                | `authenticating`, the QR code is dropped                                                                |
 | `ready`                        | `ready` (see below)                                                                                     |
 | `auth_failure`                 | `failed`, no retry: the saved login was refused and a new QR is needed                                  |
-| `disconnected` with `LOGOUT`   | `created`, no retry; the account, the name and `linkedAt` are cleared and `autoStart` is turned off     |
+| `disconnected` with `LOGOUT`   | `created`, no retry; the account, the name and `linkedAt` are cleared, `autoStart` is turned off and the saved login on disk is deleted, so the next start shows a QR code |
 | `disconnected`, any other cause | reconnect                                                                                              |
 | `session_error`                | reconnect                                                                                               |
 | `change_state` `CONFLICT`      | `failed` unless `TAKEOVER_ON_CONFLICT=true`; with the takeover on, the adapter takes the session back   |
@@ -62,6 +62,17 @@ The wait doubles with every attempt, from 5 s up to 5 min, and the gateway uses 
 `SESSION_RECONNECT_MAX_ATTEMPTS` limits them: `0` means unlimited, any other number ends in `failed` (`lastError: reconnect attempts exhausted`) once the attempts are spent.
 
 A client that was replaced is ignored: whatever it still emits is dropped.
+
+### A browser that does not start
+
+A failed `initialize` is retried like any drop, but only `SESSION_INITIALIZE_MAX_ATTEMPTS` times (default 5) **in a row**. The count starts again at any sign that a browser did come up (`qr`, `code`, `authenticated`, `ready`). When it is spent the session ends in `failed` and `lastError` says `the browser did not start 5 times in a row (last: initialize failed (<kind>)…); check the browser, the data folder and the saved login, then start the session again`. A manual `start` begins a new count. This holds with `SESSION_RECONNECT_MAX_ATTEMPTS=0` too, since that limit counts the drops of a browser that ran.
+
+Two causes have their own treatment:
+
+- **Unlinked from the phone.** On `disconnected` with `LOGOUT` the gateway deletes the folder of the session in `WWEBJS_DATA_PATH` (`session-<id>`) once its browser is gone. Without that, WhatsApp Web refused to load on the dead login (`initialize failed`, never reaching the QR code). The same deletion runs on `POST /logout`.
+- **A browser left by a gateway that died** (`kill -9`, a crash, the OOM killer). Chromium holds the profile with `SingletonLock -> <host>-<pid>` and never removes it. Before each browser start the adapter reads that lock: if the process is dead, was started for another profile (the pid was reused), or the lock comes from another host (a container that was replaced), it removes the lock files; if the process is alive, **was started with this session's own `--user-data-dir`, and was orphaned (its parent is init)**, it is closed (SIGTERM, then SIGKILL after 5 s) and the lock removed. A live browser of this profile that is not an orphan is never touched (one that is a child of this gateway is still closing: the start fails and is retried): the start fails with `lastError` `the browser profile is locked by process <pid> (<reason>); end that process and start the session again`, and counts toward the limit above. A gateway that runs as PID 1 never closes anything, since an orphan cannot predate it.
+
+A session that is already `failed` because of a login that is corrupt (not unlinked through the gateway) is not repaired by `start`: stop the gateway for that session and delete `WWEBJS_DATA_PATH/session-<id>` by hand; the next start asks for a QR code.
 
 ## Watchdog
 

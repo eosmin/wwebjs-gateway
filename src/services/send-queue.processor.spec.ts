@@ -299,7 +299,9 @@ describe('SendJobProcessor', () => {
       // afterDispatch would fail the job with CHAT_NOT_FOUND and not with UNKNOWN_OUTCOME
       WaChatNotFoundError: { make: undefined, code: undefined },
       // Raised inside the adapter and always translated by runWaCall; it never reaches a worker
-      MapperFailure: { make: undefined, code: undefined }
+      MapperFailure: { make: undefined, code: undefined },
+      // Raised only by `initialize`, before any browser runs; no send can meet it
+      WaProfileLockedError: { make: undefined, code: undefined }
     } as const
 
     it('has a decided send outcome for every error class of wa-errors.ts', () => {
