@@ -248,7 +248,7 @@ export const envSchema = z
       'Milliseconds a synchronous send request waits for the outcome'
     ),
     SEND_MAX_WAIT_MS: count(300000, { min: 1 }).describe(
-      'Milliseconds an accepted send may wait in the queue before it fails'
+      'Milliseconds an accepted send waits for a session that is not ready, counted from when it first finds the session not ready (not from when it was queued), before it fails'
     ),
     SEND_NOT_READY_RETRY_MS: count(5000, { min: 1 }).describe(
       'Milliseconds before a send is retried while its session is not ready'

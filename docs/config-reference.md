@@ -64,7 +64,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `SEND_MIN_INTERVAL_MS` | integer, 0 or more | no | `1000` | Minimum milliseconds between two sends of the same session |
 | `SEND_JITTER_MS` | integer, 0 or more | no | `400` | Random milliseconds added to the send interval |
 | `SEND_SYNC_TIMEOUT_MS` | integer, 1 or more | no | `60000` | Milliseconds a synchronous send request waits for the outcome |
-| `SEND_MAX_WAIT_MS` | integer, 1 or more | no | `300000` | Milliseconds an accepted send may wait in the queue before it fails |
+| `SEND_MAX_WAIT_MS` | integer, 1 or more | no | `300000` | Milliseconds an accepted send waits for a session that is not ready, counted from when it first finds the session not ready (not from when it was queued), before it fails |
 | `SEND_NOT_READY_RETRY_MS` | integer, 1 or more | no | `5000` | Milliseconds before a send is retried while its session is not ready |
 | `SEND_BREAKER_THRESHOLD` | integer, 1 or more | no | `5` | Consecutive send failures that open the circuit breaker of a session |
 | `SEND_BREAKER_COOLDOWN_MS` | integer, 1 or more | no | `60000` | Milliseconds an open circuit breaker stays open |
