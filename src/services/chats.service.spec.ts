@@ -226,9 +226,7 @@ describe('ChatsService', () => {
     it.each([
       ['seen', 'sendSeen'],
       ['archive', 'archiveChat'],
-      ['unarchive', 'unarchiveChat'],
       ['pin', 'pinChat'],
-      ['unpin', 'unpinChat'],
       ['clearMessages', 'clearChatMessages'],
       ['delete', 'deleteChat'],
       ['syncHistory', 'syncHistory']
@@ -239,6 +237,40 @@ describe('ChatsService', () => {
       await expect(service[method]('s', CHAT)).resolves.toBeUndefined()
       await expect(service[method]('s', CHAT)).rejects.toMatchObject({ code: 'WHATSAPP_ERROR' })
       expect(fn).toHaveBeenCalledWith(CHAT)
+    })
+
+    // wwebjs 1.34.7 answers false from both even when WhatsApp Web did it, so the chat is re-read
+    it.each([
+      ['unarchive', 'unarchiveChat', 'archived'],
+      ['unpin', 'unpinChat', 'pinned']
+    ] as const)(
+      '%s trusts the state of the chat, not the answer of %s',
+      async (method, call, flag) => {
+        const fn = jest.fn().mockResolvedValue(false)
+        const done = build({ [call]: fn, getChatById: ok({ [flag]: false }) })
+        const stuck = build({ [call]: fn, getChatById: ok({ [flag]: true }) })
+
+        await expect(done.service[method]('s', CHAT)).resolves.toBeUndefined()
+        const refused = expect(stuck.service[method]('s', CHAT)).rejects.toMatchObject({
+          code: 'WHATSAPP_ERROR'
+        })
+        await jest.advanceTimersByTimeAsync(1000)
+        await refused
+        expect(fn).toHaveBeenCalledWith(CHAT)
+      }
+    )
+
+    it('waits for a state that WhatsApp Web shows a moment late', async () => {
+      const getChatById = jest
+        .fn()
+        .mockResolvedValueOnce({ pinned: true })
+        .mockResolvedValueOnce({ pinned: false })
+      const { service } = build({ unpinChat: jest.fn().mockResolvedValue(false), getChatById })
+
+      const unpinned = expect(service.unpin('s', CHAT)).resolves.toBeUndefined()
+      await jest.advanceTimersByTimeAsync(1000)
+      await unpinned
+      expect(getChatById.mock.calls.length).toBeGreaterThanOrEqual(2)
     })
 
     it.each([

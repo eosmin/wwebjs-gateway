@@ -35,3 +35,4 @@ The other options and why each was not chosen.
 | [0003](0003-public-repository-and-protect-main.md)  | Public repository and the `protect-main` ruleset        |
 | [0004](0004-whatsapp-web-js-over-baileys.md)        | `whatsapp-web.js` over Baileys                          |
 | [0005](0005-prisma-7-with-the-pg-driver-adapter.md) | Prisma 7 with the `pg` driver adapter, `cjs` generator |
+| [0006](0006-response-dtos-follow-what-wwebjs-delivers.md) | Response DTOs follow what `whatsapp-web.js` really delivers |

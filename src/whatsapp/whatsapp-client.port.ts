@@ -329,8 +329,10 @@ export interface WhatsAppClientPort {
   getMessageGroupMentions(messageId: string): Promise<GroupChatDto[]>
   getQuotedMessage(messageId: string): Promise<MessageDto | null>
   getMessageInfo(messageId: string): Promise<MessageInfoDto | null>
-  getMessageOrder(messageId: string): Promise<OrderDto>
-  getMessagePayment(messageId: string): Promise<PaymentDto>
+  // Null when the message is not an order
+  getMessageOrder(messageId: string): Promise<OrderDto | null>
+  // Null when the message is not a payment
+  getMessagePayment(messageId: string): Promise<PaymentDto | null>
   getMessageReactions(messageId: string): Promise<ReactionListDto[]>
   getPollVotes(messageId: string): Promise<PollVoteDto[]>
   vote(messageId: string, selectedOptions: string[]): Promise<void>

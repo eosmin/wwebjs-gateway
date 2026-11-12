@@ -121,7 +121,7 @@ export class ReconcilerService implements OnApplicationBootstrap, BeforeApplicat
     since: number,
     lastEventAt: Date | null | undefined
   ): boolean {
-    if (chat.timestamp === null) return chat.unreadCount > 0
+    if (chat.timestamp === null || chat.timestamp === undefined) return chat.unreadCount > 0
     const activeAt = chat.timestamp * 1000
     if (activeAt < since) return false
     return chat.unreadCount > 0 || lastEventAt == null || activeAt > lastEventAt.getTime()

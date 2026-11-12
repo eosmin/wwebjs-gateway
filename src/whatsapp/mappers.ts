@@ -278,11 +278,24 @@ type MessageGatewayFields =
   | 'pollOptions'
   | 'dynamicReplyButtons'
 
+// The typings of wwebjs say the coordinates are strings, but WhatsApp Web hands numbers
+export interface LocationSource extends Omit<LocationDto, 'latitude' | 'longitude'> {
+  latitude: number | string
+  longitude: number | string
+}
+
 export interface MessageSource extends Omit<
   MessageDto,
-  MessageGatewayFields | 'ack' | 'broadcast' | 'isEphemeral' | 'isForwarded' | 'timestamp'
+  | MessageGatewayFields
+  | 'ack'
+  | 'broadcast'
+  | 'isEphemeral'
+  | 'isForwarded'
+  | 'timestamp'
+  | 'location'
 > {
   id: IdLike
+  location?: LocationSource | null
   // WhatsApp leaves these out of some messages
   broadcast?: boolean | null
   isEphemeral?: boolean | null
@@ -297,7 +310,6 @@ export interface MessageSource extends Omit<
   // Typed string[], but Message.js copies the `{ name, localId }` options WhatsApp Web holds
   pollOptions?: (string | { name: string })[] | null
   dynamicReplyButtons?: object | null
-  location?: LocationDto | null
   inviteV4?: InviteV4Dto | null
   latestEditMsgKey?: IdLike | null
   protocolMessageKey?: IdLike | null
@@ -363,6 +375,36 @@ const LOCATION_FIELDS = [
   'url',
   'description'
 ] as const satisfies readonly (keyof LocationDto)[]
+
+// A number, or a string that is one: null, '' and blank strings are not 0
+function coordinate(value: unknown): number | undefined {
+  if (typeof value === 'string' && value.trim() === '') return undefined
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+// A location without usable coordinates is left out; the message itself is kept
+function mapLocation(source: LocationSource | null | undefined): LocationDto | undefined {
+  if (!source) return undefined
+  const latitude = coordinate(source.latitude)
+  const longitude = coordinate(source.longitude)
+  if (latitude === undefined || longitude === undefined) return undefined
+  return { ...pick(source, LOCATION_FIELDS), latitude, longitude }
+}
+
+// An invite that lacks a field cannot be accepted, so it is left out; the message itself is kept
+function mapInvite(source: InviteV4Dto | null | undefined): InviteV4Dto | undefined {
+  if (!source) return undefined
+  const invite = pick(source, INVITE_V4_FIELDS)
+  const complete =
+    invite.inviteCode !== undefined &&
+    invite.inviteCodeExp !== undefined &&
+    invite.groupId !== undefined &&
+    invite.fromId !== undefined &&
+    invite.toId !== undefined
+  return complete ? invite : undefined
+}
 
 const INVITE_V4_FIELDS = [
   'inviteCode',
@@ -447,8 +489,10 @@ function mapMessageFields(source: MessageSource, options: MessageMapOptions): Me
       typeof option === 'string' ? option : option.name
     )
   }
-  if (source.location) message.location = pick(source.location, LOCATION_FIELDS)
-  if (source.inviteV4) message.inviteV4 = pick(source.inviteV4, INVITE_V4_FIELDS)
+  const location = mapLocation(source.location)
+  if (location) message.location = location
+  const inviteV4 = mapInvite(source.inviteV4)
+  if (inviteV4) message.inviteV4 = inviteV4
   const latestEditMsgKey = optionalId(source.latestEditMsgKey)
   if (latestEditMsgKey !== undefined) message.latestEditMsgKey = latestEditMsgKey
   const protocolMessageKey = optionalId(source.protocolMessageKey)
@@ -705,17 +749,17 @@ export type MembershipRequestSource = Omit<
   'id' | 'addedBy' | 'parentGroupId'
 > & {
   id: IdLike
-  addedBy: IdLike
+  addedBy?: IdLike | null
   parentGroupId?: IdLike | null
 }
 
 export function mapMembershipRequest(source: MembershipRequestSource): MembershipRequestDto {
   const request: MembershipRequestDto = {
-    id: serializeId(source.id),
-    addedBy: serializeId(source.addedBy),
-    requestMethod: source.requestMethod,
-    t: source.t
+    ...pick(source, ['requestMethod', 't'] as const),
+    id: serializeId(source.id)
   }
+  const addedBy = optionalId(source.addedBy)
+  if (addedBy !== undefined) request.addedBy = addedBy
   const parentGroupId = optionalId(source.parentGroupId)
   if (parentGroupId !== undefined) request.parentGroupId = parentGroupId
   return request
@@ -727,12 +771,11 @@ export type GroupNotificationSource = Omit<WithIds<GroupNotificationDto, 'id'>, 
 
 export function mapGroupNotification(source: GroupNotificationSource): GroupNotificationDto {
   return {
+    ...pick(source, ['author', 'timestamp'] as const),
     id: serializeId(source.id),
-    author: source.author,
     body: source.body,
     chatId: source.chatId,
     recipientIds: source.recipientIds.map(serializeId),
-    timestamp: source.timestamp,
     type: source.type
   }
 }
@@ -740,7 +783,7 @@ export function mapGroupNotification(source: GroupNotificationSource): GroupNoti
 // ---- Labels, broadcasts, calls -----------------------------------------------------------------
 
 export function mapLabel(source: LabelDto): LabelDto {
-  return { id: source.id, name: source.name, hexColor: source.hexColor }
+  return { ...pick(source, ['hexColor'] as const), id: source.id, name: source.name }
 }
 
 export interface BroadcastSource extends Omit<BroadcastDto, 'id' | 'msgs'> {
@@ -804,15 +847,14 @@ export interface OrderSource extends Omit<OrderDto, 'products'> {
 
 export function mapOrder(source: OrderSource): OrderDto {
   return {
-    products: source.products.map(mapProduct),
-    subtotal: source.subtotal,
-    total: source.total,
-    currency: source.currency,
-    createdAt: source.createdAt
+    ...pick(source, ['subtotal', 'total', 'currency', 'createdAt'] as const),
+    products: source.products.map(mapProduct)
   }
 }
 
-export type PaymentSource = WithIds<PaymentDto, 'id' | 'paymentMessageReceiverJid'>
+export type PaymentSource = Omit<WithIds<PaymentDto, 'id'>, 'paymentMessageReceiverJid'> & {
+  paymentMessageReceiverJid?: IdLike | null
+}
 
 const PAYMENT_FIELDS = [
   'paymentCurrency',
@@ -824,11 +866,13 @@ const PAYMENT_FIELDS = [
 ] as const satisfies readonly (keyof PaymentSource)[]
 
 export function mapPayment(source: PaymentSource): PaymentDto {
-  return {
+  const payment: PaymentDto = {
     ...(pick(source, PAYMENT_FIELDS) as PaymentDto),
-    id: serializeId(source.id),
-    paymentMessageReceiverJid: serializeId(source.paymentMessageReceiverJid)
+    id: serializeId(source.id)
   }
+  const receiver = optionalId(source.paymentMessageReceiverJid)
+  if (receiver !== undefined) payment.paymentMessageReceiverJid = receiver
+  return payment
 }
 
 // ---- Client ------------------------------------------------------------------------------------

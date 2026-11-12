@@ -371,7 +371,7 @@ describe('mapMessage', () => {
     )
 
     expect(MessageDto.parse(dto)).toEqual(dto)
-    expect(dto.location).toEqual({ latitude: '19.4', longitude: '-99.1', name: 'Zocalo' })
+    expect(dto.location).toEqual({ latitude: 19.4, longitude: -99.1, name: 'Zocalo' })
     expect(dto.latestEditMsgKey).toBe('true_x_1')
     expect(dto.protocolMessageKey).toBe('true_x_2')
     expect(dto.isEventCanceled).toBe(true)

@@ -40,7 +40,7 @@ Every type also takes `quotedMessageId`, `ignoreQuoteErrors`, `mentions`, `group
 | `GET …/messages/search`                | `query`, `chatId`, `limit`, `page`: messages WhatsApp Web has loaded                          |
 | `GET …/stored-messages`                | The messages the gateway stored, newest first; page with `cursor`/`nextCursor` until it is null |
 | `GET …/messages/:messageId/media`      | The file. The sender of a message chooses its type, so only formats a browser shows without running anything (JPEG, PNG, GIF, WebP, MP4, OGG, MP3, PDF) are served `inline` with their type; everything else is `application/octet-stream` as an `attachment`. Always `nosniff`, `sandbox` and `cache-control: private, no-store`. |
-| `…/quoted`, `…/mentions`, `…/group-mentions`, `…/info`, `…/order`, `…/payment`, `…/reactions` | What the names say |
+| `…/quoted`, `…/mentions`, `…/group-mentions`, `…/info`, `…/order`, `…/payment`, `…/reactions` | What the names say. A message that has no such part answers `404 NOT_FOUND` with a message that says which: `quoted` does not quote another message, `info` only exists for messages the account sent, `order` / `payment` are not an order / a payment |
 
 ## Actions
 
@@ -76,3 +76,7 @@ Postgres cannot store U+0000 in text or JSON, so the gateway never lets one thro
 
 - **Incoming messages:** every NUL in the text, in a key or in the `raw` copy is removed when the message is mapped, before it is stored and before it is published. What is stored is what is published (`a\u0000b` arrives as `ab`); the message is neither lost nor split between the two.
 - **API requests:** a NUL anywhere in the body, the query string or the path parameters is answered `400 VALIDATION_ERROR` with the message `The request contains a NUL (U+0000) character, which is not allowed`, for every route, instead of a `500` from the database.
+
+## Coordinates and fields a real account lacks
+
+`location` has `latitude` and `longitude` as **numbers** (degrees), in the send body, in the message and in the stored messages. Many descriptive fields of the response DTOs are optional because WhatsApp does not fill them for every account (a contact without `pushname`, a label without `hexColor`): see [ADR 0006](adr/0006-response-dtos-follow-what-wwebjs-delivers.md). If the message of a send does not fit its schema, the answer is still `sent` (the job id is there) but without `message`, and the error is logged: never a `500` for a message that went out.
