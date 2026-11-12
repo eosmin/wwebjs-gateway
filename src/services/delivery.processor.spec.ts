@@ -1,6 +1,5 @@
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { performance } from 'node:perf_hooks'
 
 import { Logger } from '@nestjs/common'
 import { UnrecoverableError } from 'bullmq'
@@ -8,6 +7,7 @@ import { UnrecoverableError } from 'bullmq'
 import { TEST_ENV } from '../../tests/helpers/env.js'
 import { NotFoundError } from '../common/errors.js'
 import { signWebhook } from '../common/lib/crypto.js'
+import * as retryModule from '../common/lib/retry.js'
 import { parseEnv } from '../config/env.schema.js'
 import type { Webhook, WebhookDelivery } from '../database/models.js'
 import type {
@@ -539,16 +539,25 @@ describe('DeliveryProcessor', () => {
         jest.spyOn(Math, 'random').mockReturnValue(0.999999)
         const { processor, recordAttempt } = setup()
         recordAttempt.mockRejectedValue(transient())
-        const writes: number[] = []
-        recordAttempt.mockImplementation(() => {
-          writes.push(performance.now())
-          return Promise.reject(transient())
-        })
+        // The pauses are recorded, not slept: a measure of the real clock would count the load of the
+        // machine as waiting
+        const pauses: number[] = []
+        const realRetry = jest.requireActual<typeof retryModule>('../common/lib/retry.js').retry
+        jest.spyOn(retryModule, 'retry').mockImplementation((operation, options) =>
+          realRetry(operation, {
+            ...options,
+            sleep: ms => {
+              pauses.push(ms)
+              return Promise.resolve()
+            }
+          })
+        )
 
         await processor.process(job())
 
-        expect(writes).toHaveLength(3)
-        expect((writes.at(-1) as number) - (writes[0] as number)).toBeLessThan(1000)
+        expect(recordAttempt).toHaveBeenCalledTimes(3)
+        expect(pauses).toEqual([100, 200])
+        expect(pauses.reduce((total, ms) => total + ms, 0)).toBeLessThan(1000)
       })
     })
 

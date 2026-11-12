@@ -6,8 +6,6 @@ import { EventSequencer } from './event-pipeline.sequencer.js'
 const tailsOf = (sequencer: EventSequencer): Map<string, unknown> =>
   (sequencer as unknown as { tails: Map<string, unknown> }).tails
 
-const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
-
 function build(nextSeq?: (sessionId: string) => Promise<number>): {
   sequencer: EventSequencer
   published: EventEnvelope[]
@@ -44,19 +42,30 @@ describe('EventSequencer', () => {
 
   it('delivers in seq order even when a stamp takes longer than the next one', async () => {
     let calls = 0
-    // The first stamp is the slowest: without the queue it would be published last
+    let releaseFirst: () => void = () => undefined
+    const firstStamp = new Promise<void>(resolve => {
+      releaseFirst = resolve
+    })
+    // The first stamp is the slowest: the queue keeps the later events from overtaking it
     const { sequencer, published } = build(async () => {
       calls += 1
       const seq = calls
-      await delay(seq === 1 ? 30 : 1)
+      if (seq === 1) await firstStamp
       return seq
     })
 
-    await Promise.all([
+    const publishing = Promise.all([
       sequencer.publish('s1', 'ready', {}),
       sequencer.publish('s1', 'authenticated', {}),
       sequencer.publish('s1', 'ready', {})
     ])
+    // Let every stamp that can start do so (one turn of the event loop), then let the slow one finish
+    await new Promise(resolve => setImmediate(resolve))
+    // The queue holds the other two behind the slow stamp: none of them has asked for a `seq` yet
+    expect(calls).toBe(1)
+    expect(published).toHaveLength(0)
+    releaseFirst()
+    await publishing
 
     expect(published.map(envelope => envelope.seq)).toEqual([1, 2, 3])
     expect(published.map(envelope => envelope.event)).toEqual(['ready', 'authenticated', 'ready'])
@@ -67,7 +76,8 @@ describe('EventSequencer', () => {
 
     const batch = sequencer.run('s1', async emit => {
       await emit('ready', {})
-      await delay(10)
+      // A turn of the event loop, in which the outsider tries to get in
+      await new Promise(resolve => setImmediate(resolve))
       await emit('authenticated', {})
     })
     const outsider = sequencer.publish('s1', 'ready', {})

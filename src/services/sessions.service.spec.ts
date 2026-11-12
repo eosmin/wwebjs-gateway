@@ -250,7 +250,8 @@ describe('SessionsService', () => {
       expect(png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)).toBe(true)
       expect(again.equals(png)).toBe(true)
       expect(other.equals(png)).toBe(false)
-    })
+      // Three real PNG renders (scale 8): about 0.9 s on an idle machine, so 5 s is little margin when it is busy
+    }, 20_000)
 
     it('does not draw an image when there is no QR code', async () => {
       manager.qr.mockReturnValue(undefined)
