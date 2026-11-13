@@ -27,6 +27,7 @@ import { SESSION_STATUSES, type SessionStatus } from '../types/dto.js'
 
 import { ACCOUNT_SETTING_CALLS } from './account-settings.js'
 import { EventPipelineService } from './event-pipeline.service.js'
+import { logoutReasonLabel } from './logout-diagnostics.js'
 import {
   DAY_MS,
   hasSavedLogin,
@@ -834,6 +835,9 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
           `[${id}] disconnected (reason=${event.data.reason.slice(0, 64)}, status=${this.statuses.get(id) ?? 'unknown'}, sinceReadyMs=${runtime.readyAt === undefined ? 'none' : Date.now() - runtime.readyAt})`
         )
         if (event.data.reason === 'LOGOUT') {
+          this.metrics.metrics.logouts.inc({
+            reason: logoutReasonLabel(runtime.client?.lastLogoutReason())
+          })
           // The login on disk is dead too: a browser started on it never reaches the QR code
           await this.markLoggedOut(id, runtime.client)
         } else {

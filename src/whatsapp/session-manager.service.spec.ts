@@ -528,6 +528,42 @@ describe('SessionManager status machine', () => {
     expect(built.manager.status(ID)).toBe('created')
   })
 
+  it.each([
+    ['0', 'client_fatal'],
+    ['1', 'sync_fail'],
+    ['2', 'history_sync_timeout'],
+    ['3', 'account_locked'],
+    [undefined, 'unspecified'],
+    ['77', 'other'],
+    ['15551234567', 'other']
+  ])('counts a LOGOUT with the code %j under the label %j', async (code, label) => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW, phoneNumber: PHONE })
+    const client = await startSession(built)
+    await makeReady(built, client)
+    client.logoutReason = code
+
+    client.emit({ event: 'disconnected', data: { reason: 'LOGOUT' } })
+    await flush()
+
+    const metric = await built.metrics.metrics.logouts.get()
+    expect(metric.values).toEqual([
+      expect.objectContaining({ labels: { reason: label }, value: 1 })
+    ])
+  })
+
+  it('does not count a disconnect that is not a logout', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    const client = await startSession(built)
+    await makeReady(built, client)
+
+    client.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
+    await flush()
+
+    expect((await built.metrics.metrics.logouts.get()).values).toEqual([])
+  })
+
   it('logs the reason of a disconnect that is not a logout too', async () => {
     const built = build()
     built.sessions.seed({ id: ID, linkedAt: NOW })

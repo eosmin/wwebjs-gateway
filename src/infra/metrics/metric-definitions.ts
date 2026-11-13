@@ -131,6 +131,18 @@ export const METRIC_DEFINITIONS = {
     help: 'Saved logins the gateway moved to quarantine on its own because WhatsApp refused them (the account was unlinked while the gateway was stopped).',
     labels: []
   },
+  logouts: {
+    name: 'gw_logout_total',
+    type: 'counter',
+    help: 'Sessions WhatsApp Web logged out on its own, by the reason it gave (client_fatal, sync_fail, history_sync_timeout, account_locked, unspecified when it gave none, other).',
+    labels: ['reason']
+  },
+  waWebBuild: {
+    name: 'gw_wa_web_build_info',
+    type: 'gauge',
+    help: 'Sessions running each WhatsApp Web build, by version (2.3000.<number>, or unknown).',
+    labels: ['version']
+  },
   policyDecisions: {
     name: 'gw_policy_decisions_total',
     type: 'counter',

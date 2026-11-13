@@ -40,6 +40,8 @@ export interface Metrics {
   watchdogRestarts: Counter
   browserRecoveries: Counter<'code'>
   authQuarantined: Counter
+  logouts: Counter<'reason'>
+  waWebBuild: Gauge<'version'>
   reconcileRecovered: Counter
   policyDecisions: Counter<'rule' | 'decision'>
   policyDelaySeconds: Histogram
@@ -68,6 +70,8 @@ export function createMetrics(registry: Registry): Metrics {
     watchdogRestarts: counter(registry, d.watchdogRestarts),
     browserRecoveries: counter(registry, d.browserRecoveries),
     authQuarantined: counter(registry, d.authQuarantined),
+    logouts: counter(registry, d.logouts),
+    waWebBuild: gauge(registry, d.waWebBuild),
     reconcileRecovered: counter(registry, d.reconcileRecovered),
     policyDecisions: counter(registry, d.policyDecisions),
     policyDelaySeconds: histogram(registry, d.policyDelaySeconds),
