@@ -531,8 +531,8 @@ describe('the patched whatsapp-web.js', () => {
       }
     })
 
-    // The live check of F30 (2026-11-14): the collection never listed the call, but after the reject
-    // `lastEndedCall` was that call and the phone of the caller stopped at once
+    // The live checks of F30 (2026-11-14): the collection never lists the call on WhatsApp Web
+    // 2.3000.1054491369, the reject cuts it anyway, and nothing the page shows proves that
     describe('when the page does not list the call', () => {
       const unlisted = (ended: string | null): { p: Page; withReason: jest.Mock } => {
         const withReason = jest.fn()
@@ -548,11 +548,21 @@ describe('the patched whatsapp-web.js', () => {
         return { p, withReason }
       }
 
-      it('confirms when the call became the last ended one because of the reject', async () => {
-        const { p, withReason } = unlisted(null)
+      // Live check of F30 (1b71da3): `lastEndedCall` was already the call while it still rang (VOZ-6),
+      // and it was the call after the caller had hung up before the reject (NEG-2): it says nothing
+      // about the effect of the reject, so it never confirms
+      it('does not confirm because lastEndedCall became the call after the reject', async () => {
+        jest.useFakeTimers()
+        try {
+          const { p, withReason } = unlisted(null)
+          const pending = reject(p)
+          await jest.advanceTimersByTimeAsync(5000)
 
-        await expect(reject(p)).resolves.toMatchObject({ result: 'rejected', confirmed: true })
-        expect(withReason).toHaveBeenCalledTimes(1)
+          await expect(pending).resolves.toMatchObject({ result: 'rejected', confirmed: false })
+          expect(withReason).toHaveBeenCalledTimes(1)
+        } finally {
+          jest.useRealTimers()
+        }
       })
 
       it('does not confirm a call that had ended before the reject (the caller hung up first)', async () => {
@@ -593,7 +603,7 @@ describe('the patched whatsapp-web.js', () => {
         lastEnded: { before: boolean; after: boolean }
         callInfo: Record<string, unknown>
       }
-      const confirmedWith = async (
+      const reportOf = async (
         stackExtra: Record<string, unknown>
       ): Promise<Outcome & { diag: Report }> => {
         const p = page(null, { listed: [] })
@@ -608,11 +618,18 @@ describe('the patched whatsapp-web.js', () => {
               ...stackExtra
             })
         }
-        return (await reject(p)) as Outcome & { diag: Report }
+        jest.useFakeTimers()
+        try {
+          const pending = reject(p)
+          await jest.advanceTimersByTimeAsync(5000)
+          return (await pending) as Outcome & { diag: Report }
+        } finally {
+          jest.useRealTimers()
+        }
       }
 
       it('says whether the call was the last ended one before and after the reject', async () => {
-        const outcome = await confirmedWith({})
+        const outcome = await reportOf({})
 
         expect(outcome.diag.lastEnded).toEqual({ before: false, after: true })
       })
@@ -622,7 +639,7 @@ describe('the patched whatsapp-web.js', () => {
           .fn()
           .mockResolvedValueOnce({ callState: 'secret-state', peer: 'secret-peer', count: 3 })
           .mockResolvedValueOnce(null)
-        const outcome = await confirmedWith({ getCallInfo })
+        const outcome = await reportOf({ getCallInfo })
         const text = JSON.stringify(outcome.diag.callInfo)
 
         expect(text).toContain('callState:string')
@@ -633,14 +650,14 @@ describe('the patched whatsapp-web.js', () => {
 
       it('never lets a failing getCallInfo change the answer', async () => {
         const getCallInfo = jest.fn().mockRejectedValue(new Error('boom with a secret'))
-        const outcome = await confirmedWith({ getCallInfo })
+        const outcome = await reportOf({ getCallInfo })
 
-        expect(outcome).toMatchObject({ result: 'rejected', confirmed: true })
+        expect(outcome).toMatchObject({ result: 'rejected', confirmed: false })
         expect(JSON.stringify(outcome.diag.callInfo)).not.toContain('secret')
       })
 
       it('works with a stack that has no getCallInfo', async () => {
-        const outcome = await confirmedWith({})
+        const outcome = await reportOf({})
 
         expect(outcome.diag.callInfo).toEqual({ before: 'absent', after: 'absent' })
       })

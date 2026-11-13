@@ -30,4 +30,4 @@ export class CallsService {
 }
 
 export const UNCONFIRMED_NOTE =
-  'The reject was handed to WhatsApp Web, but nothing shows that the call ended: do not assume the caller stopped ringing.'
+  'The reject was handed to the VoIP stack of WhatsApp Web; its effect cannot be confirmed from the page, so do not assume the caller stopped ringing.'
