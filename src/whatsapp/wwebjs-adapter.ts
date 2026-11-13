@@ -39,6 +39,7 @@ import type {
 } from '../types/dto.js'
 import {
   BroadcastDto as BroadcastSchema,
+  MessageDto as MessageSchema,
   ChannelDto as ChannelSchema,
   LabelDto as LabelSchema
 } from '../types/dto.js'
@@ -298,7 +299,7 @@ const toIdLikeOrNull = (value: unknown): IdLike | null =>
 // this is what WhatsApp answers. Each field is read on its own: one of another type is left out, never
 // a failure, because the action (participants added, group created) has already happened
 const outcomeOf = (codeKey: 'code' | 'statusCode') =>
-  z.looseObject({
+  z.object({
     [codeKey]: z.number().optional().catch(undefined),
     message: z.string().optional().catch(undefined),
     isGroupCreator: z.boolean().optional().catch(undefined),
@@ -379,7 +380,15 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       )
       return {}
     }
-    return parsed.data
+    // The message of an outcome is WhatsApp's text: it can quote a number, so it is masked like the other texts
+    return Object.fromEntries(
+      Object.entries(parsed.data).map(([id, outcome]) => [
+        id,
+        typeof outcome.message === 'string'
+          ? { ...outcome, message: sanitize(outcome.message) }
+          : outcome
+      ])
+    )
   }
 
   // The library answers a text instead of throwing, and the text can quote ids, numbers or the names
@@ -407,13 +416,14 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // must never read as "not sent", or a worker could send it twice. The exception is null: the
   // patched library answers it when the page found no chat, or the content is not supported in a
   // channel or status, so nothing was sent. undefined stays an unknown outcome
-  private sent(operation: string, source: Message | null | undefined): MessageDto {
+  private sent(operation: string, source: Message | null | undefined, chatId?: string): MessageDto {
     if (source === null) {
       throw new WaOperationError(operation, 'Chat not found or content not supported')
     }
     try {
       if (source === undefined) throw new TypeError('The library answered no message')
-      return this.message(source)
+      // The caller knows where the message went: an answer that names no chat is still a message that went out
+      return mapping(() => mapMessage(source, { ...this.mapOptions(), fallbackChatId: chatId }))
     } catch (error: unknown) {
       this.logger.warn(`Mapping the result of ${operation} failed (${errorKind(error)})`)
       throw new WaMappingError(operation, `${operation}: the result could not be read`)
@@ -447,7 +457,12 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   private messages(sources: readonly Message[]): MessageDto[] {
-    return sources.map(source => this.message(source))
+    return this.listed(
+      'messages',
+      sources,
+      source => mapMessage(source, this.mapOptions()),
+      MessageSchema
+    )
   }
 
   // wwebjs answers undefined, not an error, for a message that is not in the page
@@ -513,7 +528,12 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       }
       skipped += 1
     }
-    if (skipped > 0) {
+    if (skipped > 0 && skipped === sources.length) {
+      // Every item failing is a mapper that broke (a renamed field of the library), not an odd item
+      this.logger.error(
+        `[${this.sessionId}] ${what}: every item (${skipped}) left out of the listing (${[...reasons].join(', ')})`
+      )
+    } else if (skipped > 0) {
       this.logger.warn(
         `[${this.sessionId}] ${what}: ${skipped} of ${sources.length} items left out of the listing (${[...reasons].join(', ')})`
       )
@@ -870,7 +890,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       forward('vote_update', () => ({ event: 'vote_update', data: mapPollVote(vote) }))
     })
     client.on('call', call => {
-      this.rememberCall(call)
+      if (typeof call.id === 'string' && call.id !== '') this.rememberCall(call)
       forward('call', () => ({ event: 'call', data: mapCall(call) }))
     })
     // RemoteAuth is not used, so this never fires; it is wired so that no wwebjs event is left out
@@ -1117,7 +1137,8 @@ export class WwebjsAdapter implements WhatsAppClientPort {
           chatId,
           await this.toContent(content),
           this.toSendOptions(options)
-        )
+        ),
+        chatId
       )
     )
   }
@@ -1130,7 +1151,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('sendChannelMessage', async () => {
       const channel = await this.channelById('sendChannelMessage', channelId)
       const body = content.type === 'text' ? content.body : await this.media(content.media)
-      return this.sent('sendChannelMessage', await channel.sendMessage(body, { ...options }))
+      return this.sent(
+        'sendChannelMessage',
+        await channel.sendMessage(body, { ...options }),
+        channelId
+      )
     })
   }
 

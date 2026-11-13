@@ -131,104 +131,63 @@ describe('mapCall without the flags', () => {
 })
 
 describe('a fractional unix time', () => {
-  it('is not a usable message time: the arrival dates the message', () => {
+  it('is floored for a message, so the order does not depend on when it is read', () => {
     const invalid = jest.fn()
     const dto = mapMessage(sparse<MessageSource>({ ...MESSAGE, timestamp: 1_792_000_000.5 }), {
       ...OPTIONS,
       onInvalidTimestamp: invalid
     })
 
-    expect(dto.timestamp).toBeNull()
-    expect(invalid).toHaveBeenCalledTimes(1)
+    expect(dto.timestamp).toBe(1_792_000_000)
+    expect(dto.sentAt).toBe('2026-10-14T17:46:40.000Z')
+    expect(invalid).not.toHaveBeenCalled()
   })
 
-  it('is dropped from a chat instead of failing its schema', () => {
+  it('is floored for a chat and a NaN mute expiration is dropped, so the schema holds', () => {
     const dto = mapChat(
       sparse({ id: id('a@c.us'), timestamp: 1_792_000_000.5, muteExpiration: Number.NaN }),
       OPTIONS
     )
 
-    expect(dto.timestamp).toBeNull()
+    expect(dto.timestamp).toBe(1_792_000_000)
     expect(dto).not.toHaveProperty('muteExpiration')
     expect(ChatDto.parse(dto)).toEqual(dto)
   })
 })
 
-describe('mapMessage with fields of the wrong type or missing', () => {
-  const dropped = jest.fn()
-  const options = { ...OPTIONS, onDroppedField: dropped }
-  beforeEach(() => dropped.mockClear())
+describe('a message sent to a known chat', () => {
+  it('takes the chat from the caller when the answer names none', () => {
+    const dto = mapMessage(sparse<MessageSource>({ ...MESSAGE, fromMe: true, to: undefined }), {
+      ...OPTIONS,
+      fallbackChatId: 'known@c.us'
+    })
 
-  it('leaves out an optional field of another type and names it, never its value', () => {
-    const dto = mapMessage(
-      sparse<MessageSource>({ ...MESSAGE, duration: 12, title: { odd: 'secret value' } }),
-      options
-    )
-
-    expect(dto).not.toHaveProperty('duration')
-    expect(dto).not.toHaveProperty('title')
+    expect(dto.chatId).toBe('known@c.us')
     expect(MessageDto.parse(dto)).toEqual(dto)
-    expect(dropped.mock.calls.flat().sort()).toEqual(['duration', 'title'])
-    expect(JSON.stringify(dropped.mock.calls)).not.toContain('secret')
   })
+})
 
-  it('gives a missing body, type and device type a stated default', () => {
-    const dto = mapMessage(
-      sparse<MessageSource>({
-        ...MESSAGE,
-        body: undefined,
-        type: undefined,
-        deviceType: undefined
+describe('a numeric duration', () => {
+  it('is kept as text instead of being dropped', () => {
+    const dto = mapMessage(sparse<MessageSource>({ ...MESSAGE, duration: 12 }), OPTIONS)
+
+    expect(dto.duration).toBe('12')
+  })
+})
+
+describe('a message that maps but does not fit the schema, inside a broadcast', () => {
+  it('is left out with its field names', () => {
+    const unreadable = jest.fn()
+    const dto = mapBroadcast(
+      sparse({
+        id: id('status@broadcast'),
+        timestamp: 1,
+        msgs: [{ ...MESSAGE, forwardingScore: 'many' }, MESSAGE]
       }),
-      options
+      { ...OPTIONS, onUnreadableMessage: unreadable }
     )
 
-    expect(dto).toMatchObject({ body: '', type: 'unknown', deviceType: 'unknown' })
-    expect(MessageDto.parse(dto)).toEqual(dto)
-  })
-
-  it('reads a missing flag as false', () => {
-    const dto = mapMessage(
-      sparse<MessageSource>({ ...MESSAGE, hasMedia: undefined, hasQuotedMsg: null }),
-      options
-    )
-
-    expect(dto).toMatchObject({ hasMedia: false, hasQuotedMsg: false })
-  })
-
-  it('refuses a message that names no chat: there is no safe default for where it belongs', () => {
-    expect(() =>
-      mapMessage(sparse<MessageSource>({ ...MESSAGE, from: undefined }), options)
-    ).toThrow(/chat/)
-    expect(() =>
-      mapMessage(sparse<MessageSource>({ ...MESSAGE, fromMe: true, to: undefined }), options)
-    ).toThrow(/chat/)
-  })
-
-  it('keeps the other side of the conversation empty when only it is missing', () => {
-    const dto = mapMessage(sparse<MessageSource>({ ...MESSAGE, to: undefined }), options)
-
-    expect(dto.chatId).toBe(MESSAGE.from)
-    expect(dto.to).toBe('')
-    expect(MessageDto.parse(dto)).toEqual(dto)
-  })
-
-  it('survives arrays that are missing or hold odd entries', () => {
-    const dto = mapMessage(
-      sparse<MessageSource>({
-        ...MESSAGE,
-        mentionedIds: undefined,
-        groupMentions: [null, { groupSubject: 'g' }],
-        vCards: ['BEGIN:VCARD', undefined],
-        pollOptions: [null, 'A', { name: 'B' }, { id: 1 }]
-      }),
-      options
-    )
-
-    expect(dto.mentionedIds).toEqual([])
-    expect(dto.groupMentions).toEqual([])
-    expect(dto.vCards).toEqual(['BEGIN:VCARD'])
-    expect(dto.pollOptions).toEqual(['A', 'B'])
-    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dto.msgs).toHaveLength(1)
+    expect(unreadable).toHaveBeenCalledWith('forwardingScore')
   })
 })

@@ -100,7 +100,7 @@ call or message made a whole listing a `500`.
 - **Group and broadcast gaps:** `GroupChatDto.createdAt` is optional (an Invalid Date is left out),
   `participants` defaults to `[]`; a broadcast without `msgs` has none, `totalCount` is the number of
   statuses it holds and `unreadCount` 0; an order without `products` has none; a call flag that is
-  missing is false. A unix time must be a whole number (a fraction would fail the `.int()` of the DTO).
+  missing is false. A fractional unix time is floored (the DTOs are `.int()`, and the order buffer must give a message the same second on every read). A numeric `duration` is kept as text. A message sent to a known chat takes that chat when the answer names none (it went out). Message listings (`fetchMessages`, search, pinned) leave out an unmappable message like the others; a listing that leaves out every item logs at error level (a mapper that broke, not an odd item).
 - **An action that happened is never reported as failed:** the outcomes of `createGroup` and
   `addParticipants` are read field by field (all optional in the DTO); an odd answer is delivered with
   what is known and logged.

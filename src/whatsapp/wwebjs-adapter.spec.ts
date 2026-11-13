@@ -836,6 +836,7 @@ describe('calls', () => {
 
     it('does the same for contacts, channels, labels and broadcasts', async () => {
       const warn = warnings()
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation()
       const h = harness()
       stub(h.client, 'getContacts').mockResolvedValue([
         { id: wid('1@c.us'), isBusiness: false },
@@ -852,13 +853,40 @@ describe('calls', () => {
       ])
       ready(h)
 
-      expect((await h.adapter.getContacts()).length).toBeLessThanOrEqual(1)
+      expect(await h.adapter.getContacts()).toHaveLength(1)
       await expect(h.adapter.getChannels()).resolves.toEqual([])
       expect(await h.adapter.getLabels()).toHaveLength(1)
       expect(await h.adapter.getBroadcasts()).toHaveLength(1)
-      expect(
-        warn.mock.calls.flat().filter(line => /left out of the listing/.test(String(line)))
-      ).toHaveLength(4)
+      for (const what of ['contacts', 'labels', 'broadcasts']) {
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${what}: 1 of`))
+      }
+      // The only channel failing is every item of its listing: a broken mapper, said at error level
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('channels: every item'))
+    })
+
+    it('logs at error level when it leaves out every item, which is a broken mapper, not an odd item', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation()
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      const h = harness()
+      stub(h.client, 'getChats').mockResolvedValue([{ id: undefined }, { id: undefined }])
+      ready(h)
+
+      await expect(h.adapter.getChats()).resolves.toEqual([])
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('every item'))
+    })
+
+    it('leaves out one odd message of a message listing too', async () => {
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      const h = harness()
+      stub(h.client, 'getChatById').mockResolvedValue({
+        ...waChat(),
+        fetchMessages: jest
+          .fn()
+          .mockResolvedValue([{ id: wid('x'), from: undefined, fromMe: false }])
+      })
+      ready(h)
+
+      await expect(h.adapter.fetchMessages('a@c.us')).resolves.toEqual([])
     })
 
     it('does not hide a failure of the library behind an empty listing', async () => {
@@ -1511,10 +1539,26 @@ describe('sending', () => {
     }
   )
 
+  it('delivers a sent message whose answer names no chat, under the chat it was sent to', async () => {
+    const h = harness()
+    stub(h.client, 'sendMessage').mockResolvedValue({
+      id: wid('true_c@c.us_3EB0'),
+      fromMe: true,
+      body: 'x',
+      type: 'chat',
+      timestamp: 1_792_000_000
+    })
+    ready(h)
+
+    await expect(
+      h.adapter.sendMessage('c@c.us', { type: 'text', body: 'x' })
+    ).resolves.toMatchObject({ chatId: 'c@c.us' })
+  })
+
   it('reports a send whose result cannot be read as an unknown outcome, never as not sent', async () => {
     const h = harness()
     jest.spyOn(Logger.prototype, 'warn').mockImplementation()
-    stub(h.client, 'sendMessage').mockResolvedValue({ id: wid('broken') })
+    stub(h.client, 'sendMessage').mockResolvedValue({ id: undefined })
     ready(h)
 
     const error: unknown = await h.adapter

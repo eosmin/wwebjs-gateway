@@ -107,10 +107,11 @@ function pick<T extends object, K extends keyof T>(source: T, keys: readonly K[]
   return out as Pick<T, K> // every key was copied from `source`, so the partial is complete
 }
 
-type FieldKind = 'string' | 'boolean' | 'number' | 'unixSeconds' | 'numbers' | 'any'
+type FieldKind = 'string' | 'text' | 'boolean' | 'number' | 'unixSeconds' | 'numbers' | 'any'
 
 const KIND_CHECKS: Record<FieldKind, (value: unknown) => boolean> = {
   string: value => typeof value === 'string',
+  text: value => typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)),
   boolean: value => typeof value === 'boolean',
   number: value => typeof value === 'number' && Number.isFinite(value),
   unixSeconds: value => typeof value === 'number' && isUsableUnixTime(value),
@@ -131,7 +132,9 @@ function pickTyped<T extends object>(
   for (const [key, kind] of Object.entries(kinds) as [keyof T & string, FieldKind][]) {
     const value = source[key]
     if (value === undefined || value === null) continue
-    if (KIND_CHECKS[kind](value)) out[key] = value
+    // A number where text is expected (an audio duration) is kept as its text
+    if (KIND_CHECKS[kind](value))
+      out[key] = (kind === 'text' ? String(value) : value) as T[typeof key]
     else onDropped?.(key)
   }
   return out
@@ -404,12 +407,14 @@ export interface MessageMapOptions {
   // Called with the NAME of an optional field WhatsApp filled with another type (never the value):
   // the field is left out of the message instead of failing its schema
   onDroppedField?: (field: string) => void
+  // The chat a sent message went to, which the caller knows: used when the answer names none
+  fallbackChatId?: string
 }
 
 // The optional fields copied as they come, and the type each must have to be copied
 const MESSAGE_OPTIONAL_KINDS = {
   author: 'string',
-  duration: 'string',
+  duration: 'text',
   mediaKey: 'string',
   orderId: 'string',
   title: 'string',
@@ -529,7 +534,9 @@ function usableTimestamp(
   options: MessageMapOptions
 ): number | null {
   if (value === undefined || value === null) return null
-  if (isUsableUnixTime(value)) return value
+  // A fraction is floored: the order buffer sorts by this second, and a message must keep its place
+  const whole = Number.isFinite(value) ? Math.floor(value) : value
+  if (isUsableUnixTime(whole)) return whole
   options.onInvalidTimestamp?.()
   return null
 }
@@ -544,8 +551,9 @@ function mapMessageFields(source: MessageSource, options: MessageMapOptions): Me
   const timestamp = usableTimestamp(source.timestamp, options)
   // A message is placed by its chat: without one there is no safe default (it would be stored and
   // published under the wrong conversation), so it is refused and the caller leaves it out
-  const chatId = source.fromMe === true ? source.to : source.from
-  if (typeof chatId !== 'string' || chatId === '') {
+  const named = source.fromMe === true ? source.to : source.from
+  const chatId = typeof named === 'string' && named !== '' ? named : options.fallbackChatId
+  if (chatId === undefined || chatId === '') {
     throw new Error('A message names no chat (from or to is missing)')
   }
   const message: MessageDto = {
@@ -832,7 +840,9 @@ export interface ChatSource extends Omit<
 }
 
 const usableChatTime = (value: number | null | undefined): number | null =>
-  value !== undefined && value !== null && isUsableUnixTime(value) ? value : null
+  value !== undefined && value !== null && isUsableUnixTime(Math.floor(value))
+    ? Math.floor(value)
+    : null
 
 const CHAT_FIELDS = ['name'] as const satisfies readonly (keyof ChatSource)[]
 
