@@ -715,6 +715,75 @@ describe('messages API (integration)', () => {
       expect(response.headers['x-content-type-options']).toBe('nosniff')
     })
 
+    // H-LIVE-08: the type of a voice note arrives with its codec, and what the sender writes after the
+    // bare type never decides how the response is served nor reaches its headers
+    it.each([
+      ['audio/ogg; codecs=opus', 'audio/ogg'],
+      ['Image/JPEG', 'image/jpeg'],
+      ['image/jpeg; charset=utf-8', 'image/jpeg']
+    ])('serves %j inline as the bare type %j', async (mimetype, served) => {
+      client().script('downloadMedia', () => ({
+        mimetype,
+        data: Buffer.from('bytes').toString('base64'),
+        filename: 'v.bin'
+      }))
+
+      const response = await call('GET', `/v1/sessions/${id}/${messagePath}/media`)
+
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-type']).toBe(served)
+      expect(response.headers['content-disposition']).toBe('inline; filename="v.bin"')
+      expect(response.headers['x-content-type-options']).toBe('nosniff')
+      expect(response.headers['cache-control']).toBe('private, no-store')
+      expect(response.headers['content-security-policy']).toBe("sandbox; default-src 'none'")
+    })
+
+    it.each([
+      'text/html',
+      'image/svg+xml',
+      'application/octet-stream',
+      'text/html; x=image/jpeg',
+      'audio/ogg;;',
+      '',
+      'audio/ogg\r\nSet-Cookie: a=b',
+      'image/jpeg\u0000'
+    ])('hands %j over as an opaque download', async mimetype => {
+      client().script('downloadMedia', () => ({
+        mimetype,
+        data: Buffer.from('bytes').toString('base64'),
+        filename: 'x.bin'
+      }))
+
+      const response = await call('GET', `/v1/sessions/${id}/${messagePath}/media`)
+
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-type']).toBe('application/octet-stream')
+      expect(response.headers['content-disposition']).toBe('attachment; filename="x.bin"')
+      expect(response.headers['set-cookie']).toBeUndefined()
+      expect(response.headers['x-content-type-options']).toBe('nosniff')
+    })
+
+    it.each([
+      ['a"; x=y.pdf', 'a__ x_y.pdf'],
+      ['a\r\nSet-Cookie: z=1.pdf', 'a__Set-Cookie_ z_1.pdf'],
+      ['caf\u00e9\\.pdf', 'caf__.pdf']
+    ])(
+      'cleans the file name %j of the sender before it reaches the header',
+      async (filename, cleaned) => {
+        client().script('downloadMedia', () => ({
+          mimetype: 'application/pdf',
+          data: Buffer.from('%PDF-1.7').toString('base64'),
+          filename
+        }))
+
+        const response = await call('GET', `/v1/sessions/${id}/${messagePath}/media`)
+
+        expect(response.statusCode).toBe(200)
+        expect(response.headers['content-disposition']).toBe(`inline; filename="${cleaned}"`)
+        expect(response.headers['set-cookie']).toBeUndefined()
+      }
+    )
+
     it('404s when the media is gone', async () => {
       client().script('downloadMedia', () => null)
 
