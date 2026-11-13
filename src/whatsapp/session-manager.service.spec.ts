@@ -564,6 +564,113 @@ describe('SessionManager status machine', () => {
     expect((await built.metrics.metrics.logouts.get()).values).toEqual([])
   })
 
+  describe('the WhatsApp Web build of each session', () => {
+    const buildOf = async (built: Built): Promise<Record<string, number>> => {
+      const metric = await built.metrics.metrics.waWebBuild.get()
+      const counts: Record<string, number> = {}
+      for (const value of metric.values) counts[String(value.labels['version'])] = value.value
+      return counts
+    }
+    const warnings = (warn: jest.SpyInstance): string =>
+      warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n')
+
+    it('counts the sessions that run a build and clears it when the session leaves ready', async () => {
+      const built = build()
+      built.sessions.seed({ id: ID, linkedAt: NOW })
+      const client = await startSession(built)
+      client.script('getWWebVersion', () => '2.3000.1054292354')
+
+      await makeReady(built, client)
+      expect(await buildOf(built)).toEqual({ '2.3000.1054292354': 1 })
+
+      client.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
+      await flush()
+      expect(await buildOf(built)).toEqual({})
+    })
+
+    it('clears the build of a session that is removed', async () => {
+      const built = build()
+      built.sessions.seed({ id: ID, linkedAt: NOW })
+      const client = await startSession(built)
+      client.script('getWWebVersion', () => '2.3000.5')
+      await makeReady(built, client)
+      expect(await buildOf(built)).toEqual({ '2.3000.5': 1 })
+
+      await built.manager.remove(ID)
+
+      expect(await buildOf(built)).toEqual({})
+    })
+
+    it('labels a build that is not of the known form as unknown', async () => {
+      const built = build()
+      built.sessions.seed({ id: ID, linkedAt: NOW })
+      const client = await startSession(built)
+      client.script('getWWebVersion', () => 'https://x.test/?q=15551234567')
+
+      await makeReady(built, client)
+
+      expect(await buildOf(built)).toEqual({ unknown: 1 })
+    })
+
+    it('survives a page that cannot say its build', async () => {
+      const built = build()
+      built.sessions.seed({ id: ID, linkedAt: NOW })
+      const client = await startSession(built)
+      client.script('getWWebVersion', () => Promise.reject(new Error('detached')))
+
+      await makeReady(built, client)
+
+      expect(built.manager.status(ID)).toBe('ready')
+      expect(await buildOf(built)).toEqual({})
+    })
+
+    it('warns when the build differs from the one the gateway saw before', async () => {
+      const built = build()
+      built.sessions.seed({ id: ID, linkedAt: NOW })
+      const warn = jest.spyOn(Logger.prototype, 'warn')
+      const first = await startSession(built)
+      first.script('getWWebVersion', () => '2.3000.1')
+      await makeReady(built, first)
+      expect(warnings(warn)).not.toContain('build changed')
+
+      first.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
+      await flush()
+      await jest.advanceTimersByTimeAsync(600_000)
+      const second = built.factory.clients[1]
+      if (!second) throw new Error('the session did not reconnect')
+      second.script('getWWebVersion', () => '2.3000.2')
+      await makeReady(built, second)
+
+      expect(warnings(warn)).toContain('WhatsApp Web build changed from 2.3000.1 to 2.3000.2')
+    })
+
+    it('warns when the build is not the verified one, and says nothing when it is or none is set', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn')
+      const other = build({ WWEB_VERIFIED_BUILD: '2.3000.9' })
+      other.sessions.seed({ id: ID, linkedAt: NOW })
+      const client = await startSession(other)
+      client.script('getWWebVersion', () => '2.3000.1')
+      await makeReady(other, client)
+      expect(warnings(warn)).toContain('is not the verified build 2.3000.9')
+
+      warn.mockClear()
+      const same = build({ WWEB_VERIFIED_BUILD: '2.3000.1' })
+      same.sessions.seed({ id: ID, linkedAt: NOW })
+      const sameClient = await startSession(same)
+      sameClient.script('getWWebVersion', () => '2.3000.1')
+      await makeReady(same, sameClient)
+      expect(warnings(warn)).not.toContain('verified build')
+
+      warn.mockClear()
+      const none = build()
+      none.sessions.seed({ id: ID, linkedAt: NOW })
+      const noneClient = await startSession(none)
+      noneClient.script('getWWebVersion', () => '2.3000.1')
+      await makeReady(none, noneClient)
+      expect(warnings(warn)).not.toContain('verified build')
+    })
+  })
+
   it('logs the reason of a disconnect that is not a logout too', async () => {
     const built = build()
     built.sessions.seed({ id: ID, linkedAt: NOW })

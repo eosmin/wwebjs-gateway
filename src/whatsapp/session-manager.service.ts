@@ -38,6 +38,7 @@ import {
   wasQuarantinedWithin
 } from './saved-login.js'
 import { WaAuthStalledError, WaProfileLockedError } from './wa-errors.js'
+import { buildLabel } from './wa-web-build.js'
 import {
   WHATSAPP_CLIENT_FACTORY,
   type ClientEvent,
@@ -288,6 +289,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
         throw error
       }
       this.statuses.delete(id)
+      if (this.builds.delete(id)) this.refreshBuildGauge()
       this.refreshGauge()
       this.pipeline.forget(id)
       await this.deleteRedisKeys(id)
@@ -890,6 +892,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     const row = await this.sessions.findById(id)
     if (row && !row.linkedAt) patch.linkedAt = new Date()
     await this.transition(id, 'ready', patch)
+    await this.recordBuild(id, client)
     await this.applySettings(id, client, parseSettings(row?.settings))
   }
 
@@ -988,7 +991,45 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
 
   private setKnownStatus(id: string, status: SessionStatus): void {
     this.statuses.set(id, status)
+    if (status !== 'ready' && this.builds.delete(id)) this.refreshBuildGauge()
     this.refreshGauge()
+  }
+
+  // The WhatsApp Web build each ready session runs, as a label; the last build seen and the builds
+  // already reported as not the verified one (a build is reported once)
+  private readonly builds = new Map<string, string>()
+  private lastBuild: string | undefined
+  private readonly unverifiedReported = new Set<string>()
+
+  private async recordBuild(id: string, client: WhatsAppClientPort): Promise<void> {
+    try {
+      const build = buildLabel(
+        await withTimeout(client.getWWebVersion(), CALL_TIMEOUT_MS, 'getWWebVersion')
+      )
+      this.builds.set(id, build)
+      this.refreshBuildGauge()
+      if (build === 'unknown') return
+      if (this.lastBuild !== undefined && this.lastBuild !== build) {
+        this.logger.warn(`WhatsApp Web build changed from ${this.lastBuild} to ${build}`)
+      }
+      this.lastBuild = build
+      const verified = this.config.WWEB_VERIFIED_BUILD
+      if (verified !== undefined && verified !== build && !this.unverifiedReported.has(build)) {
+        this.unverifiedReported.add(build)
+        this.logger.warn(
+          `WhatsApp Web build ${build} is not the verified build ${verified}: the patch of whatsapp-web.js and the live checks were made on the verified one`
+        )
+      }
+    } catch (error: unknown) {
+      this.logger.warn(`[${id}] Reading the WhatsApp Web build failed (${errorKind(error)})`)
+    }
+  }
+
+  private refreshBuildGauge(): void {
+    const counts = new Map<string, number>()
+    for (const build of this.builds.values()) counts.set(build, (counts.get(build) ?? 0) + 1)
+    this.metrics.metrics.waWebBuild.reset()
+    for (const [version, count] of counts) this.metrics.metrics.waWebBuild.set({ version }, count)
   }
 
   private refreshGauge(): void {
