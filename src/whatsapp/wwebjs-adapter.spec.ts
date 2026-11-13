@@ -313,6 +313,134 @@ describe('events', () => {
     expect(lastEvent(broken.events)).toEqual({ event: 'disconnected', data: { reason: 'LOGOUT' } })
   })
 
+  // F25 (H-LIVE-05): WhatsApp Web logs a session out on its own and says why in the address and the
+  // console of its page; the gateway keeps the short token and a few fixed lines, nothing else
+  describe('the reason of a logout WhatsApp Web decided', () => {
+    const pageAt = (address: string): EventEmitter & { url: () => string } =>
+      Object.assign(new EventEmitter(), { url: () => address })
+    const consoleLine = (page: EventEmitter, text: string): void => {
+      page.emit('console', { text: () => text })
+    }
+    const logged = (spy: { mock: { calls: unknown[][] } }): string =>
+      spy.mock.calls.map(call => String(call[0])).join('\n')
+
+    it('logs the reason token of the address, and never the address', () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      const h = harness()
+      Object.assign(h.client, {
+        pupPage: pageAt(
+          'https://web.whatsapp.com/?post_logout=1&logout_reason=client_fatal&x=secret'
+        )
+      })
+
+      h.client.emit('disconnected', 'LOGOUT')
+
+      expect(logged(warn)).toContain('logoutReason=client_fatal')
+      expect(logged(warn)).not.toContain('secret')
+      expect(logged(warn)).not.toContain('web.whatsapp.com')
+    })
+
+    it('leaves the reason out when it is not a short token', () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      const h = harness()
+      Object.assign(h.client, {
+        pupPage: pageAt('https://web.whatsapp.com/?post_logout=1&logout_reason=15551234567%40c.us')
+      })
+
+      h.client.emit('disconnected', 'LOGOUT')
+
+      expect(logged(warn)).toContain('postLogoutUrl=true')
+      expect(logged(warn)).not.toContain('logoutReason')
+      expect(logged(warn)).not.toContain('1555')
+    })
+
+    it('logs the lines of the page about a reload while the session is not ready, and no other', () => {
+      const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
+      const h = harness()
+      const page = pageAt('https://web.whatsapp.com/')
+      Object.assign(h.client, { pupPage: page })
+      h.client.emit('qr', 'x')
+
+      consoleLine(page, '[reload] Updater.restart')
+      consoleLine(page, 'storage initialization error, logging out')
+      consoleLine(page, 'chat 15551234567 opened')
+
+      expect(logged(debug)).toContain('[reload] Updater.restart')
+      expect(logged(debug)).toContain('storage initialization error, logging out')
+      expect(logged(debug)).not.toContain('chat')
+    })
+
+    it('masks numbers and cuts the length of what it logs', () => {
+      const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
+      const h = harness()
+      const page = pageAt('https://web.whatsapp.com/')
+      Object.assign(h.client, { pupPage: page })
+      h.client.emit('qr', 'x')
+
+      consoleLine(page, `[reload] 15551234567@c.us ${'y'.repeat(400)}`)
+
+      expect(logged(debug)).not.toContain('15551234567')
+      expect(Math.max(...debug.mock.calls.map(call => String(call[0]).length))).toBeLessThan(260)
+    })
+
+    it('holds the lines of a running session and gives them back only when a logout follows', () => {
+      const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
+      const h = harness()
+      const page = pageAt('https://web.whatsapp.com/?post_logout=1')
+      Object.assign(h.client, { pupPage: page })
+      ready(h)
+
+      consoleLine(page, '[reload] Updater.restart')
+      expect(logged(debug)).not.toContain('Updater.restart')
+
+      h.client.emit('disconnected', 'LOGOUT')
+
+      expect(logged(debug)).toContain('[reload] Updater.restart')
+    })
+
+    it('stops after a fixed number of lines for a run that is not ready', () => {
+      const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
+      const h = harness()
+      const page = pageAt('https://web.whatsapp.com/')
+      Object.assign(h.client, { pupPage: page })
+      h.client.emit('qr', 'x')
+
+      for (let i = 0; i < 200; i += 1) consoleLine(page, `[reload] attempt ${i}`)
+
+      expect(debug.mock.calls.filter(call => String(call[0]).includes('[reload]'))).toHaveLength(50)
+    })
+
+    it('gives the budget of lines back when the session becomes ready again', () => {
+      const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation()
+      const h = harness()
+      const page = pageAt('https://web.whatsapp.com/')
+      Object.assign(h.client, { pupPage: page })
+      h.client.emit('qr', 'x')
+      for (let i = 0; i < 80; i += 1) consoleLine(page, `[reload] first ${i}`)
+
+      ready(h)
+      h.client.emit('disconnected', 'NAVIGATION')
+      for (let i = 0; i < 80; i += 1) consoleLine(page, `[reload] second ${i}`)
+
+      expect(debug.mock.calls.filter(call => String(call[0]).includes('second'))).toHaveLength(50)
+    })
+
+    it('survives a console message that cannot be read', () => {
+      const h = harness()
+      const page = pageAt('https://web.whatsapp.com/')
+      Object.assign(h.client, { pupPage: page })
+      h.client.emit('qr', 'x')
+
+      expect(() =>
+        page.emit('console', {
+          text: () => {
+            throw new Error('detached')
+          }
+        })
+      ).not.toThrow()
+    })
+  })
+
   it('maps what wwebjs emits to payloads that satisfy the event schemas', () => {
     const h = harness()
     const { client, events } = h
