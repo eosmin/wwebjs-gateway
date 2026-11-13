@@ -264,8 +264,8 @@ export class GroupsController {
     scope: 'manage',
     summary: 'Add, remove, promote or demote participants',
     description:
-      'One action on a list of user ids. `add` answers per participant (a participant WhatsApp cannot add gets an invite when `options.autoSendInviteV4` is true); the other three answer the `status` WhatsApp gave. Needs an admin account. At most 256 ids per call.',
-    errors: ON_GROUP,
+      'One action on a list of user ids. `add` answers per participant (a participant WhatsApp cannot add gets an invite when `options.autoSendInviteV4` is true); the other three answer the `status` WhatsApp gave. Needs an admin account. At most 256 ids per call. **`add` is off by default** (`ENABLE_ADD_PARTICIPANTS=false`): it answers `501 UNSUPPORTED_OPERATION` without calling WhatsApp, as a precaution, because on two test accounts WhatsApp logged the account out right after an add (the cause is not proven). `remove`, `promote` and `demote` are always on.',
+    errors: [...ON_GROUP, 'UNSUPPORTED_OPERATION'],
     examples: {
       request: { action: 'add', participants: [USER_ID], options: { autoSendInviteV4: false } },
       response: {

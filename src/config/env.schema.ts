@@ -124,6 +124,9 @@ export const envSchema = z
     RATE_LIMIT_MAX: count(300, { min: 1 }).describe(
       'Requests per minute allowed per API key and, separately, per client address'
     ),
+    ENABLE_ADD_PARTICIPANTS: flag(false).describe(
+      'Allow adding participants to a group (groups.participants with action add; remove, promote and demote are always on). Off by default as a precaution: on two test accounts WhatsApp logged the account out and then restricted it right after an add with WhatsApp Web 2.3000.1054445547 and whatsapp-web.js 1.34.8; the cause is not proven (a page error, a reload for a new WhatsApp Web build, or a defence of the server). Turn it on only with a disposable test account'
+    ),
     ENABLE_DOCS: optionalFlag().describe(
       'Serve Swagger UI and the OpenAPI JSON; when unset, true except in production, where true is refused'
     ),

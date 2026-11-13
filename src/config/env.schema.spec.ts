@@ -77,6 +77,7 @@ const DEFAULTS = {
   SESSION_MAX_PER_DAY: 1500,
   DUPLICATE_RECIPIENTS_THRESHOLD: 5,
   DUPLICATE_WINDOW_MINUTES: 10,
+  ENABLE_ADD_PARTICIPANTS: false,
   WARMUP_DAYS: 14,
   WARMUP_START_FRACTION: 0.1,
   UNREACHABLE_STREAK: 5,
@@ -323,7 +324,8 @@ describe('envSchema bounds and edges', () => {
     'INBOUND_ORDERING_ENABLED',
     'INCLUDE_RAW',
     'STORE_MESSAGE_BODIES',
-    'ENABLE_DOCS'
+    'ENABLE_DOCS',
+    'ENABLE_ADD_PARTICIPANTS'
   ])('%s accepts only "true" or "false"', key => {
     expect(envSchema.safeParse({ ...valid, [key]: 'false' }).success).toBe(true)
     expect(envSchema.safeParse({ ...valid, [key]: '1' }).success).toBe(false)

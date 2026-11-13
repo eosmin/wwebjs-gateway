@@ -1,6 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { NotFoundError, ValidationError, WhatsAppError } from '../common/errors.js'
+import {
+  NotFoundError,
+  UnsupportedOperationError,
+  ValidationError,
+  WhatsAppError
+} from '../common/errors.js'
+import { APP_CONFIG } from '../config/config.module.js'
+import type { AppConfig } from '../config/env.schema.js'
 import type { GroupChatDto, MembershipRequestDto } from '../types/dto.js'
 import type {
   CreateGroupBody,
@@ -38,6 +45,7 @@ const isGroup = (chat: AnyChatDto): chat is GroupChatDto =>
 @Injectable()
 export class GroupsService {
   constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(SessionManager) private readonly sessions: SessionManager,
     @Inject(MediaResolverService) private readonly media: MediaResolverService
   ) {}
@@ -151,6 +159,16 @@ export class GroupsService {
     groupId: string,
     { action, participants, options }: GroupParticipantsBody
   ): Promise<ParticipantsOutcome> {
+    // Before the client is looked up, let alone called: two test accounts were logged out by
+    // WhatsApp right after an add (cause not proven), so an add is off unless the owner turns it on.
+    // remove, promote and demote use another WhatsApp Web module and stay as they were.
+    if (action === 'add' && !this.config.ENABLE_ADD_PARTICIPANTS) {
+      throw new UnsupportedOperationError(
+        'UNSUPPORTED_OPERATION',
+        'groups.participants add is disabled: it was followed by a logout of the account with the current WhatsApp Web build; set ENABLE_ADD_PARTICIPANTS=true to try',
+        { setting: 'ENABLE_ADD_PARTICIPANTS' }
+      )
+    }
     const client = this.sessions.requireReady(sessionId)
     switch (action) {
       case 'add': {

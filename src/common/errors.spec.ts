@@ -10,6 +10,7 @@ import {
   NotFoundError,
   UnauthorizedError,
   UnprocessableError,
+  UnsupportedOperationError,
   ValidationError,
   WhatsAppError
 } from './errors.js'
@@ -38,6 +39,7 @@ describe('ERROR_DEFINITIONS', () => {
     ['POLICY_BLOCKED', 422],
     ['WHATSAPP_ERROR', 502],
     ['WHATSAPP_TIMEOUT', 504],
+    ['UNSUPPORTED_OPERATION', 501],
     ['INTERNAL', 500]
   ] as const)('%s answers %d', (code, status) => {
     expect(ERROR_DEFINITIONS[code].status).toBe(status)
@@ -85,6 +87,12 @@ describe('the subclasses', () => {
     ],
     ['WhatsAppError', new WhatsAppError('WHATSAPP_ERROR'), 'WHATSAPP_ERROR', 502],
     ['WhatsAppError', new WhatsAppError('WHATSAPP_TIMEOUT'), 'WHATSAPP_TIMEOUT', 504],
+    [
+      'UnsupportedOperationError',
+      new UnsupportedOperationError('UNSUPPORTED_OPERATION'),
+      'UNSUPPORTED_OPERATION',
+      501
+    ],
     ['InternalError', new InternalError('INTERNAL'), 'INTERNAL', 500]
   ])('%s(%s)', (name, error, code, status) => {
     expect(error).toBeInstanceOf(AppError)
