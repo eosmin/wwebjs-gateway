@@ -171,7 +171,8 @@ Everything here is proven in `omnichannel-platform` and is reproduced on purpose
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:integration": "jest -c jest.integration.config.cts --runInBand --passWithNoTests",
+    "test:integration": "jest -c jest.integration.config.cts --runInBand",
+    "test:integration:cov": "jest -c jest.integration.config.cts --runInBand --coverage",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -696,7 +697,7 @@ jobs:
       - name: Migrate an empty database
         run: pnpm db:migrate
       - name: Integration suites
-        run: pnpm test:integration
+        run: pnpm test:integration:cov
       - name: The built service starts and answers
         run: |
           pnpm build
