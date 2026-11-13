@@ -1,4 +1,6 @@
-import { ConflictError } from '../common/errors.js'
+import { TEST_ENV } from '../../tests/helpers/env.js'
+import { ConflictError, ForbiddenError } from '../common/errors.js'
+import { parseEnv } from '../config/env.schema.js'
 import type { MessageDto } from '../types/dto.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
 import type { WhatsAppClientPort } from '../whatsapp/whatsapp-client.port.js'
@@ -16,10 +18,13 @@ const POLL = { id: 'm', type: 'poll_creation', pollOptions: ['Martes', 'Jueves']
 const EVENT = { id: 'm', type: 'scheduled_event_creation', fromMe: true } as MessageDto
 const START = '2026-02-01T18:00:00.000Z'
 
+const config = (env: Record<string, string> = {}) =>
+  parseEnv({ ...TEST_ENV, ENABLE_GROUP_WRITES: 'true', ...env })
+
 const build = (client: Partial<Record<keyof WhatsAppClientPort, jest.Mock>>) => {
   const requireReady = jest.fn(() => client)
   return {
-    service: new PollsEventsService({ requireReady } as unknown as SessionManager),
+    service: new PollsEventsService(config(), { requireReady } as unknown as SessionManager),
     requireReady
   }
 }
@@ -94,7 +99,7 @@ describe('PollsEventsService', () => {
     ],
     ['acceptGroupInvite', (s: PollsEventsService) => s.acceptGroupInvite('s', 'm')]
   ])('%s lets the error of a session that is not ready through', async (_name, run) => {
-    const service = new PollsEventsService({
+    const service = new PollsEventsService(config(), {
       requireReady: jest.fn(() => {
         throw new ConflictError('SESSION_NOT_READY', 'Session s is stopped, not ready')
       })
@@ -239,5 +244,18 @@ describe('PollsEventsService', () => {
       await expect(run()).rejects.toMatchObject({ code })
       expect(acceptGroupV4Invite).not.toHaveBeenCalled()
     })
+  })
+
+  it('refuses to accept a group invite with OPERATION_DISABLED, before the client, when group writes are off', async () => {
+    const requireReady = jest.fn()
+    const service = new PollsEventsService(config({ ENABLE_GROUP_WRITES: 'false' }), {
+      requireReady
+    } as unknown as SessionManager)
+
+    const refusal = service.acceptGroupInvite('s', 'm')
+
+    await expect(refusal).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(refusal).rejects.toMatchObject({ code: 'OPERATION_DISABLED', status: 403 })
+    expect(requireReady).not.toHaveBeenCalled()
   })
 })

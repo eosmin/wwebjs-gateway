@@ -26,6 +26,15 @@ Redis and BullMQ, in strict TypeScript.
 - **`.wwebjs_auth/` is an account credential.** Whoever has it can use the WhatsApp account. It is
   git-ignored and must never be committed, shared or backed up unprotected.
 
+## Production readiness and risks
+
+What can be said today, without claiming more than was checked:
+
+- **Group writes are off by default.** Creating a group, adding, removing, promoting or demoting participants, revoking an invite link and joining a group (`ENABLE_GROUP_WRITES=false`) answer `403 OPERATION_DISABLED` before WhatsApp is touched. Automating group creation or changes goes against the terms of WhatsApp and can get the account blocked; two disposable test accounts were. Reads, the events of groups, and changing the subject, description and settings of a group or leaving one stay on, and are writes that still carry a risk. See `docs/groups.md`.
+- **The official route.** For anything critical the official route is the WhatsApp Business API. This gateway uses an unofficial client: any use with a real number carries a risk of restriction. Never test with the production number.
+- **A patch on top of a WhatsApp Web build.** The gateway depends on a patch of `whatsapp-web.js` checked against WhatsApp Web `2.3000.1054445547`; a new build can break it. Pinning a build is not solved (`docs/sessions.md`).
+- **What was checked live and what was not**: see "Integration readiness and known limits" in `docs/IMPLEMENTATION_PLAN.md` (10.4).
+
 ## Run it
 
 Requirements: Node.js 24, Docker, and [gitleaks](https://github.com/gitleaks/gitleaks)
