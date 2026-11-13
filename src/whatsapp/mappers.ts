@@ -1,3 +1,5 @@
+import type { z } from 'zod'
+
 import { stripNul } from '../common/lib/nul.js'
 import { MessageDto as MessageSchema } from '../types/dto.js'
 import type {
@@ -833,6 +835,20 @@ const CHAT_FIELDS = ['name'] as const satisfies readonly (keyof ChatSource)[]
 
 // The last message of a chat is shown only when it fits its schema: one odd message must not
 // turn a listing of every chat into a 500 (ADR 0006). The message stays in `messages` and the events.
+// The fields (never the values) a schema rejected, looking inside a union too, where the issue holds the
+// issues of every branch
+export function failedFields(error: z.ZodError): string[] {
+  const names = new Set<string>()
+  const visit = (issues: readonly z.core.$ZodIssue[]): void => {
+    for (const issue of issues) {
+      if (issue.code === 'invalid_union') for (const branch of issue.errors) visit(branch)
+      else names.add(issue.path.join('.') || '(root)')
+    }
+  }
+  visit(error.issues)
+  return [...names]
+}
+
 function mapTolerantMessage(
   source: MessageSource,
   options: MessageMapOptions
@@ -841,9 +857,7 @@ function mapTolerantMessage(
     const message = mapMessage(source, options)
     const parsed = MessageSchema.safeParse(message)
     if (parsed.success) return message
-    options.onUnreadableMessage?.(
-      [...new Set(parsed.error.issues.map(issue => issue.path.join('.') || '(root)'))].join(', ')
-    )
+    options.onUnreadableMessage?.(failedFields(parsed.error).join(', '))
   } catch (error: unknown) {
     options.onUnreadableMessage?.(
       `(mapping failed: ${error instanceof Error ? error.name : typeof error})`

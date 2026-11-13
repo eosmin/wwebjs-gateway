@@ -536,11 +536,11 @@ describe('calls', () => {
     const getChats = stub(h.client, 'getChats')
     ready(h)
 
-    // A chat whose data the mapper cannot read
-    getChats.mockResolvedValueOnce([{ id: undefined }])
-    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaMappingError)
+    // A chat whose data the mapper cannot read (a listing leaves it out, see the listings below)
+    stub(h.client, 'getChatById').mockResolvedValueOnce({ id: undefined })
+    await expect(h.adapter.getChatById('x@c.us')).rejects.toBeInstanceOf(WaMappingError)
     expect(warn).toHaveBeenCalledWith(
-      expect.stringMatching(/^getChats failed \[MAPPING\] \(TypeError\)/)
+      expect.stringMatching(/^getChatById failed \[MAPPING\] \(TypeError\)/)
     )
 
     // A TypeError that comes out of the library itself is not a mapper of ours
@@ -785,6 +785,62 @@ describe('calls', () => {
     await expect(h.adapter.getBroadcasts()).resolves.toEqual([
       { id: '5215500000001@c.us', timestamp: 1, totalCount: 0, unreadCount: 0, msgs: [] }
     ])
+  })
+
+  describe('a listing with one item that cannot be delivered', () => {
+    const warnings = () => jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+
+    it('leaves out a chat the mapper cannot read and keeps the rest, logging field names only', async () => {
+      const warn = warnings()
+      const h = harness()
+      stub(h.client, 'getChats').mockResolvedValue([
+        waChat({ id: wid('5215500000001@c.us'), name: 'Secret Ana' }),
+        { id: undefined },
+        waChat({ id: wid('5215500000003@c.us'), unreadCount: 'many' })
+      ])
+      ready(h)
+
+      const chats = await h.adapter.getChats()
+
+      expect(chats.map(chat => chat.id)).toEqual(['5215500000001@c.us'])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('2 of 3'))
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/Secret|5215500000/)
+    })
+
+    it('does the same for contacts, channels, labels and broadcasts', async () => {
+      const warn = warnings()
+      const h = harness()
+      stub(h.client, 'getContacts').mockResolvedValue([
+        { id: wid('1@c.us'), isBusiness: false },
+        { id: undefined }
+      ])
+      stub(h.client, 'getChannels').mockResolvedValue([{ id: undefined }])
+      stub(h.client, 'getLabels').mockResolvedValue([
+        { id: '1', name: 'L', hexColor: '#fff' },
+        { id: undefined, name: undefined }
+      ])
+      stub(h.client, 'getBroadcasts').mockResolvedValue([
+        { id: wid('status@broadcast'), timestamp: 1, totalCount: 0, unreadCount: 0, msgs: [] },
+        { id: {} }
+      ])
+      ready(h)
+
+      expect((await h.adapter.getContacts()).length).toBeLessThanOrEqual(1)
+      await expect(h.adapter.getChannels()).resolves.toEqual([])
+      expect(await h.adapter.getLabels()).toHaveLength(1)
+      expect(await h.adapter.getBroadcasts()).toHaveLength(1)
+      expect(
+        warn.mock.calls.flat().filter(line => /left out of the listing/.test(String(line)))
+      ).toHaveLength(4)
+    })
+
+    it('does not hide a failure of the library behind an empty listing', async () => {
+      const h = harness()
+      stub(h.client, 'getChats').mockRejectedValue(new Error('page closed'))
+      ready(h)
+
+      await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
+    })
   })
 
   it('answers a chat the page does not have as not found, in the chat operations and the group ones', async () => {

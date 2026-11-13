@@ -60,7 +60,7 @@ export class ChatMessagesQueryDto extends createZodDto(ChatMessagesQuery) {}
 const LastMessage = z.object(MessageDto.shape).optional()
 const plain = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) =>
   z.object({ ...schema.shape, lastMessage: LastMessage })
-const AnyChat = z.union([plain(GroupChatDto), plain(ChannelDto), plain(ChatDto)])
+export const AnyChat = z.union([plain(GroupChatDto), plain(ChannelDto), plain(ChatDto)])
 
 // A union cannot be the base of a class, so this one is the DTO value without a class
 export const ChatResponseDto = createZodDto(AnyChat)
