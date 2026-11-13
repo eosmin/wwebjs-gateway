@@ -89,12 +89,14 @@ const DEFAULTS = {
   HUMANIZE_MIN_REPLY_DELAY_MS: 1500,
   EVENT_REPLAY_WINDOW_SECONDS: 300,
   WEBHOOKS_MAX_PER_SESSION: 20,
+  WEBHOOK_TEST_MAX_PER_MINUTE: 6,
   WEBHOOK_TIMEOUT_MS: 10000,
   WEBHOOK_MAX_ATTEMPTS: 10,
   WEBHOOK_BACKOFF_MS: 5000,
   WEBHOOK_WORKER_CONCURRENCY: 10,
   WEBHOOK_INLINE_MEDIA_MAX_BYTES: 5242880,
   WEBHOOK_PRIVATE_HOST_ALLOWLIST: [],
+  MEDIA_PRIVATE_HOST_ALLOWLIST: [],
   ALLOW_PRIVATE_WEBHOOK_TARGETS: false,
   CALL_CACHE_SIZE: 50,
   DELIVERY_RETENTION_DAYS: 14,
@@ -347,6 +349,23 @@ describe('envSchema bounds and edges', () => {
     }
   )
 
+  // Media URLs come from the caller of a send: the allowlist of webhook receivers is not theirs to use
+  it('has an empty MEDIA_PRIVATE_HOST_ALLOWLIST apart from the webhook one', () => {
+    const env = envSchema.parse({ ...valid, WEBHOOK_PRIVATE_HOST_ALLOWLIST: 'bot,10.0.0.0/8' })
+
+    expect(env.MEDIA_PRIVATE_HOST_ALLOWLIST).toEqual([])
+    expect(
+      envSchema.parse({ ...valid, MEDIA_PRIVATE_HOST_ALLOWLIST: 'files.internal, 10.2.0.0/16' })
+        .MEDIA_PRIVATE_HOST_ALLOWLIST
+    ).toEqual(['files.internal', '10.2.0.0/16'])
+  })
+
+  it.each(['10.0.0.0/99', 'bad host'])('rejects %j in MEDIA_PRIVATE_HOST_ALLOWLIST', entry => {
+    expect(envSchema.safeParse({ ...valid, MEDIA_PRIVATE_HOST_ALLOWLIST: entry }).success).toBe(
+      false
+    )
+  })
+
   it('accepts hostnames, addresses and CIDRs in WEBHOOK_PRIVATE_HOST_ALLOWLIST', () => {
     const env = envSchema.parse({
       ...valid,
@@ -425,6 +444,11 @@ describe('envSchema bounds and edges', () => {
       'an IPv6 allowlist that covers everything in production',
       { NODE_ENV: 'production', WEBHOOK_PRIVATE_HOST_ALLOWLIST: '::/0' },
       'WEBHOOK_PRIVATE_HOST_ALLOWLIST'
+    ],
+    [
+      'a media allowlist that covers everything in production',
+      { NODE_ENV: 'production', MEDIA_PRIVATE_HOST_ALLOWLIST: 'cdn,10.0.0.0/0' },
+      'MEDIA_PRIVATE_HOST_ALLOWLIST'
     ],
     [
       'private webhook targets allowed in production',

@@ -8,7 +8,10 @@ import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { Webhook } from '../database/models.js'
 import { SessionsRepository } from '../database/repositories/sessions.repository.js'
-import { WebhooksRepository } from '../database/repositories/webhooks.repository.js'
+import {
+  type WebhookPatch,
+  WebhooksRepository
+} from '../database/repositories/webhooks.repository.js'
 import { CREDENTIAL_EVENTS } from '../types/events.js'
 import type {
   CreatedWebhookDto,
@@ -49,6 +52,9 @@ export function assertCredentialEventsAllowed(
 ): void {
   if (listensToCredentials(events)) assertScope(principal, 'manage')
 }
+
+// Times a checked write reads the webhook again after another request changed it under it
+const CHECKED_WRITE_ATTEMPTS = 3
 
 // What the webhooks routes do, and the list of enabled webhooks the dispatcher reads for every
 // event. That list is cached; every write here drops the cache.
@@ -121,21 +127,37 @@ export class WebhookService {
     return { ...toWebhookDto(row), secret }
   }
 
-  async update(id: string, patch: UpdateWebhookDto): Promise<WebhookDto> {
+  async update(principal: Principal, id: string, patch: UpdateWebhookDto): Promise<WebhookDto> {
     this.assertRawAvailable(patch.includeRaw)
     if (patch.url !== undefined) {
       // A missing webhook answers 404 before the URL is resolved
       await this.require(id)
       await this.assertAllowedUrl(patch.url)
     }
-    const row = await this.write(() =>
-      this.webhooks.update(id, {
-        ...patch,
-        events: patch.events && normalizeEvents(patch.events)
-      })
-    )
-    if (row === null) throw webhookNotFound(id)
+    const row = await this.changeChecked(principal, id, patch.events, {
+      ...patch,
+      events: patch.events && normalizeEvents(patch.events)
+    })
     return toWebhookDto(row)
+  }
+
+  // Applies a change after the check of the QR and pairing code events, which decides on what the
+  // webhook listens to now and will listen to. The write is conditional on those same events, so a
+  // webhook that another request changed between the check and the write is checked again instead of
+  // being changed on the strength of a stale read.
+  private async changeChecked(
+    principal: Principal,
+    id: string,
+    newEvents: readonly string[] | undefined,
+    patch: WebhookPatch
+  ): Promise<Webhook> {
+    for (let attempt = 0; attempt < CHECKED_WRITE_ATTEMPTS; attempt += 1) {
+      const current = await this.require(id)
+      assertCredentialEventsAllowed(principal, [...current.events, ...(newEvents ?? [])])
+      const row = await this.write(() => this.webhooks.updateIfEvents(id, current.events, patch))
+      if (row !== null) return row
+    }
+    throw new ConflictError('WEBHOOK_CHANGED', `Webhook "${id}" was changed by another request`)
   }
 
   // Every webhook a session has is one more job in Redis for each of its events, so the number is
@@ -163,10 +185,10 @@ export class WebhookService {
 
   // The old secret stops signing at once: deliveries still waiting to be retried are signed with
   // the new one, because the processor reads the secret at each attempt
-  async rotateSecret(id: string): Promise<CreatedWebhookDto> {
+  async rotateSecret(principal: Principal, id: string): Promise<CreatedWebhookDto> {
     const secret = generateWebhookSecret()
-    const row = await this.write(() => this.webhooks.update(id, { secret }))
-    if (row === null) throw webhookNotFound(id)
+    // The secret signs what the receiver of the QR code trusts: whoever holds it can forge it
+    const row = await this.changeChecked(principal, id, undefined, { secret })
     return { ...toWebhookDto(row), secret }
   }
 
@@ -214,7 +236,9 @@ export class WebhookService {
     }
   }
 
-  private invalidate(): void {
+  // Drops the cache of enabled webhooks. A write here does it; whoever deletes webhooks from outside
+  // (a session goes with its webhooks, by cascade) must call it too.
+  invalidate(): void {
     this.generation += 1
     this.enabledBySession.clear()
   }

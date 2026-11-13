@@ -21,6 +21,7 @@ import type {
 import { SessionManager } from '../whatsapp/session-manager.service.js'
 
 import { AuthService } from './auth.service.js'
+import { WebhookService } from './webhook.service.js'
 
 // Pixels per module and quiet zone of the PNG: large enough for a phone to scan from a monitor
 const QR_PNG_SCALE = 8
@@ -58,7 +59,8 @@ export class SessionsService {
   constructor(
     @Inject(SessionsRepository) private readonly sessions: SessionsRepository,
     @Inject(SessionManager) private readonly manager: SessionManager,
-    @Inject(AuthService) private readonly auth: AuthService
+    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(WebhookService) private readonly webhooks: WebhookService
   ) {}
 
   async list(): Promise<SessionListDto> {
@@ -103,13 +105,15 @@ export class SessionsService {
     return toSessionDto(await this.manager.logout(id))
   }
 
-  // The keys of the session are deleted with it; the cache of the guard must forget them now, also
-  // when a later step of the deletion fails, because the rows are already gone by then
+  // The keys and the webhooks of the session are deleted with it; the caches of the guard and of the
+  // dispatcher must forget them now, also when a later step of the deletion fails, because the rows
+  // are already gone by then. A session created again under the same id must not inherit them.
   async remove(id: string): Promise<void> {
     try {
       await this.manager.remove(id)
     } finally {
       this.auth.invalidateSession(id)
+      this.webhooks.invalidate()
     }
   }
 
