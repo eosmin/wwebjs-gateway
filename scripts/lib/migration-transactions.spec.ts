@@ -39,14 +39,59 @@ describe('findTransactionProblems', () => {
     ])
   })
 
-  it.each(['CREATE INDEX CONCURRENTLY "i" ON "a"("b")', 'VACUUM "a"'])(
-    'reports %s inside a transaction',
+  it.each([
+    'CREATE INDEX CONCURRENTLY "i" ON "a"("b")',
+    'VACUUM "a"',
+    `ALTER TYPE "s" ADD VALUE 'x'`,
+    'alter type "s" add value if not exists \'x\'',
+    'DROP DATABASE "d"',
+    'CREATE DATABASE "d"',
+    'CREATE TABLESPACE "t" LOCATION \'/x\'',
+    'ALTER SYSTEM SET work_mem = 1'
+  ])('reports %s inside a transaction', statement => {
+    expect(check(`BEGIN;\n${statement};\nCOMMIT;`)).toEqual([
+      expect.stringContaining('cannot run in a transaction')
+    ])
+  })
+
+  it.each(['ROLLBACK', 'ABORT', 'END', 'COMMIT AND CHAIN'])(
+    'reports %s in the middle, which would leave the rest outside the transaction',
     statement => {
-      expect(check(`BEGIN;\n${statement};\nCOMMIT;`)).toEqual([
-        expect.stringContaining('cannot run in a transaction')
+      expect(check(`BEGIN;\nSELECT 1;\n${statement};\nSELECT 2;\nCOMMIT;`)).toEqual([
+        expect.stringContaining('in the middle')
       ])
     }
   )
+
+  it('accepts a function body, whose END and END IF are not the end of the transaction', () => {
+    expect(
+      check(
+        'BEGIN;\nCREATE FUNCTION f() RETURNS void AS $body$ BEGIN IF true THEN PERFORM 1; END IF; ROLLBACK; END; $body$ LANGUAGE plpgsql;\nCREATE FUNCTION g() RETURNS void AS $$ BEGIN VACUUM x; END; $$ LANGUAGE plpgsql;\nCOMMIT;'
+      )
+    ).toEqual([])
+  })
+
+  it.each([
+    'ALTER TYPE "s" OWNER TO "x"',
+    `ALTER TYPE "s" RENAME VALUE 'a' TO 'b'`,
+    'CREATE TABLE "tablespace_x" ("a" INT)',
+    'ALTER TABLE "a" SET TABLESPACE "t"',
+    `COMMENT ON TABLE "a" IS 'about ALTER SYSTEM and DROP DATABASE'`
+  ])('accepts %s inside the transaction', statement => {
+    expect(check(`BEGIN;\n${statement};\nCOMMIT;`)).toEqual([])
+  })
+
+  it('ignores the words of a comment', () => {
+    expect(check('BEGIN;\n-- ALTER SYSTEM and DROP DATABASE\nSELECT 1;\nCOMMIT;')).toEqual([])
+  })
+
+  it('accepts a savepoint inside the transaction', () => {
+    expect(
+      check(
+        'BEGIN;\nSAVEPOINT s;\nSELECT 1;\nROLLBACK TO SAVEPOINT s;\nRELEASE SAVEPOINT s;\nCOMMIT;'
+      )
+    ).toEqual([])
+  })
 
   it('accepts a statement that cannot run in a transaction when the opt-out says why', () => {
     expect(

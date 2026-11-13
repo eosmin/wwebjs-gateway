@@ -997,17 +997,29 @@ describe('repositories (integration)', () => {
       expect((await messages.findById(sessionId, 'm2'))?.ack).toBe(-1)
     })
 
-    it('applies an ack of -1 (error) whatever the stored one', async () => {
+    it('applies an ack of -1 (error) only to a message that is not yet sent', async () => {
       const sessionId = await newSession('msg-ack-error')
-      await messages.upsert(message(sessionId, 'm1', { ack: 2 }))
+      await messages.upsert(message(sessionId, 'pending', { ack: 0 }))
+      await messages.upsert(message(sessionId, 'sent', { ack: 1 }))
+      await messages.upsert(message(sessionId, 'read', { ack: 3 }))
+      await messages.upsert(message(sessionId, 'played', { ack: 4 }))
+      await messages.upsert(message(sessionId, 'unknown', { ack: null }))
 
-      expect(await messages.updateAck(sessionId, 'm1', -1)).toBe(true)
-      expect(await messages.updateAck(sessionId, 'm1', -1)).toBe(false)
-      expect((await messages.findById(sessionId, 'm1'))?.ack).toBe(-1)
+      expect(await messages.updateAck(sessionId, 'pending', -1)).toBe(true)
+      expect(await messages.updateAck(sessionId, 'pending', -1)).toBe(false)
+      expect((await messages.findById(sessionId, 'pending'))?.ack).toBe(-1)
+      // A late copy of an error does not undo an ack that says the message went out
+      expect(await messages.updateAck(sessionId, 'sent', -1)).toBe(false)
+      expect(await messages.updateAck(sessionId, 'read', -1)).toBe(false)
+      expect(await messages.updateAck(sessionId, 'played', -1)).toBe(false)
+      // A message with no ack yet takes the error
+      expect(await messages.updateAck(sessionId, 'unknown', -1)).toBe(true)
+      expect((await messages.findById(sessionId, 'sent'))?.ack).toBe(1)
+      expect((await messages.findById(sessionId, 'read'))?.ack).toBe(3)
       // An ack after the error replaces it (the message was sent again), then only moves forward
-      expect(await messages.updateAck(sessionId, 'm1', 0)).toBe(true)
-      expect(await messages.updateAck(sessionId, 'm1', 1)).toBe(true)
-      expect(await messages.updateAck(sessionId, 'm1', 0)).toBe(false)
+      expect(await messages.updateAck(sessionId, 'pending', 0)).toBe(true)
+      expect(await messages.updateAck(sessionId, 'pending', 1)).toBe(true)
+      expect(await messages.updateAck(sessionId, 'pending', 0)).toBe(false)
     })
 
     it('marks as published once and lists the unpublished incoming ones in sent order', async () => {

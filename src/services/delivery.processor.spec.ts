@@ -34,10 +34,17 @@ const workers: {
 const workerClose = jest.fn((_force?: boolean) => Promise.resolve())
 
 // The classification of database errors has its own spec; here only what the processor does with it
-jest.mock('../database/db-errors.js', () => ({
-  isTransientDbError: (error: unknown) =>
-    error instanceof Error && error.name === 'TransientDatabaseError'
-}))
+jest.mock('../database/db-errors.js', () => {
+  // The real classifier for everything the fake name does not cover
+  const actual = jest.requireActual<{ isRetrySafeDbError(error: unknown): boolean }>(
+    '../database/db-errors.js'
+  )
+  return {
+    isRetrySafeDbError: (error: unknown) =>
+      (error instanceof Error && error.name === 'TransientDatabaseError') ||
+      actual.isRetrySafeDbError(error)
+  }
+})
 
 jest.mock('bullmq', () => ({
   ...jest.requireActual<object>('bullmq'),
@@ -514,6 +521,30 @@ describe('DeliveryProcessor', () => {
         expect(log).toHaveLength(1)
         expect(log[0]).toContain('TransientDatabaseError')
         expect(log[0]).not.toContain('connection lost')
+      })
+
+      it('does not write again after a connection lost with the outcome unknown, which could count the attempt twice', async () => {
+        const { processor, recordAttempt } = setup()
+        const lost = new Error('connection lost after the commit')
+        lost.name = 'LostConnectionError'
+        recordAttempt.mockRejectedValue(lost)
+
+        await expect(processor.process(job())).resolves.toBe('delivered')
+
+        expect(recordAttempt).toHaveBeenCalledTimes(1)
+      })
+
+      it('uses the real classifier: a connection that was refused is written again, one reset mid-write is not', async () => {
+        const socketError = (code: string): Error => Object.assign(new Error('boom'), { code })
+        const refused = setup()
+        refused.recordAttempt.mockRejectedValueOnce(socketError('ECONNREFUSED'))
+        await refused.processor.process(job())
+        expect(refused.recordAttempt).toHaveBeenCalledTimes(2)
+
+        const reset = setup()
+        reset.recordAttempt.mockRejectedValueOnce(socketError('ECONNRESET'))
+        await reset.processor.process(job())
+        expect(reset.recordAttempt).toHaveBeenCalledTimes(1)
       })
 
       it('does not write again after an error that waiting cannot cure', async () => {

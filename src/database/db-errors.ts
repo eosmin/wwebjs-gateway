@@ -45,6 +45,24 @@ const TRANSIENT_SOCKET_CODES: ReadonlySet<string> = new Set([
   'EPIPE',
   'EAI_AGAIN'
 ])
+// Of those, the ones where the statement certainly did not take effect: nothing was sent (the
+// connection could not be opened, the pool had no connection), or the database rolled it back. A
+// connection that drops while a statement or its COMMIT is in flight is not here: the write may have
+// been committed, and a write that is not idempotent must not run again.
+// (P1001 and P1002 are not here: with a driver adapter they can wrap a connection reset in the middle of
+// a statement. A connection that could not be opened at all is a PrismaClientInitializationError.)
+const RETRY_SAFE_CODES: ReadonlySet<string> = new Set(['P2024', 'P2034', 'P2037'])
+const RETRY_SAFE_SQLSTATES: ReadonlySet<string> = new Set([
+  // sqlclient_unable_to_establish_sqlconnection, serialization failure, deadlock, no connection
+  // slot left, lock not available, the server is starting up
+  '08001',
+  '40001',
+  '40P01',
+  '53300',
+  '55P03',
+  '57P03'
+])
+const RETRY_SAFE_SOCKET_CODES: ReadonlySet<string> = new Set(['ECONNREFUSED', 'EAI_AGAIN'])
 // How far down a chain of `cause` the code is looked for
 const MAX_CAUSE_DEPTH = 5
 
@@ -70,6 +88,23 @@ export const isTransientDbError = (error: unknown): boolean =>
   error instanceof Prisma.PrismaClientInitializationError ||
   (error instanceof Prisma.PrismaClientKnownRequestError && TRANSIENT_CODES.has(error.code)) ||
   databaseCodesOf(error).some(isTransientCode)
+
+// A transient failure after which the same write can run again with no risk of it counting twice. Use
+// this, not `isTransientDbError`, to retry a write that is not idempotent (an increment, an insert
+// without a unique key); `isTransientDbError` also covers a connection lost with the outcome unknown.
+export function isRetrySafeDbError(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientInitializationError) return true
+  if (error instanceof Prisma.PrismaClientKnownRequestError && RETRY_SAFE_CODES.has(error.code)) {
+    return true
+  }
+  const codes = databaseCodesOf(error)
+  // One code that leaves the outcome open is enough to make the whole error unsafe
+  if (codes.some(code => isTransientCode(code) && !isRetrySafeCode(code))) return false
+  return codes.some(isRetrySafeCode)
+}
+
+const isRetrySafeCode = (code: string): boolean =>
+  RETRY_SAFE_SQLSTATES.has(code) || RETRY_SAFE_SOCKET_CODES.has(code)
 
 const isTransientCode = (code: string): boolean =>
   TRANSIENT_SQLSTATES.has(code) || TRANSIENT_SOCKET_CODES.has(code)
