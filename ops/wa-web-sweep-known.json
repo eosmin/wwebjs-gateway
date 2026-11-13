@@ -1,0 +1,32 @@
+[
+  {
+    "target": "WAWebBizOrderBridge.queryOrder",
+    "kind": "object-shape",
+    "note": "INV-signature-drift B: takes one object now; business account only; plan 10.4"
+  },
+  {
+    "target": "WAWebNoteAction.noteAddAction",
+    "kind": "arity",
+    "note": "INV-signature-drift B: takes one object now; business account only; plan 10.4"
+  },
+  {
+    "target": "WAWebChatMessageSearch.getSearchContext",
+    "kind": "arity",
+    "note": "INV-signature-drift A: the gateway exposes no route that reaches it (Client.interface is unsupported)"
+  },
+  {
+    "target": "WAWebChatSendMessages.sendGroupInviteMessage",
+    "kind": "function-missing",
+    "note": "INV-signature-drift C: gone; the patch checks it once with missingFunction; plan 10.4"
+  },
+  {
+    "target": "WAWebStatusGatingUtils.canCheckStatusRankingPosterGating",
+    "kind": "function-missing",
+    "note": "INV-signature-drift C: gone; the patch asks through window.WWebJS.cannotBeRanked"
+  },
+  {
+    "target": "WAWebContactCollection.getMeContact",
+    "kind": "function-missing",
+    "note": "INV-signature-drift C: now a method of ContactCollection, not of the module; the library call reads undefined only on a path the gateway does not use; plan 10.11 to confirm"
+  }
+]

@@ -38,7 +38,8 @@
     "validate:docs": "tsx scripts/gen-docs.ts --check",
     "validate:all": "pnpm lint && pnpm type-check && pnpm format:check && pnpm validate:env && pnpm validate:deprecations && pnpm validate:rollbacks && pnpm validate:migrations && pnpm validate:pins && pnpm validate:docs && pnpm test",
     "validate:affected": "tsx scripts/validate-affected.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "wa-web:sweep": "tsx scripts/wa-web-sweep.ts"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
