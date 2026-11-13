@@ -79,6 +79,34 @@ while it was the last message of a chat, `GET chats` answered 500 for the whole 
 - `Message.js` copies `isStarred`, `links`, `vCards`, `isStatus`, `isGif`, `forwardingScore` without a
   default, so the mapper defaults them (false, `[]`, `[]`, false, false, 0).
 
+## Addendum (F21, review E): the same rule for every listing and for the mappers
+
+The review of the mappers found the F13 pattern still open elsewhere: one odd group, broadcast, order,
+call or message made a whole listing a `500`.
+
+- **Listings leave out what cannot be delivered.** Chats (groups and channels included), contacts,
+  channels, labels and broadcasts are mapped one by one and validated against the schema of the
+  response; an item that cannot be mapped or does not fit is left out and the listing goes on. The
+  adapter logs one warn per listing: the session, how many items of how many, and the field names
+  (never values or ids). The item stays reachable by its own id, where a failure is reported as such.
+  This **extends** the F13 reversal (a last message) to the items of a listing; single objects and
+  message lists keep the earlier rule. The client cannot yet tell "left out" from "does not exist":
+  see the debt in the plan (a skipped-items counter, step 10.4).
+- **Optional fields are copied by type.** A field WhatsApp filled with another type is left out of the
+  message and reported by name; a missing `body` is `''`, a missing `type`/`deviceType` is `'unknown'`,
+  a missing flag is false. A message that names no chat (`from`/`to` of its side) is refused: there is no
+  safe default, it would be stored under the wrong conversation. A call or any item without `id` is
+  refused too.
+- **Group and broadcast gaps:** `GroupChatDto.createdAt` is optional (an Invalid Date is left out),
+  `participants` defaults to `[]`; a broadcast without `msgs` has none, `totalCount` is the number of
+  statuses it holds and `unreadCount` 0; an order without `products` has none; a call flag that is
+  missing is false. A fractional unix time is floored (the DTOs are `.int()`, and the order buffer must give a message the same second on every read). A numeric `duration` is kept as text. A message sent to a known chat takes that chat when the answer names none (it went out). Message listings (`fetchMessages`, search, pinned) leave out an unmappable message like the others; a listing that leaves out every item logs at error level (a mapper that broke, not an odd item).
+- **An action that happened is never reported as failed:** the outcomes of `createGroup` and
+  `addParticipants` are read field by field (all optional in the DTO); an odd answer is delivered with
+  what is known and logged.
+- The contract tests derive the required keys of each DTO from its schema, so a new required field
+  cannot be left unfilled by a mapper without a test failing.
+
 ## Alternatives considered
 
 - **Keep the strict schemas and fix each field as a real account breaks it.** Rejected: every miss is a

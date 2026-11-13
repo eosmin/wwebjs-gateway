@@ -210,7 +210,7 @@ export interface CreateGroupResult {
   gid: string
   participants: Record<
     string,
-    { statusCode: number; message: string; isGroupCreator: boolean; isInviteV4Sent: boolean }
+    { statusCode?: number; message?: string; isGroupCreator?: boolean; isInviteV4Sent?: boolean }
   >
 }
 
@@ -221,9 +221,10 @@ export interface CreateChannelResult {
   createdAtTs: number
 }
 
-// What wwebjs answers when a participant could not be added is a plain text, kept as it comes
+// What wwebjs answers when a participant could not be added is a plain text, kept as it comes. The
+// fields of an outcome are optional: a field of another type or a missing one is left out (ADR 0006)
 export type AddParticipantsResult =
-  Record<string, { code: number; message: string; isInviteV4Sent: boolean }> | string
+  Record<string, { code?: number; message?: string; isInviteV4Sent?: boolean }> | string
 
 export interface MembershipRequestActionResult {
   requesterId: string | string[] | null

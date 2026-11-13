@@ -1,5 +1,6 @@
 import {
   CreateGroupBody,
+  CreateGroupResultDto,
   GroupParticipantsBody,
   GroupSettingsBody,
   MembershipRequestsActionBody,
@@ -116,5 +117,17 @@ describe('groups bodies', () => {
       MembershipRequestsActionBody.safeParse({ requesterIds: [user], sleep: [0, 5000] }).success
     ).toBe(true)
     expect(MembershipRequestsActionBody.safeParse({ sleep: [900, 100] }).success).toBe(false)
+  })
+})
+
+describe('the outcome of the participants', () => {
+  it('delivers an entry that lacks fields, as wwebjs leaves them out', () => {
+    expect(
+      CreateGroupResultDto.schema.parse({
+        subject: 'G',
+        groupId: 'g@g.us',
+        participants: { 'a@c.us': {} }
+      }).participants
+    ).toEqual({ 'a@c.us': {} })
   })
 })

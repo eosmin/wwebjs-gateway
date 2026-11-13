@@ -19,6 +19,8 @@ import { LONG_CALL_TIMEOUT_MS } from '../common/lib/call-limits.js'
 import { withTimeout } from '../common/lib/timeout.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { processTreeRssBytes } from '../infra/process/process-memory.js'
+import { AnyChat } from '../types/chats.dto.js'
+import { AnyContact } from '../types/contacts.dto.js'
 import type {
   BatteryInfoDto,
   BroadcastDto,
@@ -35,8 +37,15 @@ import type {
   PollVoteDto,
   ReactionListDto
 } from '../types/dto.js'
+import {
+  BroadcastDto as BroadcastSchema,
+  MessageDto as MessageSchema,
+  ChannelDto as ChannelSchema,
+  LabelDto as LabelSchema
+} from '../types/dto.js'
 
 import {
+  failedFields,
   mapBatteryInfo,
   mapCustomerNote,
   mapBroadcast,
@@ -276,18 +285,28 @@ const errorKind = (error: unknown): string => (error instanceof Error ? error.na
 
 // The typings of wwebjs say `object` for some ids that are wids at runtime
 const WidLike = z.looseObject({ _serialized: z.string() })
+type BroadcastInput = Omit<Parameters<typeof mapBroadcast>[0], 'id'> & {
+  id?: Parameters<typeof mapBroadcast>[0]['id']
+}
+
 const toIdLike = (value: unknown): IdLike =>
   typeof value === 'string' ? value : WidLike.parse(value)
 
 const toIdLikeOrNull = (value: unknown): IdLike | null =>
   value === null || value === undefined ? null : toIdLike(value)
 
-// The result of `addParticipants` is typed wrongly in wwebjs 1.34.8 (`{ [id]: { [id]: … } }`); this is
-// what WhatsApp answers
-const ParticipantOutcomes = z.record(
-  z.string(),
-  z.looseObject({ code: z.number(), message: z.string(), isInviteV4Sent: z.boolean() })
-)
+// The outcomes of `addParticipants` and `createGroup` are typed wrongly in wwebjs 1.34.8 (`{ [id]: { [id]: … } }`);
+// this is what WhatsApp answers. Each field is read on its own: one of another type is left out, never
+// a failure, because the action (participants added, group created) has already happened
+const outcomeOf = (codeKey: 'code' | 'statusCode') =>
+  z.object({
+    [codeKey]: z.number().optional().catch(undefined),
+    message: z.string().optional().catch(undefined),
+    isGroupCreator: z.boolean().optional().catch(undefined),
+    isInviteV4Sent: z.boolean().optional().catch(undefined)
+  })
+const Outcomes = (codeKey: 'code' | 'statusCode') =>
+  z.record(z.string(), outcomeOf(codeKey).catch({}))
 
 const isChannel = (chat: Chat | Channel): chat is Channel =>
   'isChannel' in chat && chat.isChannel === true
@@ -347,6 +366,31 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     else this.logger.warn(line)
   }
 
+  // The participants outcomes, read field by field. The action already happened, so an odd answer is
+  // delivered with what is known and logged, never turned into a failure
+  private outcomes(
+    operation: string,
+    codeKey: 'code' | 'statusCode',
+    raw: unknown
+  ): Record<string, Record<string, unknown>> {
+    const parsed = Outcomes(codeKey).safeParse(raw)
+    if (!parsed.success) {
+      this.logger.warn(
+        `[${this.sessionId}] ${operation}: the participant outcomes had an unexpected shape`
+      )
+      return {}
+    }
+    // The message of an outcome is WhatsApp's text: it can quote a number, so it is masked like the other texts
+    return Object.fromEntries(
+      Object.entries(parsed.data).map(([id, outcome]) => [
+        id,
+        typeof outcome.message === 'string'
+          ? { ...outcome, message: sanitize(outcome.message) }
+          : outcome
+      ])
+    )
+  }
+
   // The library answers a text instead of throwing, and the text can quote ids, numbers or the names
   // the caller sent (subject, title, description): it is masked (the names too, which the masking
   // cannot know) before it is logged or reaches the client and the webhooks
@@ -372,13 +416,14 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // must never read as "not sent", or a worker could send it twice. The exception is null: the
   // patched library answers it when the page found no chat, or the content is not supported in a
   // channel or status, so nothing was sent. undefined stays an unknown outcome
-  private sent(operation: string, source: Message | null | undefined): MessageDto {
+  private sent(operation: string, source: Message | null | undefined, chatId?: string): MessageDto {
     if (source === null) {
       throw new WaOperationError(operation, 'Chat not found or content not supported')
     }
     try {
       if (source === undefined) throw new TypeError('The library answered no message')
-      return this.message(source)
+      // The caller knows where the message went: an answer that names no chat is still a message that went out
+      return mapping(() => mapMessage(source, { ...this.mapOptions(), fallbackChatId: chatId }))
     } catch (error: unknown) {
       this.logger.warn(`Mapping the result of ${operation} failed (${errorKind(error)})`)
       throw new WaMappingError(operation, `${operation}: the result could not be read`)
@@ -394,7 +439,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
         ),
       onUnreadableMessage: fields =>
         this.logger.warn(
-          `[${this.sessionId}] The last message of a chat does not fit its schema (${fields}); left out of the chat`
+          `[${this.sessionId}] A message does not fit its schema (${fields}); left out of the chat or broadcast that holds it`
+        ),
+      onDroppedField: field =>
+        this.logger.warn(
+          `[${this.sessionId}] A message field came with an unexpected type (${field}); left out of the message`
         ),
       includeRaw: this.config.INCLUDE_RAW,
       rawMaxFieldBytes: this.config.RAW_MAX_FIELD_BYTES,
@@ -408,7 +457,12 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   }
 
   private messages(sources: readonly Message[]): MessageDto[] {
-    return sources.map(source => this.message(source))
+    return this.listed(
+      'messages',
+      sources,
+      source => mapMessage(source, this.mapOptions()),
+      MessageSchema
+    )
   }
 
   // wwebjs answers undefined, not an error, for a message that is not in the page
@@ -436,17 +490,68 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return chat
   }
 
-  private anyChat(chat: Chat | Channel): AnyChatDto {
+  private mapAnyChat(chat: Chat | Channel): AnyChatDto {
     const options = this.mapOptions()
-    return mapping(() => {
-      if (isChannel(chat)) return mapChannel(chat, options)
-      if (isGroupChat(chat)) return mapGroupChat(chat, options)
-      return mapChat(chat, options)
-    })
+    if (isChannel(chat)) return mapChannel(chat, options)
+    if (isGroupChat(chat)) return mapGroupChat(chat, options)
+    return mapChat(chat, options)
+  }
+
+  private anyChat(chat: Chat | Channel): AnyChatDto {
+    return mapping(() => this.mapAnyChat(chat))
+  }
+
+  // A listing leaves out an item that cannot be mapped or does not fit the schema of its response, and
+  // says so in the log (field names only, never values or ids): one odd item of the account must not
+  // turn the whole listing, which the rest of the account needs, into a 500. The item stays reachable
+  // by its own id, where a failure is reported as such. See ADR 0006.
+  private listed<S, D>(
+    what: string,
+    sources: readonly S[],
+    map: (source: S) => D,
+    schema: z.ZodType
+  ): D[] {
+    const items: D[] = []
+    const reasons = new Set<string>()
+    let skipped = 0
+    for (const source of sources) {
+      try {
+        const dto = map(source)
+        const parsed = schema.safeParse(dto)
+        if (parsed.success) {
+          items.push(dto)
+          continue
+        }
+        for (const field of failedFields(parsed.error)) reasons.add(field)
+      } catch (error: unknown) {
+        reasons.add(`mapping failed: ${error instanceof Error ? error.name : typeof error}`)
+      }
+      skipped += 1
+    }
+    if (skipped > 0 && skipped === sources.length) {
+      // Every item failing is a mapper that broke (a renamed field of the library), not an odd item
+      this.logger.error(
+        `[${this.sessionId}] ${what}: every item (${skipped}) left out of the listing (${[...reasons].join(', ')})`
+      )
+    } else if (skipped > 0) {
+      this.logger.warn(
+        `[${this.sessionId}] ${what}: ${skipped} of ${sources.length} items left out of the listing (${[...reasons].join(', ')})`
+      )
+    }
+    return items
   }
 
   private chatDtos(chats: readonly (Chat | Channel)[]): AnyChatDto[] {
-    return chats.map(chat => this.anyChat(chat))
+    return this.listed('chats', chats, chat => this.mapAnyChat(chat), AnyChat)
+  }
+
+  private channelDtos(channels: readonly Channel[]): ChannelDto[] {
+    return this.listed(
+      'channels',
+      channels,
+      channel => mapChannel(channel, this.mapOptions()),
+      ChannelSchema
+    )
   }
 
   private groupChatDto(chat: GroupChat): GroupChatDto {
@@ -457,28 +562,42 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return mapping(() => mapChannel(channel, this.mapOptions()))
   }
 
-  private contactDto(contact: Contact): AnyContactDto {
+  private mapAnyContact(contact: Contact): AnyContactDto {
     // BusinessContact assigns the property even when the profile is not loaded (undefined)
-    return mapping(() =>
-      'businessProfile' in contact && contact.businessProfile
-        ? mapBusinessContact(contact as Parameters<typeof mapBusinessContact>[0]) // BusinessContact is a Contact with a profile
-        : mapContact(contact)
-    )
+    return 'businessProfile' in contact && contact.businessProfile
+      ? mapBusinessContact(contact as Parameters<typeof mapBusinessContact>[0]) // BusinessContact is a Contact with a profile
+      : mapContact(contact)
+  }
+
+  private contactDto(contact: Contact): AnyContactDto {
+    return mapping(() => this.mapAnyContact(contact))
   }
 
   private contactDtos(contacts: readonly Contact[]): AnyContactDto[] {
-    return contacts.map(contact => this.contactDto(contact))
+    return this.listed('contacts', contacts, contact => this.mapAnyContact(contact), AnyContact)
+  }
+
+  private labelDtos(labels: readonly LabelDto[]): LabelDto[] {
+    return this.listed('labels', labels, mapLabel, LabelSchema)
   }
 
   // wwebjs builds a `Broadcast` without `id` and `msgs` when WhatsApp Web holds no statuses of the user
-  private broadcastDto(
-    source: Omit<Parameters<typeof mapBroadcast>[0], 'id'> & {
-      id?: Parameters<typeof mapBroadcast>[0]['id']
-    }
-  ): BroadcastDto | null {
+  private broadcastDto(source: BroadcastInput): BroadcastDto | null {
     const { id } = source
     if (id === undefined) return null
     return mapping(() => mapBroadcast({ ...source, id }, this.mapOptions()))
+  }
+
+  private broadcastDtos(sources: readonly BroadcastInput[]): BroadcastDto[] {
+    const withId = sources.flatMap(source =>
+      source.id === undefined ? [] : [{ ...source, id: source.id }]
+    )
+    return this.listed(
+      'broadcasts',
+      withId,
+      source => mapBroadcast(source, this.mapOptions()),
+      BroadcastSchema
+    )
   }
 
   private async media(media: OutboundMedia): Promise<InstanceType<typeof MessageMedia>> {
@@ -771,7 +890,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       forward('vote_update', () => ({ event: 'vote_update', data: mapPollVote(vote) }))
     })
     client.on('call', call => {
-      this.rememberCall(call)
+      if (typeof call.id === 'string' && call.id !== '') this.rememberCall(call)
       forward('call', () => ({ event: 'call', data: mapCall(call) }))
     })
     // RemoteAuth is not used, so this never fires; it is wired so that no wwebjs event is left out
@@ -1018,7 +1137,8 @@ export class WwebjsAdapter implements WhatsAppClientPort {
           chatId,
           await this.toContent(content),
           this.toSendOptions(options)
-        )
+        ),
+        chatId
       )
     )
   }
@@ -1031,7 +1151,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('sendChannelMessage', async () => {
       const channel = await this.channelById('sendChannelMessage', channelId)
       const body = content.type === 'text' ? content.body : await this.media(content.media)
-      return this.sent('sendChannelMessage', await channel.sendMessage(body, { ...options }))
+      return this.sent(
+        'sendChannelMessage',
+        await channel.sendMessage(body, { ...options }),
+        channelId
+      )
     })
   }
 
@@ -1475,7 +1599,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('createGroup', async () => {
       const result = await this.client.createGroup(title, participantIds, { ...options })
       if (typeof result === 'string') return this.refusedReason('createGroup', result, [title])
-      return { title: result.title, gid: result.gid._serialized, participants: result.participants }
+      return {
+        title: result.title,
+        gid: result.gid._serialized,
+        participants: this.outcomes('createGroup', 'statusCode', result.participants)
+      }
     })
   }
 
@@ -1489,7 +1617,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       const result: unknown = await group.addParticipants(participantIds, { ...options })
       return typeof result === 'string'
         ? this.refusedReason('addParticipants', result)
-        : ParticipantOutcomes.parse(result)
+        : this.outcomes('addParticipants', 'code', result)
     })
   }
 
@@ -1630,9 +1758,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // ---- Channels --------------------------------------------------------------------------------
 
   getChannels(): Promise<ChannelDto[]> {
-    return this.run('getChannels', async () =>
-      (await this.client.getChannels()).map(channel => this.channelDto(channel))
-    )
+    return this.run('getChannels', async () => this.channelDtos(await this.client.getChannels()))
   }
 
   getChannelByInviteCode(inviteCode: string): Promise<ChannelDto> {
@@ -1643,7 +1769,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
 
   searchChannels(options: SearchChannelsOptions): Promise<ChannelDto[]> {
     return this.run('searchChannels', async () =>
-      (await this.client.searchChannels({ ...options })).map(channel => this.channelDto(channel))
+      this.channelDtos(await this.client.searchChannels({ ...options }))
     )
   }
 
@@ -1781,7 +1907,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   getLabels(): Promise<LabelDto[]> {
     return this.run('getLabels', async () => {
       const labels = await this.client.getLabels()
-      return mapping(() => labels.map(mapLabel))
+      return this.labelDtos(labels)
     })
   }
 
@@ -1795,7 +1921,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   getChatLabels(chatId: string): Promise<LabelDto[]> {
     return this.run('getChatLabels', async () => {
       const labels = await this.client.getChatLabels(chatId)
-      return mapping(() => labels.map(mapLabel))
+      return this.labelDtos(labels)
     })
   }
 
@@ -1811,7 +1937,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
 
   getBroadcasts(): Promise<BroadcastDto[]> {
     return this.run('getBroadcasts', async () =>
-      (await this.client.getBroadcasts()).flatMap(broadcast => this.broadcastDto(broadcast) ?? [])
+      this.broadcastDtos(await this.client.getBroadcasts())
     )
   }
 

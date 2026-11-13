@@ -304,7 +304,7 @@ export type GroupParticipantDto = z.infer<typeof GroupParticipantDto>
 export const GroupChatDto = dto('GroupChatDto', {
   ...ChatDto.shape,
   owner: serializedId.nullable().describe('null when WhatsApp gave none'),
-  createdAt: isoDate,
+  createdAt: isoDate.optional().describe('Absent when WhatsApp sent no creation time'),
   description: z.string().nullable().describe('null when the group has none'),
   participants: z.array(GroupParticipantDto)
 })

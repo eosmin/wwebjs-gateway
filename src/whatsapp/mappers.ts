@@ -1,3 +1,5 @@
+import type { z } from 'zod'
+
 import { stripNul } from '../common/lib/nul.js'
 import { MessageDto as MessageSchema } from '../types/dto.js'
 import type {
@@ -88,10 +90,11 @@ const optionalId = (id: IdLike | null | undefined): string | undefined =>
 const toIso = (value: Date | number): string => new Date(value).toISOString()
 const unixToIso = (seconds: number): string => toIso(seconds * 1000)
 
+// A whole number of seconds (the DTOs are `.int()`: a fraction would fail the response of a message that is otherwise fine).
 // The ISO string must stay a 4-digit year (RFC 3339, the DTO schema and Postgres): 0 to 9999-12-31
 const MAX_UNIX_SECONDS = 253_402_300_799
 const isUsableUnixTime = (seconds: number): boolean =>
-  Number.isFinite(seconds) && seconds >= 0 && seconds <= MAX_UNIX_SECONDS
+  Number.isInteger(seconds) && seconds >= 0 && seconds <= MAX_UNIX_SECONDS
 
 // Copies the listed keys, leaving out the ones that are undefined or null so that a field WhatsApp
 // did not fill is absent from the DTO instead of failing its schema
@@ -102,6 +105,39 @@ function pick<T extends object, K extends keyof T>(source: T, keys: readonly K[]
     if (value !== undefined && value !== null) out[key] = value
   }
   return out as Pick<T, K> // every key was copied from `source`, so the partial is complete
+}
+
+type FieldKind = 'string' | 'text' | 'boolean' | 'number' | 'unixSeconds' | 'numbers' | 'any'
+
+const KIND_CHECKS: Record<FieldKind, (value: unknown) => boolean> = {
+  string: value => typeof value === 'string',
+  text: value => typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)),
+  boolean: value => typeof value === 'boolean',
+  number: value => typeof value === 'number' && Number.isFinite(value),
+  unixSeconds: value => typeof value === 'number' && isUsableUnixTime(value),
+  numbers: value =>
+    Array.isArray(value) && value.every(item => typeof item === 'number' && Number.isFinite(item)),
+  any: () => true
+}
+
+// Like `pick`, but a value of another type than the DTO declares is left out too, and its name is
+// reported (never its value): WhatsApp Web changes shapes without notice and one drifted field must not
+// turn the response of a message that is otherwise fine into a 500
+function pickTyped<T extends object>(
+  source: T,
+  kinds: Readonly<Partial<Record<keyof T & string, FieldKind>>>,
+  onDropped?: (field: string) => void
+): Partial<T> {
+  const out: Partial<T> = {}
+  for (const [key, kind] of Object.entries(kinds) as [keyof T & string, FieldKind][]) {
+    const value = source[key]
+    if (value === undefined || value === null) continue
+    // A number where text is expected (an audio duration) is kept as its text
+    if (KIND_CHECKS[kind](value))
+      out[key] = (kind === 'text' ? String(value) : value) as T[typeof key]
+    else onDropped?.(key)
+  }
+  return out
 }
 
 // A DTO whose id fields arrive as wwebjs ids
@@ -300,8 +336,29 @@ export interface MessageSource extends Omit<
   | 'isStatus'
   | 'isGif'
   | 'forwardingScore'
+  | 'deviceType'
+  | 'body'
+  | 'from'
+  | 'to'
+  | 'type'
+  | 'fromMe'
+  | 'hasMedia'
+  | 'hasQuotedMsg'
+  | 'hasReaction'
+  | 'mentionedIds'
+  | 'groupMentions'
 > {
   id: IdLike
+  // Message.js copies these without a default, so a real account can lack any of them (see `mapMessageFields`)
+  deviceType?: string | null
+  body?: string | null
+  from?: string | null
+  to?: string | null
+  type?: string | null
+  fromMe?: boolean | null
+  hasMedia?: boolean | null
+  hasQuotedMsg?: boolean | null
+  hasReaction?: boolean | null
   location?: LocationSource | null
   // Message.js copies these as they come (`this.isStarred = data.star`, `this.links = data.links`)
   // and a message of a special type can lack them: absent is false, empty or 0
@@ -319,8 +376,8 @@ export interface MessageSource extends Omit<
   // Some incoming messages come without one
   ack?: number | null
   // The typings of wwebjs say string, but Message.js copies what WhatsApp Web holds, which can be wids
-  mentionedIds: IdLike[]
-  groupMentions: { groupSubject: string; groupJid: IdLike }[]
+  mentionedIds?: IdLike[] | null
+  groupMentions?: ({ groupSubject: string; groupJid: IdLike } | null)[] | null
   businessOwnerJid?: IdLike | null
   // Typed string[], but Message.js copies the `{ name, localId }` options WhatsApp Web holds
   pollOptions?: (string | { name: string })[] | null
@@ -347,38 +404,38 @@ export interface MessageMapOptions {
   // Called with the names of the fields (never the values) when the last message of a chat does not
   // fit its schema: it is left out of the chat instead of turning the whole listing into a 500
   onUnreadableMessage?: (fields: string) => void
+  // Called with the NAME of an optional field WhatsApp filled with another type (never the value):
+  // the field is left out of the message instead of failing its schema
+  onDroppedField?: (field: string) => void
+  // The chat a sent message went to, which the caller knows: used when the answer names none
+  fallbackChatId?: string
 }
 
-const MESSAGE_FIELDS = [
-  'ack',
-  'author',
-  'deviceType',
-  'body',
-  'from',
-  'fromMe',
-  'hasMedia',
-  'hasQuotedMsg',
-  'hasReaction',
-  'duration',
-  'mediaKey',
-  'to',
-  'type',
-  'orderId',
-  'title',
-  'description',
-  'productId',
-  'latestEditSenderTimestampMs',
-  'selectedButtonId',
-  'selectedRowId',
-  'pollName',
-  'allowMultipleAnswers',
-  'eventStartTime',
-  'eventEndTime',
-  'eventDescription',
-  'eventLocation',
-  'eventJoinLink',
-  'messageSecret'
-] as const satisfies readonly (keyof MessageSource)[]
+// The optional fields copied as they come, and the type each must have to be copied
+const MESSAGE_OPTIONAL_KINDS = {
+  author: 'string',
+  duration: 'text',
+  mediaKey: 'string',
+  orderId: 'string',
+  title: 'string',
+  description: 'string',
+  productId: 'string',
+  latestEditSenderTimestampMs: 'number',
+  selectedButtonId: 'string',
+  selectedRowId: 'string',
+  pollName: 'string',
+  allowMultipleAnswers: 'boolean',
+  eventStartTime: 'unixSeconds',
+  eventEndTime: 'unixSeconds',
+  eventDescription: 'string',
+  eventLocation: 'any',
+  eventJoinLink: 'string',
+  messageSecret: 'numbers'
+} as const satisfies Partial<Record<keyof MessageSource, FieldKind>>
+
+const textOr = (value: unknown, fallback: string): string =>
+  typeof value === 'string' ? value : fallback
+const flag = (value: unknown): boolean => value === true
 
 const LOCATION_FIELDS = [
   'latitude',
@@ -477,7 +534,9 @@ function usableTimestamp(
   options: MessageMapOptions
 ): number | null {
   if (value === undefined || value === null) return null
-  if (isUsableUnixTime(value)) return value
+  // A fraction is floored: the order buffer sorts by this second, and a message must keep its place
+  const whole = Number.isFinite(value) ? Math.floor(value) : value
+  if (isUsableUnixTime(whole)) return whole
   options.onInvalidTimestamp?.()
   return null
 }
@@ -490,13 +549,33 @@ export function mapMessage(source: MessageSource, options: MessageMapOptions): M
 
 function mapMessageFields(source: MessageSource, options: MessageMapOptions): MessageDto {
   const timestamp = usableTimestamp(source.timestamp, options)
+  // A message is placed by its chat: without one there is no safe default (it would be stored and
+  // published under the wrong conversation), so it is refused and the caller leaves it out
+  const named = source.fromMe === true ? source.to : source.from
+  const chatId = typeof named === 'string' && named !== '' ? named : options.fallbackChatId
+  if (chatId === undefined || chatId === '') {
+    throw new Error('A message names no chat (from or to is missing)')
+  }
   const message: MessageDto = {
-    ...(pick(source, MESSAGE_FIELDS) as MessageDto), // required fields are filled by wwebjs
+    ...(pickTyped(source, MESSAGE_OPTIONAL_KINDS, options.onDroppedField) as Partial<MessageDto>),
+    // The type and the device are labels: a missing one is 'unknown' and the body is empty
+    deviceType: textOr(source.deviceType, 'unknown'),
+    body: textOr(source.body, ''),
+    type: textOr(source.type, 'unknown'),
+    // The other side of the conversation stays empty when only it is missing
+    from: textOr(source.from, ''),
+    to: textOr(source.to, ''),
+    fromMe: flag(source.fromMe),
+    hasMedia: flag(source.hasMedia),
+    hasQuotedMsg: flag(source.hasQuotedMsg),
+    hasReaction: flag(source.hasReaction),
     id: serializeId(source.id),
     ack: source.ack ?? null,
     isStarred: source.isStarred ?? false,
     links: source.links ?? [],
-    vCards: source.vCards ?? [],
+    vCards: (Array.isArray(source.vCards) ? source.vCards : []).filter(
+      (card): card is string => typeof card === 'string'
+    ),
     isStatus: source.isStatus ?? false,
     isGif: source.isGif ?? false,
     forwardingScore: source.forwardingScore ?? 0,
@@ -505,24 +584,27 @@ function mapMessageFields(source: MessageSource, options: MessageMapOptions): Me
     isForwarded: source.isForwarded ?? false,
     timestamp,
     // For a group chat `from` is the group, `author` the sender
-    chatId: source.fromMe ? source.to : source.from,
+    chatId,
     // A message without a usable timestamp is dated by its arrival so that it still has a place in the order
     sentAt: timestamp === null ? toIso(options.receivedAt) : unixToIso(timestamp),
     receivedAt: toIso(options.receivedAt),
-    mentionedIds: source.mentionedIds.map(serializeId),
-    groupMentions: source.groupMentions.map(({ groupSubject, groupJid }) => ({
-      groupSubject,
-      groupJid: serializeId(groupJid)
-    }))
+    mentionedIds: (Array.isArray(source.mentionedIds) ? source.mentionedIds : []).map(serializeId),
+    groupMentions: (Array.isArray(source.groupMentions) ? source.groupMentions : []).flatMap(
+      mention =>
+        mention && typeof mention.groupSubject === 'string' && mention.groupJid
+          ? [{ groupSubject: mention.groupSubject, groupJid: serializeId(mention.groupJid) }]
+          : []
+    )
   }
   const businessOwnerJid = optionalId(source.businessOwnerJid)
   if (businessOwnerJid !== undefined) message.businessOwnerJid = businessOwnerJid
   const dynamicReplyButtons = toJson(source.dynamicReplyButtons)
   if (dynamicReplyButtons !== undefined) message.dynamicReplyButtons = dynamicReplyButtons
-  if (source.pollOptions) {
-    message.pollOptions = source.pollOptions.map(option =>
-      typeof option === 'string' ? option : option.name
-    )
+  if (Array.isArray(source.pollOptions)) {
+    message.pollOptions = source.pollOptions.flatMap(option => {
+      const name = typeof option === 'string' ? option : option?.name
+      return typeof name === 'string' ? [name] : []
+    })
   }
   const location = mapLocation(source.location)
   if (location) message.location = location
@@ -757,18 +839,38 @@ export interface ChatSource extends Omit<
   lastMessage?: MessageSource | null
 }
 
-const CHAT_FIELDS = ['muteExpiration', 'name'] as const satisfies readonly (keyof ChatSource)[]
+const usableChatTime = (value: number | null | undefined): number | null =>
+  value !== undefined && value !== null && isUsableUnixTime(Math.floor(value))
+    ? Math.floor(value)
+    : null
+
+const CHAT_FIELDS = ['name'] as const satisfies readonly (keyof ChatSource)[]
 
 // The last message of a chat is shown only when it fits its schema: one odd message must not
 // turn a listing of every chat into a 500 (ADR 0006). The message stays in `messages` and the events.
-function mapLastMessage(source: MessageSource, options: MessageMapOptions): MessageDto | undefined {
+// The fields (never the values) a schema rejected, looking inside a union too, where the issue holds the
+// issues of every branch
+export function failedFields(error: z.ZodError): string[] {
+  const names = new Set<string>()
+  const visit = (issues: readonly z.core.$ZodIssue[]): void => {
+    for (const issue of issues) {
+      if (issue.code === 'invalid_union') for (const branch of issue.errors) visit(branch)
+      else names.add(issue.path.join('.') || '(root)')
+    }
+  }
+  visit(error.issues)
+  return [...names]
+}
+
+function mapTolerantMessage(
+  source: MessageSource,
+  options: MessageMapOptions
+): MessageDto | undefined {
   try {
     const message = mapMessage(source, options)
     const parsed = MessageSchema.safeParse(message)
     if (parsed.success) return message
-    options.onUnreadableMessage?.(
-      [...new Set(parsed.error.issues.map(issue => issue.path.join('.') || '(root)'))].join(', ')
-    )
+    options.onUnreadableMessage?.(failedFields(parsed.error).join(', '))
   } catch (error: unknown) {
     options.onUnreadableMessage?.(
       `(mapping failed: ${error instanceof Error ? error.name : typeof error})`
@@ -789,35 +891,54 @@ export function mapChat(source: ChatSource, options: MessageMapOptions): ChatDto
     archived: source.archived ?? false,
     isReadOnly: source.isReadOnly ?? false,
     isLocked: source.isLocked ?? false,
-    timestamp: source.timestamp ?? null
+    timestamp: usableChatTime(source.timestamp)
   }
-  const lastMessage = source.lastMessage ? mapLastMessage(source.lastMessage, options) : undefined
+  if (
+    source.muteExpiration !== undefined &&
+    source.muteExpiration !== null &&
+    isUsableUnixTime(source.muteExpiration)
+  ) {
+    chat.muteExpiration = source.muteExpiration
+  }
+  const lastMessage = source.lastMessage
+    ? mapTolerantMessage(source.lastMessage, options)
+    : undefined
   if (lastMessage) chat.lastMessage = lastMessage
   return chat
 }
 
 export interface GroupChatSource extends Omit<ChatSource, never> {
   owner?: IdLike | null
-  createdAt: Date | number
+  createdAt?: Date | number | null
   description?: string | null
-  participants: (Omit<GroupChatDto['participants'][number], 'id' | 'isAdmin' | 'isSuperAdmin'> & {
+  participants?: (Omit<GroupChatDto['participants'][number], 'id' | 'isAdmin' | 'isSuperAdmin'> & {
     id: IdLike
     isAdmin?: boolean | null
     isSuperAdmin?: boolean | null
   })[]
 }
 
+function creationOf(value: Date | number | null | undefined): { createdAt?: string } {
+  if (value === undefined || value === null) return {}
+  const time = new Date(value)
+  return Number.isNaN(time.getTime()) ? {} : { createdAt: time.toISOString() }
+}
+
 export function mapGroupChat(source: GroupChatSource, options: MessageMapOptions): GroupChatDto {
   return {
     ...mapChat(source, options),
     owner: source.owner === undefined || source.owner === null ? null : serializeId(source.owner),
-    createdAt: toIso(source.createdAt),
+    // GroupChat.createdAt is `new Date(creation * 1000)`: an Invalid Date when WhatsApp sent no `creation`
+    ...creationOf(source.createdAt),
     description: source.description ?? null,
-    participants: source.participants.map(participant => ({
-      id: serializeId(participant.id),
-      isAdmin: participant.isAdmin ?? false,
-      isSuperAdmin: participant.isSuperAdmin ?? false
-    }))
+    // wwebjs itself reads a group without participants as empty (`participants || []`)
+    participants: (Array.isArray(source.participants) ? source.participants : []).map(
+      participant => ({
+        id: serializeId(participant.id),
+        isAdmin: participant.isAdmin ?? false,
+        isSuperAdmin: participant.isSuperAdmin ?? false
+      })
+    )
   }
 }
 
@@ -852,7 +973,9 @@ export function mapChannel(source: ChannelSource, options: MessageMapOptions): C
     unreadCount: source.unreadCount ?? 0,
     isMuted: source.isMuted ?? false
   }
-  const lastMessage = source.lastMessage ? mapLastMessage(source.lastMessage, options) : undefined
+  const lastMessage = source.lastMessage
+    ? mapTolerantMessage(source.lastMessage, options)
+    : undefined
   if (lastMessage) channel.lastMessage = lastMessage
   return channel
 }
@@ -899,23 +1022,41 @@ export function mapLabel(source: LabelDto): LabelDto {
   return { ...pick(source, ['hexColor'] as const), id: source.id, name: source.name }
 }
 
-export interface BroadcastSource extends Omit<BroadcastDto, 'id' | 'msgs'> {
+export interface BroadcastSource extends Omit<
+  BroadcastDto,
+  'id' | 'msgs' | 'totalCount' | 'unreadCount'
+> {
   id: IdLike
-  msgs: MessageSource[]
+  // Broadcast.js builds `msgs` with `data.msgs?.map(...)` and copies the counts without a default
+  msgs?: MessageSource[]
+  totalCount?: number | null
+  unreadCount?: number | null
 }
 
 export function mapBroadcast(source: BroadcastSource, options: MessageMapOptions): BroadcastDto {
+  // One status that does not fit its schema is left out, as the last message of a chat is: it must not
+  // turn the listing of every broadcast into a 500
+  const msgs = (Array.isArray(source.msgs) ? source.msgs : []).flatMap(message => {
+    const mapped = mapTolerantMessage(message, options)
+    return mapped === undefined ? [] : [mapped]
+  })
   return {
     id: serializeId(source.id),
     timestamp: source.timestamp,
-    totalCount: source.totalCount,
-    unreadCount: source.unreadCount,
-    msgs: source.msgs.map(message => mapMessage(message, options))
+    totalCount: source.totalCount ?? msgs.length,
+    unreadCount: source.unreadCount ?? 0,
+    msgs
   }
 }
 
 // `from` is `data.peerJid` in Call.js, the wid WhatsApp Web holds, though the typings say string
-export type CallSource = Omit<CallDto, 'from' | 'participants'> & {
+export type CallSource = Omit<
+  CallDto,
+  'from' | 'participants' | 'isVideo' | 'isGroup' | 'fromMe'
+> & {
+  isVideo?: boolean | null
+  isGroup?: boolean | null
+  fromMe?: boolean | null
   from?: IdLike | null
   participants?: object | null
 }
@@ -931,7 +1072,15 @@ const CALL_FIELDS = [
 ] as const satisfies readonly (keyof CallSource)[]
 
 export function mapCall(source: CallSource): CallDto {
-  const call: CallDto = pick(source, CALL_FIELDS)
+  // The id is what a call is told apart by: without one there is nothing to deliver
+  if (typeof source.id !== 'string' || source.id === '') throw new Error('A call has no id')
+  // Call.js copies the flags without a default: a missing one is false, as `outgoing` is in the patched hook
+  const call: CallDto = {
+    ...pick(source, CALL_FIELDS),
+    isVideo: source.isVideo ?? false,
+    isGroup: source.isGroup ?? false,
+    fromMe: source.fromMe ?? false
+  }
   const from = optionalId(source.from)
   if (from !== undefined) call.from = from
   const participants = toJson(source.participants)
@@ -955,13 +1104,13 @@ export function mapProduct(source: ProductDto): ProductDto {
 }
 
 export interface OrderSource extends Omit<OrderDto, 'products'> {
-  products: ProductDto[]
+  products?: ProductDto[] // Order.js sets it only `if (data.products)`
 }
 
 export function mapOrder(source: OrderSource): OrderDto {
   return {
     ...pick(source, ['subtotal', 'total', 'currency', 'createdAt'] as const),
-    products: source.products.map(mapProduct)
+    products: (source.products ?? []).map(mapProduct)
   }
 }
 

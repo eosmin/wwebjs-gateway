@@ -536,11 +536,11 @@ describe('calls', () => {
     const getChats = stub(h.client, 'getChats')
     ready(h)
 
-    // A chat whose data the mapper cannot read
-    getChats.mockResolvedValueOnce([{ id: undefined }])
-    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaMappingError)
+    // A chat whose data the mapper cannot read (a listing leaves it out, see the listings below)
+    stub(h.client, 'getChatById').mockResolvedValueOnce({ id: undefined })
+    await expect(h.adapter.getChatById('x@c.us')).rejects.toBeInstanceOf(WaMappingError)
     expect(warn).toHaveBeenCalledWith(
-      expect.stringMatching(/^getChats failed \[MAPPING\] \(TypeError\)/)
+      expect.stringMatching(/^getChatById failed \[MAPPING\] \(TypeError\)/)
     )
 
     // A TypeError that comes out of the library itself is not a mapper of ours
@@ -590,6 +590,33 @@ describe('calls', () => {
       expect(JSON.stringify(warn.mock.calls)).not.toContain(leaked)
     }
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('createGroup'))
+  })
+
+  it('does not report a group action that happened as failed when the outcomes are odd', async () => {
+    const h = harness()
+    stub(h.client, 'getChatById').mockResolvedValue({
+      ...waChat({ isGroup: true }),
+      participants: [],
+      addParticipants: jest
+        .fn()
+        .mockResolvedValue({ 'a@c.us': { code: '200', message: 'added' }, 'b@c.us': 'odd' })
+    })
+    stub(h.client, 'createGroup').mockResolvedValue({
+      title: 'G',
+      gid: { _serialized: 'g@g.us' },
+      participants: { 'a@c.us': { statusCode: 200, isGroupCreator: 'no' } }
+    })
+    ready(h)
+
+    // The action went through: the outcome is delivered with what is known, never a failure
+    await expect(h.adapter.addParticipants('g@g.us', ['a@c.us'])).resolves.toEqual({
+      'a@c.us': { message: 'added' },
+      'b@c.us': {}
+    })
+    await expect(h.adapter.createGroup('G', ['a@c.us'])).resolves.toMatchObject({
+      gid: 'g@g.us',
+      participants: { 'a@c.us': { statusCode: 200 } }
+    })
   })
 
   it('masks the text answers of addParticipants and createChannel too', async () => {
@@ -785,6 +812,90 @@ describe('calls', () => {
     await expect(h.adapter.getBroadcasts()).resolves.toEqual([
       { id: '5215500000001@c.us', timestamp: 1, totalCount: 0, unreadCount: 0, msgs: [] }
     ])
+  })
+
+  describe('a listing with one item that cannot be delivered', () => {
+    const warnings = () => jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+
+    it('leaves out a chat the mapper cannot read and keeps the rest, logging field names only', async () => {
+      const warn = warnings()
+      const h = harness()
+      stub(h.client, 'getChats').mockResolvedValue([
+        waChat({ id: wid('5215500000001@c.us'), name: 'Secret Ana' }),
+        { id: undefined },
+        waChat({ id: wid('5215500000003@c.us'), unreadCount: 'many' })
+      ])
+      ready(h)
+
+      const chats = await h.adapter.getChats()
+
+      expect(chats.map(chat => chat.id)).toEqual(['5215500000001@c.us'])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('2 of 3'))
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/Secret|5215500000/)
+    })
+
+    it('does the same for contacts, channels, labels and broadcasts', async () => {
+      const warn = warnings()
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation()
+      const h = harness()
+      stub(h.client, 'getContacts').mockResolvedValue([
+        { id: wid('1@c.us'), isBusiness: false },
+        { id: undefined }
+      ])
+      stub(h.client, 'getChannels').mockResolvedValue([{ id: undefined }])
+      stub(h.client, 'getLabels').mockResolvedValue([
+        { id: '1', name: 'L', hexColor: '#fff' },
+        { id: undefined, name: undefined }
+      ])
+      stub(h.client, 'getBroadcasts').mockResolvedValue([
+        { id: wid('status@broadcast'), timestamp: 1, totalCount: 0, unreadCount: 0, msgs: [] },
+        { id: {} }
+      ])
+      ready(h)
+
+      expect(await h.adapter.getContacts()).toHaveLength(1)
+      await expect(h.adapter.getChannels()).resolves.toEqual([])
+      expect(await h.adapter.getLabels()).toHaveLength(1)
+      expect(await h.adapter.getBroadcasts()).toHaveLength(1)
+      for (const what of ['contacts', 'labels', 'broadcasts']) {
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${what}: 1 of`))
+      }
+      // The only channel failing is every item of its listing: a broken mapper, said at error level
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('channels: every item'))
+    })
+
+    it('logs at error level when it leaves out every item, which is a broken mapper, not an odd item', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation()
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      const h = harness()
+      stub(h.client, 'getChats').mockResolvedValue([{ id: undefined }, { id: undefined }])
+      ready(h)
+
+      await expect(h.adapter.getChats()).resolves.toEqual([])
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('every item'))
+    })
+
+    it('leaves out one odd message of a message listing too', async () => {
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      const h = harness()
+      stub(h.client, 'getChatById').mockResolvedValue({
+        ...waChat(),
+        fetchMessages: jest
+          .fn()
+          .mockResolvedValue([{ id: wid('x'), from: undefined, fromMe: false }])
+      })
+      ready(h)
+
+      await expect(h.adapter.fetchMessages('a@c.us')).resolves.toEqual([])
+    })
+
+    it('does not hide a failure of the library behind an empty listing', async () => {
+      const h = harness()
+      stub(h.client, 'getChats').mockRejectedValue(new Error('page closed'))
+      ready(h)
+
+      await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
+    })
   })
 
   it('answers a chat the page does not have as not found, in the chat operations and the group ones', async () => {
@@ -1428,10 +1539,26 @@ describe('sending', () => {
     }
   )
 
+  it('delivers a sent message whose answer names no chat, under the chat it was sent to', async () => {
+    const h = harness()
+    stub(h.client, 'sendMessage').mockResolvedValue({
+      id: wid('true_c@c.us_3EB0'),
+      fromMe: true,
+      body: 'x',
+      type: 'chat',
+      timestamp: 1_792_000_000
+    })
+    ready(h)
+
+    await expect(
+      h.adapter.sendMessage('c@c.us', { type: 'text', body: 'x' })
+    ).resolves.toMatchObject({ chatId: 'c@c.us' })
+  })
+
   it('reports a send whose result cannot be read as an unknown outcome, never as not sent', async () => {
     const h = harness()
     jest.spyOn(Logger.prototype, 'warn').mockImplementation()
-    stub(h.client, 'sendMessage').mockResolvedValue({ id: wid('broken') })
+    stub(h.client, 'sendMessage').mockResolvedValue({ id: undefined })
     ready(h)
 
     const error: unknown = await h.adapter
@@ -1572,22 +1699,28 @@ describe('sending', () => {
 })
 
 describe('boundaries', () => {
-  it('turns a bad participants answer into WaOperationError without echoing it', async () => {
+  it('delivers a bad participants answer without its odd fields and never echoes them', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
     const h = harness()
-    const group = {
+    const addParticipants = jest
+      .fn()
+      .mockResolvedValueOnce({ 'a@c.us': { code: 'secret-5215500000001' } })
+      .mockResolvedValueOnce(42)
+    stub(h.client, 'getChatById').mockResolvedValue({
       ...waChat({ isGroup: true }),
       participants: [],
-      addParticipants: jest.fn().mockResolvedValue({ 'a@c.us': { code: 'secret-5215500000001' } })
-    }
-    stub(h.client, 'getChatById').mockResolvedValue(group)
+      addParticipants
+    })
     ready(h)
 
-    const error: unknown = await h.adapter
-      .addParticipants('g@g.us', ['a@c.us'])
-      .catch((e: unknown) => e)
+    const odd = await h.adapter.addParticipants('g@g.us', ['a@c.us'])
+    const notARecord = await h.adapter.addParticipants('g@g.us', ['a@c.us'])
 
-    expect(error).toBeInstanceOf(WaOperationError)
-    expect((error as Error).message).not.toContain('5215500000001')
+    expect(JSON.stringify(odd)).not.toContain('5215500000001')
+    expect(odd).toEqual({ 'a@c.us': {} })
+    expect(notARecord).toEqual({})
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unexpected shape'))
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('5215500000001')
   })
 
   it('keeps the text answers of createGroup and addParticipants', async () => {
