@@ -574,6 +574,44 @@ describe('calls', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('5215512345678')
   })
 
+  it('returns a sanitized reason when createGroup answers a text, and logs it', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    ready(h)
+    stub(h.client, 'createGroup').mockResolvedValueOnce(
+      'CreateGroupError: unknown (Bad 5215512345678@c.us, +52 55 1234 5678 in Secret Club)'
+    )
+
+    const result = await h.adapter.createGroup('Secret Club', ['5215512345678@c.us'])
+
+    expect(typeof result).toBe('string')
+    for (const leaked of ['5215512345678', '1234 5678', 'Secret Club']) {
+      expect(result).not.toContain(leaked)
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(leaked)
+    }
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('createGroup'))
+  })
+
+  it('masks the text answers of addParticipants and createChannel too', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    stub(h.client, 'getChatById').mockResolvedValue({
+      ...waChat({ isGroup: true }),
+      participants: [],
+      addParticipants: jest.fn().mockResolvedValue('cannot add 5215512345678@c.us')
+    })
+    stub(h.client, 'createChannel').mockResolvedValueOnce('bad channel Secret News, 5215512345678')
+    ready(h)
+
+    const added = await h.adapter.addParticipants('g@g.us', ['5215512345678@c.us'])
+    const channel = await h.adapter.createChannel('secret news')
+
+    for (const text of [added, channel, JSON.stringify(warn.mock.calls)]) {
+      expect(text).not.toContain('5215512345678')
+      expect(text).not.toMatch(/secret news/i)
+    }
+  })
+
   // WhatsApp took the message by the time the answer is mapped: it must read as an unknown outcome,
   // never as "not sent"
   it('reports a send whose result cannot be mapped as dispatched and unknown', async () => {
