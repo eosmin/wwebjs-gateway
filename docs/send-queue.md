@@ -13,7 +13,7 @@ A send that fails is a **finished** job (its result says `ok: false` and the err
 
 ## What a job goes through
 
-1. **Not ready.** While the session is not `ready` the job waits and looks again every `SEND_NOT_READY_RETRY_MS`. It gives up with `SESSION_NOT_READY` once `SEND_MAX_WAIT_MS` has passed since it was queued.
+1. **Not ready.** While the session is not `ready` the job waits and looks again every `SEND_NOT_READY_RETRY_MS`. It gives up with `SESSION_NOT_READY` once `SEND_MAX_WAIT_MS` has passed since it first found the session not ready. A job held for hours by a cold-send rule, or one that waited out a restart, gets the whole time again, so a brief blink of the session does not fail it.
 2. **Send policy.** `SendPolicyService.admit` answers `allow` (the budgets are spent), `delay` (the worker waits and asks again) or `reject` (the job ends with that code and `details.rule`). A delay beyond `SEND_POLICY_MAX_WAIT_MS` ends as `POLICY_DELAY_EXCEEDED`. See [safety.md](safety.md).
 3. **Pacing.** At least `SEND_MIN_INTERVAL_MS` plus a random part up to `SEND_JITTER_MS` between two sends of the session.
 4. **Humanize** (only when the request has it): `markSeenFirst`, then the typing or recording state for the requested time (at least `HUMANIZE_MIN_REPLY_DELAY_MS`), renewed every 20 s, and always cleared afterwards, even if the send is given up.
