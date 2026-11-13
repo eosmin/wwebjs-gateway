@@ -1,3 +1,5 @@
+import { logoutReasonLabel } from '../../whatsapp/logout-diagnostics.js'
+
 import { METRIC_DEFINITIONS } from './metric-definitions.js'
 import { MetricsService } from './metrics.service.js'
 
@@ -92,7 +94,8 @@ describe('MetricsService', () => {
     const body = await first.scrape()
     expect(body).toContain('gw_send_total{result="sent"} 2')
     expect(body).toContain('gw_send_total{result="failed"} 1')
-    expect(await second.scrape()).not.toContain('gw_send_total{result="sent"}')
+    // The other instance has its own counts: the seeded series is still at zero there
+    expect(await second.scrape()).toContain('gw_send_total{result="sent"} 0')
   })
 
   it('observes histograms into the configured buckets', async () => {
@@ -108,5 +111,36 @@ describe('MetricsService', () => {
 
   it('answers with the Prometheus content type', () => {
     expect(new MetricsService().contentType).toContain('text/plain')
+  })
+})
+
+// A counter series that first shows at 1 gives Prometheus no increase(): the series of the labels with
+// a fixed set are written at 0 from the start
+describe('the seeded series', () => {
+  it('shows every logout reason, browser code, pipeline stage and send result at 0 before anything happens', async () => {
+    const text = await new MetricsService().scrape()
+
+    for (const line of [
+      'gw_logout_total{reason="client_fatal"} 0',
+      'gw_logout_total{reason="unspecified"} 0',
+      'gw_logout_total{reason="other"} 0',
+      'gw_browser_recoveries_total{code="PAGE_CRASHED"} 0',
+      'gw_pipeline_errors_total{stage="policy"} 0',
+      'gw_send_total{result="sent"} 0',
+      'gw_send_total{result="UNKNOWN_OUTCOME"} 0'
+    ]) {
+      expect(text).toContain(line)
+    }
+  })
+
+  it('has a seed for every label value the code can write for those counters', () => {
+    const seeded = (
+      definition: { seed?: readonly Record<string, string>[] },
+      label: string
+    ): string[] => (definition.seed ?? []).map(labels => labels[label] ?? '')
+
+    for (const reason of ['0', '1', '2', '3', undefined, '9']) {
+      expect(seeded(METRIC_DEFINITIONS.logouts, 'reason')).toContain(logoutReasonLabel(reason))
+    }
   })
 })

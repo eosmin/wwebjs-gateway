@@ -328,16 +328,30 @@ describe('events', () => {
       const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
       const h = harness()
       Object.assign(h.client, {
-        pupPage: pageAt(
-          'https://web.whatsapp.com/?post_logout=1&logout_reason=client_fatal&x=secret'
-        )
+        pupPage: pageAt('https://web.whatsapp.com/?post_logout=1&logout_reason=0&x=secret')
       })
 
       h.client.emit('disconnected', 'LOGOUT')
 
-      expect(logged(warn)).toContain('logoutReason=client_fatal')
+      expect(logged(warn)).toContain('logoutReason=0')
       expect(logged(warn)).not.toContain('secret')
       expect(logged(warn)).not.toContain('web.whatsapp.com')
+    })
+
+    it('keeps the reason for the manager to count, and none when there was none', () => {
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+      const h = harness()
+      expect(h.adapter.lastLogoutReason()).toBeUndefined()
+      Object.assign(h.client, {
+        pupPage: pageAt('https://web.whatsapp.com/?post_logout=1&logout_reason=3')
+      })
+
+      h.client.emit('disconnected', 'LOGOUT')
+      expect(h.adapter.lastLogoutReason()).toBe('3')
+
+      Object.assign(h.client, { pupPage: pageAt('https://web.whatsapp.com/?post_logout=1') })
+      h.client.emit('disconnected', 'LOGOUT')
+      expect(h.adapter.lastLogoutReason()).toBeUndefined()
     })
 
     it('leaves the reason out when it is not a short token', () => {

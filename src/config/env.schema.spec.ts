@@ -400,6 +400,16 @@ describe('envSchema bounds and edges', () => {
       },
       'WWEB_VERSION_REMOTE_PATH'
     ],
+    [
+      'a verified build that is not a WhatsApp Web build',
+      { WWEB_VERIFIED_BUILD: 'latest' },
+      'WWEB_VERIFIED_BUILD'
+    ],
+    [
+      'a verified build with a suffix',
+      { WWEB_VERIFIED_BUILD: '2.3000.1-alpha' },
+      'WWEB_VERIFIED_BUILD'
+    ],
     ['a SOCKS proxy with credentials', { PROXY_URL: 'socks5://u:p@proxy.test:1080' }, 'PROXY_URL'],
     [
       'a path without the placeholder',
@@ -622,5 +632,25 @@ describe('parseEnv', () => {
   ])('refuses %s above its ceiling of the send policy', (key, value) => {
     expect(() => parseEnv({ ...valid, [key]: String(value) })).toThrow(new RegExp(key))
     expect(parseEnv({ ...valid, [key]: String(value - 1) })).toHaveProperty(key, value - 1)
+  })
+})
+
+describe('WWEB_VERIFIED_BUILD', () => {
+  const base = {
+    NODE_ENV: 'test',
+    PUBLIC_BASE_URL: 'http://localhost:3000',
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
+    REDIS_URL: 'redis://localhost:6379',
+    ADMIN_API_KEY: 'a'.repeat(32)
+  }
+
+  it('is optional and empty by default, which means no comparison', () => {
+    expect(parseEnv(base).WWEB_VERIFIED_BUILD).toBeUndefined()
+  })
+
+  it('takes a build of the form 2.3000.<number>', () => {
+    expect(
+      parseEnv({ ...base, WWEB_VERIFIED_BUILD: '2.3000.1054292354' }).WWEB_VERIFIED_BUILD
+    ).toBe('2.3000.1054292354')
   })
 })

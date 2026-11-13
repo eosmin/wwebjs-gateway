@@ -1,0 +1,276 @@
+# Alert rules for the wwebjs-gateway (F29). Load this file under `rule_files:` of Prometheus.
+#
+# - The gateway is ONE instance with a handful of sessions, so the thresholds are small on purpose:
+#   one logout, one quarantine or one stuck session already matters. Raise them if your volume does.
+# - `job="wwebjs-gateway"` in the `up` rule is the job name of your scrape config; change it to yours.
+# - tests/ops/prometheus-alerts.spec.ts parses this file and fails when a rule cites a series or a
+#   label that docs/metrics.md (metric-definitions.ts) does not define, so a renamed metric cannot
+#   leave a rule that never fires.
+# - Every rule has `description` (what fires it) and `action` (what to do first). The longer
+#   procedures are in docs/operations.md.
+groups:
+  - name: wwebjs-gateway-account
+    rules:
+      - alert: GatewaySessionLoggedOut
+        expr: increase(gw_logout_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: A session was logged out by WhatsApp Web
+          description: >-
+            WhatsApp Web logged a linked account out (gw_logout_total went up), by `reason`: client_fatal
+            (the page storage or a chat write failed), sync_fail, history_sync_timeout, account_locked,
+            unspecified (unlinked on the phone or revoked by WhatsApp) or other. The saved login is gone and
+            the session needs a new QR code. One is enough to look at: a login can be lost for good.
+          action: >-
+            Read the `LOGOUT` warning of that session (logoutReason) and the debug lines of the page, then
+            check the phone for "linked devices". Do not retry sends or link the same number again within
+            minutes; see "What to do when WhatsApp Web changes" and "Pilot rollout" in docs/operations.md.
+
+      - alert: GatewayAuthQuarantined
+        expr: increase(gw_auth_quarantined_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: A saved login was refused by WhatsApp and moved to quarantine
+          description: >-
+            The gateway moved a saved login aside on its own because WhatsApp refused it, which usually means
+            the account was unlinked while the gateway was stopped. The session will ask for a QR code.
+          action: >-
+            Check the account on the phone, then link it again with GET /v1/sessions/:id/qr. The old login
+            stays in the quarantine folder of WWEBJS_DATA_PATH; do not restore it without looking.
+
+      - alert: GatewayNoReadySession
+        expr: sum(gw_sessions{status="ready"}) == 0 and sum(gw_sessions{status=~"starting|authenticating|disconnected|failed"}) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: No session is ready and some are trying to be
+          description: >-
+            Sessions exist that are starting, authenticating, disconnected or failed, and none has been ready
+            for 10 minutes. Nothing is being sent or received. 10 minutes covers a normal restart and a
+            reconnect with its backoff. A session that waits for a QR code or a pairing code is not counted:
+            it waits for a person, not for the gateway.
+          action: >-
+            GET /ready and GET /v1/sessions: read each session's status and lastError. `failed` or
+            `disconnected` for long means look at the logs for the cause; a session in `qr` needs a scan.
+
+  - name: wwebjs-gateway-whatsapp-web
+    rules:
+      - alert: GatewayWhatsAppWebBuildsMixed
+        expr: count(gw_wa_web_build_info) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Sessions run different WhatsApp Web builds
+          description: >-
+            Two or more WhatsApp Web builds are in use at the same time (gw_wa_web_build_info has more than one
+            version), so the page of some sessions loaded a newer build than the others. WhatsApp ships a new
+            build every few hours; a new build can change the functions the library calls.
+          action: >-
+            Compare the versions with WWEB_VERIFIED_BUILD and with the build the patch was last checked on
+            (docs/sessions.md). If the builds are new, run the signature sweep on an unlinked page before a
+            502 shows up, and pin WWEB_VERSION if one build is known good.
+
+      - alert: GatewayWhatsAppWebBuildUnknown
+        expr: gw_wa_web_build_info{version="unknown"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: A session could not read its WhatsApp Web build
+          description: >-
+            A ready session answered a build that is not of the form 2.3000.<number>, or did not answer.
+            WhatsApp Web may have changed how it names its version, which also changes what the gateway
+            expects from the page.
+          action: >-
+            GET /v1/system/info and look at wwebVersion; read the "Reading the WhatsApp Web build failed"
+            warning; run the signature sweep (docs/operations.md) before more sends.
+
+      - alert: GatewayEventsDropped
+        expr: increase(gw_events_skipped_total[1h]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: The adapter dropped events it could not map
+          description: >-
+            More than 5 events in an hour could not be mapped to the gateway format and were dropped. A single
+            odd event happens; a run of them is the sign that WhatsApp Web changed the shape of what it sends.
+          action: >-
+            Look at the `event` label, find the warning with the event name in the logs, and compare with the
+            last verified build. Messages may be missing from the webhooks: reconcile after a fix.
+
+  - name: wwebjs-gateway-sessions
+    rules:
+      - alert: GatewayWatchdogRestarts
+        expr: increase(gw_watchdog_restarts_total[30m]) >= 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: The watchdog restarted sessions three times in 30 minutes
+          description: >-
+            The watchdog restarted a frozen browser, a start that never ended or a browser above its memory
+            limit three or more times in half an hour. One restart is normal care; three is a loop.
+          action: >-
+            Read the watchdog lines of the logs for the reason. If it is memory, look at process memory and
+            the number of sessions on the host; if it is a start that never ends, the WhatsApp Web page does
+            not load: check the network and the pinned build.
+
+      - alert: GatewayBrowserRecoveries
+        expr: increase(gw_browser_recoveries_total[30m]) >= 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Browsers or pages died and were recovered three times in 30 minutes
+          description: >-
+            The adapter found the browser or the page of a session gone (killed, crashed or closed) three or
+            more times in 30 minutes and sent it to reconnect. The `code` label says which.
+          action: >-
+            Check the host for the out-of-memory killer and for Chrome crashes; a page that closes on its own
+            can be WhatsApp Web reloading, see "What to do when WhatsApp Web changes".
+
+      - alert: GatewayDisconnectStorm
+        expr: increase(gw_events_total{event="disconnected"}[30m]) >= 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Three or more disconnect events in 30 minutes
+          description: >-
+            WhatsApp Web reported a disconnect three or more times in half an hour (any reason, including
+            NAVIGATION and LOGOUT). A single reconnect is routine; repeated ones mean an unstable link or a
+            page reloading.
+          action: >-
+            Read the "disconnected (reason=...)" warnings for the reason and the time since ready, and check
+            the network of the host and whether a new WhatsApp Web build appeared (GatewayWhatsAppWebBuildsMixed).
+
+      - alert: GatewayMessagesRecovered
+        expr: increase(gw_reconcile_recovered_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: Messages were recovered after a reconnect
+          description: >-
+            The reconciliation pass found messages that arrived while the session was disconnected and
+            published them. They reach the webhooks late and possibly out of order (use `seq`). It is the
+            gateway working as designed, and a measure of how long sessions are offline.
+          action: >-
+            Nothing to do for a few; if it happens every hour, look for the cause of the disconnections
+            (GatewayDisconnectStorm).
+
+  - name: wwebjs-gateway-delivery
+    rules:
+      - alert: GatewaySendQueueBacklog
+        expr: max(gw_send_queue_depth) > 100
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: A send queue has more than 100 jobs waiting for 15 minutes
+          description: >-
+            The queue of a session holds more than 100 waiting jobs for 15 minutes. The send policy spaces
+            messages on purpose, so a short queue is normal; a long one for this long means sends arrive
+            faster than the policy lets them go, or the session is not sending.
+          action: >-
+            Look at gw_policy_decisions_total for `delay` and at the session status. Slow the producer rather
+            than raising the limits of the policy: a faster send rate is what gets a number restricted.
+
+      - alert: GatewaySendFailures
+        expr: sum(increase(gw_send_total{result=~"WHATSAPP_ERROR|WHATSAPP_TIMEOUT|INTERNAL"}[30m])) > 5 and sum(increase(gw_send_total{result=~"WHATSAPP_ERROR|WHATSAPP_TIMEOUT|INTERNAL"}[30m])) / sum(increase(gw_send_total[30m])) > 0.2
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: More than a fifth of the sends failed in WhatsApp Web
+          description: >-
+            More than 5 sends and over 20% of them in 30 minutes ended as WHATSAPP_ERROR, WHATSAPP_TIMEOUT or
+            INTERNAL. Refusals of the send policy are not counted, nor is SESSION_NOT_READY (a restart window
+            has it, and the queue retries it): this is the page or the session failing, typically after a
+            WhatsApp Web build changed a function.
+          action: >-
+            Look for `[signature]` or `[lazy-module]` in the causes of the logs; if found, follow "What to do
+            when WhatsApp Web changes". Stop sending to the session if it is not ready.
+
+      - alert: GatewaySendUnknownOutcome
+        expr: increase(gw_send_total{result="UNKNOWN_OUTCOME"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: A send ended with an unknown outcome
+          description: >-
+            A send was dispatched to WhatsApp Web and the answer was lost (the page went away or failed after
+            the message was added), so nobody knows whether it was delivered. The gateway never retries such
+            a send by itself, to avoid a duplicate; one is enough to look at.
+          action: >-
+            Find the job in the send queue, ask the recipient or look at the chat on the phone, and resend with
+            the same Idempotency-Key only if the message is not there.
+
+      - alert: GatewayHttpServerErrors
+        expr: sum(rate(gw_http_requests_total{status=~"5.."}[5m])) / sum(rate(gw_http_requests_total[5m])) > 0.05 and sum(rate(gw_http_requests_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5% of the API answers are 5xx
+          description: >-
+            Over 5% of the HTTP answers of the last 5 minutes were 5xx for 10 minutes, with at least one
+            request every 20 seconds so that a single failure on a quiet gateway does not fire it. A 502
+            carries the failure of a call into WhatsApp Web; a 500 is a bug of the gateway.
+          action: >-
+            Group gw_http_requests_total by route and status, then read the logs of that route; a 502 with
+            `[signature]` is a WhatsApp Web change.
+
+      - alert: GatewayWebhookFailures
+        expr: increase(gw_webhook_deliveries_total{result=~"failed|dropped"}[30m]) > 10
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 10 webhook deliveries failed for good in 30 minutes
+          description: >-
+            Deliveries that failed their last attempt or were dropped (`failed` and `dropped`), more than 10
+            in half an hour. The consumer is down, slow or rejecting the signature; events are kept in the
+            gateway and can be sent again.
+          action: >-
+            Check the consumer endpoint and its answer codes in GET /v1/webhooks/:id/deliveries, fix it, and
+            send again what failed with POST /v1/webhooks/:id/deliveries/retry-failed.
+
+      - alert: GatewayPipelineErrors
+        expr: increase(gw_pipeline_errors_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: The event pipeline failed at some stage
+          description: >-
+            An inbound event failed at the stage in the `stage` label (dedupe, store, publish, replay, event,
+            policy). The pipeline is built to not lose events, so any failure is worth reading: Redis or
+            Postgres may be unreachable.
+          action: >-
+            GET /ready for the state of Postgres and Redis, then read the pipeline warning of the stage in the
+            logs.
+
+  - name: wwebjs-gateway-process
+    rules:
+      - alert: GatewayDown
+        expr: up{job="wwebjs-gateway"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Prometheus cannot scrape the gateway
+          description: >-
+            The scrape of the gateway failed for 2 minutes: the process is down, restarting in a loop or
+            the METRICS_TOKEN is wrong. The gateway is a single instance, so nothing is serving.
+          action: >-
+            Check the container, its restarts and the last lines of its log. After a restart the sessions of
+            the volume come back without a QR code unless a login was lost.

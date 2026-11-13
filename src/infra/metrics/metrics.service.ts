@@ -5,8 +5,16 @@ import { METRIC_DEFINITIONS, type MetricDefinition } from './metric-definitions.
 
 type Definition<L extends string> = MetricDefinition & { labels: readonly L[] }
 
-const counter = <L extends string>(registry: Registry, def: Definition<L>): Counter<L> =>
-  new Counter({ name: def.name, help: def.help, labelNames: def.labels, registers: [registry] })
+const counter = <L extends string>(registry: Registry, def: Definition<L>): Counter<L> => {
+  const made = new Counter({
+    name: def.name,
+    help: def.help,
+    labelNames: def.labels,
+    registers: [registry]
+  })
+  for (const labels of def.seed ?? []) (made as unknown as Counter<string>).inc(labels, 0)
+  return made
+}
 
 const gauge = <L extends string>(registry: Registry, def: Definition<L>): Gauge<L> =>
   new Gauge({ name: def.name, help: def.help, labelNames: def.labels, registers: [registry] })
@@ -40,6 +48,8 @@ export interface Metrics {
   watchdogRestarts: Counter
   browserRecoveries: Counter<'code'>
   authQuarantined: Counter
+  logouts: Counter<'reason'>
+  waWebBuild: Gauge<'version'>
   reconcileRecovered: Counter
   policyDecisions: Counter<'rule' | 'decision'>
   policyDelaySeconds: Histogram
@@ -68,6 +78,8 @@ export function createMetrics(registry: Registry): Metrics {
     watchdogRestarts: counter(registry, d.watchdogRestarts),
     browserRecoveries: counter(registry, d.browserRecoveries),
     authQuarantined: counter(registry, d.authQuarantined),
+    logouts: counter(registry, d.logouts),
+    waWebBuild: gauge(registry, d.waWebBuild),
     reconcileRecovered: counter(registry, d.reconcileRecovered),
     policyDecisions: counter(registry, d.policyDecisions),
     policyDelaySeconds: histogram(registry, d.policyDelaySeconds),

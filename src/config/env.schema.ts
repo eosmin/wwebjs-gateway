@@ -157,6 +157,12 @@ export const envSchema = z
       .describe(
         'https URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote. The page it serves runs inside the logged-in browser: trust the host'
       ),
+    WWEB_VERIFIED_BUILD: text()
+      .regex(/^2\.3000\.\d{1,20}$/, 'Not a WhatsApp Web build such as 2.3000.1054292354')
+      .optional()
+      .describe(
+        'The WhatsApp Web build last checked with a real account (for example 2.3000.1054292354). A session that runs another build logs a warning when it becomes ready; nothing else changes. Unset means no comparison'
+      ),
     WWEB_VERSION_STRICT: flag(true).describe(
       'Fail the session start when the pinned WhatsApp Web version cannot be loaded, instead of running the live latest build'
     ),

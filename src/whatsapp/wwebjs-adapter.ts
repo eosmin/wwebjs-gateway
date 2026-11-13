@@ -335,6 +335,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // 5 s before a LOGOUT
   private readonly consoleTail = new ConsoleTail(5_000, 20)
   private pageLines = 0
+  private logoutReason: string | undefined
   private ready = false
   // Set when the session ended (a disconnect event, a destroy or a logout), so that the browser
   // closing right after is not reported a second time
@@ -765,12 +766,14 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // when no navigation follows) and whether the frame went to the logout address. Two booleans: no
   // address and no account data. It only looks; the logout goes on as it always did.
   private logLogout(): void {
+    this.logoutReason = undefined
     try {
       const flagStale = (this.client as { lastLoggedOut?: unknown }).lastLoggedOut === true
       const address = this.client.pupPage?.url() ?? ''
       const postLogoutUrl = address.includes('post_logout=1')
       // The token WhatsApp Web gives as the reason, when it is a short one: never the address
       const reason = logoutReasonOf(address)
+      this.logoutReason = reason
       this.logger.warn(
         `WhatsApp Web reported a LOGOUT (flagStale=${flagStale}, postLogoutUrl=${postLogoutUrl}${
           reason ? `, logoutReason=${reason}` : ''
@@ -1093,6 +1096,10 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       const state: string | null | undefined = await this.client.getState()
       return state ?? null
     })
+  }
+
+  lastLogoutReason(): string | undefined {
+    return this.logoutReason
   }
 
   getWWebVersion(): Promise<string> {
