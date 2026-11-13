@@ -19,6 +19,7 @@ import type { FastifyReply } from 'fastify'
 import { ZodResponse, ZodValidationPipe } from 'nestjs-zod'
 
 import type { ErrorCode } from '../../common/errors.js'
+import { inlineMediaType } from '../../common/lib/inline-media.js'
 import { MessageSendService } from '../../services/message-send.service.js'
 import { MessagesService } from '../../services/messages.service.js'
 import {
@@ -84,18 +85,6 @@ const SEND_REQUEST = { to: '+52 55 0000 0001', type: 'text', body: 'Hola, tu ped
 
 const ROUTE: ErrorCode[] = ['VALIDATION_ERROR', 'UNAUTHORIZED', 'FORBIDDEN', 'INSUFFICIENT_SCOPE']
 const ON_MESSAGE: ErrorCode[] = [...ROUTE, 'NOT_FOUND', 'SESSION_NOT_READY', 'WHATSAPP_ERROR']
-
-// Shown by a browser without running anything; the rest of what a sender can attach is downloaded
-const INLINE_MEDIA_TYPES: ReadonlySet<string> = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'video/mp4',
-  'audio/ogg',
-  'audio/mpeg',
-  'application/pdf'
-])
 
 // The messages of a session: sending (TDD §6.8) and what can be read or done to one message.
 // Sending is asynchronous by nature: the answer is 201 with the message when it went out within
@@ -275,14 +264,16 @@ export class MessagesController {
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<StreamableFile> {
     const media = await this.messages.media(sessionId, messageId)
-    const inline = INLINE_MEDIA_TYPES.has(media.mimetype)
+    // The bare type, or undefined for a download: what the sender wrote after it is never served
+    const inlineType = inlineMediaType(media.mimetype)
+    const inline = inlineType !== undefined
     const filename = media.filename?.replace(/[^\w.\- ]/g, '_')
     void reply
       .header('cache-control', 'private, no-store')
       .header('x-content-type-options', 'nosniff')
       .header('content-security-policy', "sandbox; default-src 'none'")
     return new StreamableFile(Buffer.from(media.data, 'base64'), {
-      type: inline ? media.mimetype : 'application/octet-stream',
+      type: inlineType ?? 'application/octet-stream',
       disposition: `${inline ? 'inline' : 'attachment'}${filename ? `; filename="${filename}"` : ''}`
     })
   }
