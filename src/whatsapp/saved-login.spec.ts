@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -18,6 +19,7 @@ import {
   profileDirOf,
   purgeExpiredQuarantine,
   quarantineSavedLogin,
+  restoreSavedLogin,
   wasQuarantinedWithin
 } from './saved-login.js'
 
@@ -174,6 +176,22 @@ describe('symlinks in the quarantine', () => {
     }
   })
 
+  it('never changes the mode of what a symlinked quarantine folder points at', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'elsewhere-'))
+    try {
+      chmodSync(elsewhere, 0o755)
+      symlinkSync(elsewhere, join(dataPath, '.quarantine'))
+      seedLogin('line-1')
+
+      await expect(quarantineSavedLogin(dataPath, 'line-1', NOW)).rejects.toThrow()
+
+      expect(statSync(elsewhere).mode & 0o777).toBe(0o755)
+      expect(existsSync(join(dataPath, 'session-line-1'))).toBe(true)
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true })
+    }
+  })
+
   it('does not purge an entry that is a symlink', async () => {
     const elsewhere = mkdtempSync(join(tmpdir(), 'elsewhere-'))
     try {
@@ -197,5 +215,69 @@ describe('symlinks in the quarantine', () => {
     await quarantineSavedLogin(dataPath, 'line-1', NOW)
 
     expect(statSync(join(dataPath, '.quarantine')).mode & 0o777).toBe(0o700)
+  })
+})
+
+describe('the login of a deleted session', () => {
+  it('goes to a folder that says it was removed, and does not count as an automatic quarantine', async () => {
+    seedLogin('line-1', 'secret-token')
+
+    const target = await quarantineSavedLogin(dataPath, 'line-1', NOW, { removed: true })
+
+    expect(target).toBe(join(dataPath, '.quarantine', `removed-session-line-1-${NOW.getTime()}`))
+    expect(readFileSync(join(target ?? '', 'Default', 'Cookies'), 'utf8')).toBe('secret-token')
+    // A session created again under the same id may still be quarantined on its own
+    await expect(wasQuarantinedWithin(dataPath, 'line-1', DAY_MS, NOW)).resolves.toBe(false)
+  })
+
+  it('is deleted for good after the waiting time like any quarantine, and not before', async () => {
+    mkdirSync(join(dataPath, '.quarantine', `removed-session-a-${NOW.getTime() - 8 * DAY_MS}`), {
+      recursive: true
+    })
+    mkdirSync(join(dataPath, '.quarantine', `removed-session-b-${NOW.getTime() - 2 * DAY_MS}`), {
+      recursive: true
+    })
+
+    await expect(purgeExpiredQuarantine(dataPath, 7 * DAY_MS, NOW)).resolves.toBe(1)
+
+    expect(readdirSync(join(dataPath, '.quarantine'))).toEqual([
+      `removed-session-b-${NOW.getTime() - 2 * DAY_MS}`
+    ])
+  })
+})
+
+describe('restoreSavedLogin', () => {
+  it('puts a moved login back where LocalAuth looks for it', async () => {
+    seedLogin('line-1', 'secret-token')
+    const target = await quarantineSavedLogin(dataPath, 'line-1', NOW, { removed: true })
+
+    await expect(restoreSavedLogin(dataPath, 'line-1', target ?? '')).resolves.toBe(true)
+
+    expect(readFileSync(join(dataPath, 'session-line-1', 'Default', 'Cookies'), 'utf8')).toBe(
+      'secret-token'
+    )
+    expect(existsSync(target ?? '')).toBe(false)
+  })
+
+  it('never writes over a login that is there already', async () => {
+    seedLogin('line-1', 'old')
+    const target = await quarantineSavedLogin(dataPath, 'line-1', NOW)
+    seedLogin('line-1', 'new')
+
+    await expect(restoreSavedLogin(dataPath, 'line-1', target ?? '')).resolves.toBe(false)
+
+    expect(readFileSync(join(dataPath, 'session-line-1', 'Default', 'Cookies'), 'utf8')).toBe('new')
+    expect(existsSync(target ?? '')).toBe(true)
+  })
+
+  it('refuses a folder that is not inside the quarantine of this data folder', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'outside-'))
+    try {
+      await expect(restoreSavedLogin(dataPath, 'line-1', outside)).resolves.toBe(false)
+      expect(existsSync(outside)).toBe(true)
+      expect(existsSync(join(dataPath, 'session-line-1'))).toBe(false)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 })

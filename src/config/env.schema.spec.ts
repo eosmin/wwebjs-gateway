@@ -304,7 +304,9 @@ describe('envSchema bounds and edges', () => {
     ['MAX_SESSIONS', 1],
     ['SEND_MAX_WAIT_MS', 1],
     ['WEBHOOK_MAX_ATTEMPTS', 1],
-    ['WEBHOOKS_MAX_PER_SESSION', 1]
+    ['WEBHOOKS_MAX_PER_SESSION', 1],
+    // Fewer starts than this would take one slow start for a login that WhatsApp refuses
+    ['SESSION_INITIALIZE_MAX_ATTEMPTS', 3]
   ])('%s accepts its minimum %d and rejects one below', (key, min) => {
     expect(envSchema.safeParse({ ...valid, [key]: String(min) }).success).toBe(true)
     expect(envSchema.safeParse({ ...valid, [key]: String(min - 1) }).success).toBe(false)

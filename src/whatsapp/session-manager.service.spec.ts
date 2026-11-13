@@ -570,25 +570,27 @@ describe('SessionManager status machine', () => {
   it('counts the failed starts again after a sign of life such as a QR code', async () => {
     let calls = 0
     const built = build(
-      { SESSION_INITIALIZE_MAX_ATTEMPTS: '2' },
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
       {
         initialize: () =>
-          ++calls === 2 ? Promise.resolve() : Promise.reject(new WaOperationError('x'))
+          calls++ === 2 ? Promise.resolve() : Promise.reject(new WaOperationError('x'))
       }
     )
     built.sessions.seed({ id: ID })
     await built.manager.start(ID)
     await flush()
     await untilNextClient(built, 1)
+    await flush()
+    await untilNextClient(built, 2)
     built.factory.clientFor(ID)?.emit({ event: 'qr', data: { qr: 'q' } })
     await flush()
     expect(built.manager.status(ID)).toBe('qr')
     built.factory.clientFor(ID)?.emit({ event: 'session_error', data: { code: 'x', message: 'x' } })
     await flush()
-    await untilNextClient(built, 2)
+    await untilNextClient(built, 3)
     await flush()
 
-    // The third start fails too, but it is the first of a new run of failures
+    // The fourth start fails too, but it is the first of a new run of failures
     expect(built.manager.status(ID)).toBe('disconnected')
   })
 
@@ -1875,7 +1877,7 @@ describe('SessionManager and a login that WhatsApp refuses', () => {
 
   it('gives the probe 60 seconds, then keeps the login', async () => {
     const built = build(
-      { SESSION_INITIALIZE_MAX_ATTEMPTS: '2' },
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
       {
         initialize: sessionId =>
           isProbe(sessionId) ? new Promise<void>(() => undefined) : stall(sessionId)
@@ -1883,7 +1885,7 @@ describe('SessionManager and a login that WhatsApp refuses', () => {
     )
     built.sessions.seed({ id: ID, linkedAt: NOW })
     seedLogin()
-    await stallUntilCap(built, 2)
+    await stallUntilCap(built, 3)
 
     await until(() => built.factory.clients.some(c => isProbe(c.sessionId)))
     await jest.advanceTimersByTimeAsync(59_000)
@@ -1981,11 +1983,11 @@ describe('SessionManager and a login that WhatsApp refuses', () => {
   it('does not count stalls from before a sign of life such as a QR code', async () => {
     let calls = 0
     const built = build(
-      { SESSION_INITIALIZE_MAX_ATTEMPTS: '2' },
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
       {
         initialize: sessionId => {
           if (isProbe(sessionId)) return Promise.resolve()
-          return ++calls === 2 ? Promise.resolve() : Promise.reject(new WaAuthStalledError())
+          return ++calls === 3 ? Promise.resolve() : Promise.reject(new WaAuthStalledError())
         }
       }
     )
@@ -1994,14 +1996,17 @@ describe('SessionManager and a login that WhatsApp refuses', () => {
     await built.manager.start(ID)
     await flush()
     await untilNextClient(built, 1)
+    await flush()
+    await untilNextClient(built, 2)
     built.factory.clientFor(ID)?.emit({ event: 'qr', data: { qr: 'q' } })
     await flush()
     built.factory.clientFor(ID)?.emit({ event: 'session_error', data: { code: 'x', message: 'x' } })
     await flush()
-    await untilNextClient(built, 2)
+    await untilNextClient(built, 3)
     await flush()
 
-    // The third start stalls, but it is the first of a new run
+    // Two stalls before the QR code and one after: without the reset the third would reach the cap
+    // of 3 and start the probe; with it, it is the first of a new run
     expect(built.manager.status(ID)).toBe('disconnected')
     expect(existsSync(join(dataPath, `session-${ID}`))).toBe(true)
     expect(built.factory.clients.some(c => isProbe(c.sessionId))).toBe(false)
@@ -2034,7 +2039,7 @@ describe('SessionManager and a login that WhatsApp refuses', () => {
 
   it('keeps the login when the gateway shuts down during the probe', async () => {
     const built = build(
-      { SESSION_INITIALIZE_MAX_ATTEMPTS: '2' },
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
       {
         initialize: sessionId =>
           isProbe(sessionId) ? new Promise<void>(() => undefined) : stall(sessionId)
@@ -2042,7 +2047,7 @@ describe('SessionManager and a login that WhatsApp refuses', () => {
     )
     built.sessions.seed({ id: ID, linkedAt: NOW })
     seedLogin()
-    await stallUntilCap(built, 2)
+    await stallUntilCap(built, 3)
     await until(() => built.factory.clients.some(c => isProbe(c.sessionId)))
 
     const shutdown = built.manager.beforeApplicationShutdown()
@@ -2177,4 +2182,410 @@ describe('SessionManager logout of a session that is not ready', () => {
       }
     }
   )
+})
+
+// ---- Deleting a session must not leave its login behind (F19) -------------------------------------
+
+describe('SessionManager remove and the saved login', () => {
+  it('moves the login of a session that is not running to quarantine, never deleting it', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, status: 'stopped', linkedAt: NOW })
+    seedLogin(ID, 'secret-token')
+
+    await built.manager.remove(ID)
+
+    expect(built.sessions.rows.has(ID)).toBe(false)
+    expect(existsSync(join(dataPath, `session-${ID}`))).toBe(false)
+    const [entry] = quarantined()
+    expect(entry).toMatch(new RegExp(`^removed-session-${ID}-\\d+$`))
+    expect(
+      readFileSync(join(dataPath, '.quarantine', entry ?? '', 'Default', 'Cookies'), 'utf8')
+    ).toBe('secret-token')
+  })
+
+  it('moves the login when the logout before the delete failed, after the browser is gone', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin(ID, 'secret-token')
+    const client = await startSession(built)
+    client.script('logout', () => Promise.reject(new WaOperationError('gone')))
+
+    await built.manager.remove(ID)
+
+    expect(client.callsOf('destroy')).toHaveLength(1)
+    expect(client.callsOf('discardAuth')).toHaveLength(0)
+    expect(existsSync(join(dataPath, `session-${ID}`))).toBe(false)
+    expect(quarantined()).toHaveLength(1)
+  })
+
+  it('does not let a session created again under the same id find the old login', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, status: 'stopped', linkedAt: NOW })
+    seedLogin(ID)
+    await built.manager.remove(ID)
+
+    await built.manager.create(ID)
+    await built.manager.start(ID)
+
+    expect(existsSync(join(dataPath, `session-${ID}`))).toBe(false)
+    const [entry, ...more] = quarantined()
+    expect(more).toEqual([])
+    expect(
+      readFileSync(join(dataPath, '.quarantine', entry ?? '', 'Default', 'Cookies'), 'utf8')
+    ).toBe('cookie')
+  })
+
+  it('creates no quarantine folder for a session that has no login', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID })
+
+    await built.manager.remove(ID)
+
+    expect(existsSync(join(dataPath, '.quarantine'))).toBe(false)
+  })
+
+  it('keeps the session, and its login where it was, when the login cannot be moved', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, status: 'stopped', linkedAt: NOW })
+    seedLogin(ID, 'secret-token')
+    // A file where the quarantine folder must be
+    writeFileSync(join(dataPath, '.quarantine'), 'in the way')
+
+    const removed = jest.fn(() => Promise.resolve())
+    built.manager.onRemoved(removed)
+
+    await expect(built.manager.remove(ID)).rejects.toThrow(/saved login could not be moved/)
+
+    expect(built.sessions.rows.has(ID)).toBe(true)
+    expect(built.manager.status(ID)).toBe('stopped')
+    expect(removed).not.toHaveBeenCalled()
+    expect(existsSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'))).toBe(true)
+  })
+
+  it('keeps a running session that cannot move its login, with the browser already closed', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin(ID, 'secret-token')
+    writeFileSync(join(dataPath, '.quarantine'), 'in the way')
+    const client = await startSession(built)
+    client.script('logout', () => Promise.reject(new WaOperationError('gone')))
+
+    await expect(built.manager.remove(ID)).rejects.toThrow(/saved login could not be moved/)
+
+    expect(client.callsOf('destroy')).toHaveLength(1)
+    expect(built.sessions.rows.has(ID)).toBe(true)
+    expect(built.manager.status(ID)).toBe('stopped')
+    expect(existsSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'))).toBe(true)
+  })
+
+  it('deletes a row whose id could not name a folder without touching anything outside the data folder', async () => {
+    const built = build()
+    const target = join(dataPath, '..', 'escape')
+    mkdirSync(join(target, 'Default'), { recursive: true })
+    writeFileSync(join(target, 'Default', 'Cookies'), 'keep')
+    try {
+      built.sessions.seed({ id: '../escape', status: 'stopped', linkedAt: NOW })
+
+      await built.manager.remove('../escape')
+
+      expect(built.sessions.rows.has('../escape')).toBe(false)
+      expect(readFileSync(join(target, 'Default', 'Cookies'), 'utf8')).toBe('keep')
+      expect(quarantined()).toEqual([])
+    } finally {
+      rmSync(target, { recursive: true, force: true })
+    }
+  })
+
+  it('puts the login back when the row cannot be deleted, so the session still has it', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, status: 'stopped', linkedAt: NOW })
+    seedLogin(ID, 'secret-token')
+    built.sessions.delete.mockRejectedValueOnce(new Error('db'))
+
+    await expect(built.manager.remove(ID)).rejects.toThrow('db')
+
+    expect(built.sessions.rows.has(ID)).toBe(true)
+    expect(readFileSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'), 'utf8')).toBe(
+      'secret-token'
+    )
+    expect(quarantined()).toEqual([])
+  })
+
+  it('does not make a deletion by a session that may exist again count as an automatic quarantine', async () => {
+    const built = build({ SESSION_INITIALIZE_MAX_ATTEMPTS: '3' })
+    built.sessions.seed({ id: ID, status: 'stopped', linkedAt: NOW })
+    seedLogin(ID)
+    await built.manager.remove(ID)
+    expect(quarantined()).toHaveLength(1)
+
+    // A new session with that id links, and its login stalls: the 24 h rule does not block it
+    const stalled: Built = build(
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
+      {
+        initialize: sessionId => {
+          if (isProbe(sessionId)) {
+            stalled.factory.clientFor(sessionId)?.emit({ event: 'qr', data: { qr: 'q' } })
+            return Promise.resolve()
+          }
+          return Promise.reject(new WaAuthStalledError())
+        }
+      }
+    )
+    stalled.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin(ID)
+    await stallUntilCap(stalled, 3)
+    await until(() => stalled.manager.status(ID) === 'created')
+
+    expect(quarantined()).toHaveLength(2)
+  })
+
+  it('does not move anything of another session', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, status: 'stopped', linkedAt: NOW })
+    seedLogin(ID)
+    seedLogin('other')
+
+    await built.manager.remove(ID)
+
+    expect(existsSync(join(dataPath, 'session-other', 'Default', 'Cookies'))).toBe(true)
+  })
+})
+
+// ---- The probe is not proof of a dead login (F19) --------------------------------------------------
+
+describe('SessionManager and the last start with the saved login', () => {
+  // The saved login stalls `stalls` times, then connects (or not): what a short outage looks like
+  function buildOutage(options: { stalls: number; then: 'connect' | 'qr' | 'stall' | 'fail' }): {
+    built: Built
+    realStarts: () => number
+    loginSeenByStart: boolean[]
+  } {
+    let real = 0
+    const loginSeenByStart: boolean[] = []
+    const built: Built = build(
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
+      {
+        initialize: sessionId => {
+          if (isProbe(sessionId)) {
+            built.factory.clientFor(sessionId)?.emit({ event: 'qr', data: { qr: 'q' } })
+            return Promise.resolve()
+          }
+          real++
+          loginSeenByStart.push(existsSync(join(dataPath, `session-${ID}`)))
+          if (real <= options.stalls) return Promise.reject(new WaAuthStalledError())
+          const client = built.factory.clientFor(ID)
+          if (options.then === 'connect') {
+            client?.emit({ event: 'authenticated', data: {} })
+            client?.emit({ event: 'ready', data: {} })
+            return Promise.resolve()
+          }
+          if (options.then === 'qr') {
+            client?.emit({ event: 'qr', data: { qr: 'q' } })
+            return Promise.resolve()
+          }
+          return options.then === 'stall'
+            ? Promise.reject(new WaAuthStalledError())
+            : Promise.reject(new WaOperationError('no chromium'))
+        }
+      }
+    )
+    return { built, realStarts: () => real, loginSeenByStart }
+  }
+
+  it('does not move a valid login that stalled during an outage and connects after the probe', async () => {
+    const { built, realStarts } = buildOutage({ stalls: 3, then: 'connect' })
+    built.sessions.seed({ id: ID, linkedAt: NOW, phoneNumber: PHONE })
+    seedLogin(ID, 'secret-token')
+
+    await stallUntilCap(built, 3)
+    await until(() => built.manager.status(ID) === 'ready')
+
+    expect(realStarts()).toBe(4)
+    expect(readFileSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'), 'utf8')).toBe(
+      'secret-token'
+    )
+    expect(quarantined()).toEqual([])
+    expect(built.sessions.rows.get(ID)).toMatchObject({ autoStart: true, linkedAt: NOW })
+    expect(await built.metrics.metrics.authQuarantined.get()).toMatchObject({
+      values: [{ value: 0 }]
+    })
+  })
+
+  it('counts a QR code of that last start as a sign of life and keeps the login', async () => {
+    const { built } = buildOutage({ stalls: 3, then: 'qr' })
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin()
+
+    await stallUntilCap(built, 3)
+    await until(() => built.manager.status(ID) === 'qr')
+
+    expect(existsSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'))).toBe(true)
+    expect(quarantined()).toEqual([])
+  })
+
+  it('moves the login only after that last start has stalled too, with the login still in place for it', async () => {
+    const { built, realStarts, loginSeenByStart } = buildOutage({ stalls: 3, then: 'stall' })
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin()
+
+    await stallUntilCap(built, 3)
+    await until(() => built.manager.status(ID) === 'created')
+
+    expect(realStarts()).toBe(4)
+    expect(loginSeenByStart).toEqual([true, true, true, true])
+    expect(existsSync(join(dataPath, `session-${ID}`))).toBe(false)
+    expect(quarantined()).toHaveLength(1)
+    expect(built.factory.clients.filter(c => isProbe(c.sessionId))).toHaveLength(1)
+  })
+
+  it('keeps the login and fails when the last start fails for another reason', async () => {
+    const { built } = buildOutage({ stalls: 3, then: 'fail' })
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin()
+
+    await stallUntilCap(built, 3)
+    await until(() => built.manager.status(ID) === 'failed')
+
+    expect(existsSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'))).toBe(true)
+    expect(quarantined()).toEqual([])
+  })
+
+  it('does not take a probe of an earlier run for this one: after a sign of life it probes again', async () => {
+    let real = 0
+    const built: Built = build(
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
+      {
+        initialize: sessionId => {
+          if (isProbe(sessionId)) {
+            built.factory.clientFor(sessionId)?.emit({ event: 'qr', data: { qr: 'q' } })
+            return Promise.resolve()
+          }
+          // The fourth start (the one after the first probe) shows a QR code; every other one stalls
+          if (++real === 4) {
+            built.factory.clientFor(ID)?.emit({ event: 'qr', data: { qr: 'q' } })
+            return Promise.resolve()
+          }
+          return Promise.reject(new WaAuthStalledError())
+        }
+      }
+    )
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin()
+    await stallUntilCap(built, 3)
+    await until(() => built.manager.status(ID) === 'qr')
+    expect(built.factory.clients.filter(c => isProbe(c.sessionId))).toHaveLength(1)
+
+    // The QR code was a sign of life: three new stalls need a new probe before anything moves
+    built.factory.clientFor(ID)?.emit({ event: 'session_error', data: { code: 'x', message: 'x' } })
+    await flush()
+    await until(() => built.manager.status(ID) === 'created', 5000)
+
+    expect(built.factory.clients.filter(c => isProbe(c.sessionId))).toHaveLength(2)
+    expect(quarantined()).toHaveLength(1)
+  })
+})
+
+// ---- Several probes, and a shutdown that comes before one (F19) ---------------------------------
+
+describe('SessionManager probes and the shutdown', () => {
+  const OTHER = 'sales-line'
+  const never = (): Promise<void> => new Promise<void>(() => undefined)
+
+  function buildTwo(): Built {
+    return build(
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
+      {
+        initialize: sessionId =>
+          isProbe(sessionId) ? never() : Promise.reject(new WaAuthStalledError())
+      }
+    )
+  }
+
+  it('aborts every probe that is running, not only the last one', async () => {
+    const built = buildTwo()
+    for (const id of [ID, OTHER]) {
+      built.sessions.seed({ id, linkedAt: NOW })
+      seedLogin(id)
+    }
+    await built.manager.start(ID)
+    await built.manager.start(OTHER)
+    await until(() => built.factory.clients.filter(c => isProbe(c.sessionId)).length === 2, 5000)
+
+    const shutdown = built.manager.beforeApplicationShutdown()
+    // Well before the 60 s that the probe of a session gets
+    await jest.advanceTimersByTimeAsync(5000)
+    await shutdown
+
+    for (const id of [ID, OTHER]) {
+      expect(existsSync(join(dataPath, `session-${id}`, 'Default', 'Cookies'))).toBe(true)
+    }
+    expect(quarantined()).toEqual([])
+    for (const probe of built.factory.clients.filter(c => isProbe(c.sessionId))) {
+      expect(probe.callsOf('destroy')).toHaveLength(1)
+    }
+  })
+
+  it('keeps the login when the shutdown comes during the last start after the probe', async () => {
+    let real = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const built: Built = build(
+      { SESSION_INITIALIZE_MAX_ATTEMPTS: '3' },
+      {
+        initialize: async sessionId => {
+          if (isProbe(sessionId)) {
+            built.factory.clientFor(sessionId)?.emit({ event: 'qr', data: { qr: 'q' } })
+            return
+          }
+          // The fourth start waits for the shutdown, then stalls
+          if (++real === 4) await gate
+          throw new WaAuthStalledError()
+        }
+      }
+    )
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin()
+    await built.manager.start(ID)
+    await until(() => real === 4, 5000)
+
+    const shutdown = built.manager.beforeApplicationShutdown()
+    release()
+    await jest.advanceTimersByTimeAsync(5000)
+    await shutdown
+
+    expect(existsSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'))).toBe(true)
+    expect(quarantined()).toEqual([])
+    expect(built.manager.status(ID)).not.toBe('created')
+  })
+
+  it('does not start a probe browser when the shutdown came while the login was being looked at', async () => {
+    const built = buildTwo()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    seedLogin()
+    // The read of the row that follows the third stall waits for the shutdown
+    let release: () => void = () => undefined
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const real = built.sessions.findById.getMockImplementation()
+    if (!real) throw new Error('findById has no implementation')
+    built.sessions.findById.mockImplementation(async id => {
+      if (built.factory.clients.length >= 3) await gate
+      return real(id)
+    })
+    await built.manager.start(ID)
+    await until(() => built.factory.clients.length === 3, 5000)
+    await flush()
+
+    const shutdown = built.manager.beforeApplicationShutdown()
+    release()
+    await jest.advanceTimersByTimeAsync(5000)
+    await shutdown
+
+    expect(built.factory.clients.some(c => isProbe(c.sessionId))).toBe(false)
+    expect(existsSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'))).toBe(true)
+    expect(quarantined()).toEqual([])
+  })
 })

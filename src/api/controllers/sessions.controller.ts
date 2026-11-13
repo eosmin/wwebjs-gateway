@@ -141,8 +141,15 @@ export class SessionsController {
     scope: 'manage',
     summary: 'Delete a session',
     description:
-      'Logs the account out when it is running, then deletes the session with its API keys, webhooks, inbound hooks and stored messages. It cannot be undone.',
-    errors: ['VALIDATION_ERROR', 'UNAUTHORIZED', 'FORBIDDEN', 'INSUFFICIENT_SCOPE', 'NOT_FOUND'],
+      'Logs the account out when it is running, then deletes the session with its API keys, webhooks, inbound hooks and stored messages. That cannot be undone. A saved login that the logout did not remove is not left where a session created again with the same id would find it: it is moved to the quarantine folder, and deleted for good after SESSION_AUTH_QUARANTINE_TTL_DAYS. If it cannot be moved the session is not deleted (INTERNAL).',
+    errors: [
+      'VALIDATION_ERROR',
+      'UNAUTHORIZED',
+      'FORBIDDEN',
+      'INSUFFICIENT_SCOPE',
+      'NOT_FOUND',
+      'INTERNAL'
+    ],
     examples: { request: null, response: null },
     wwebjs: ['Client.logout', 'Client.destroy']
   })

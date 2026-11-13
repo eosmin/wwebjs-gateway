@@ -90,11 +90,13 @@ export class MessagesRepository {
   }
 
   // The ack only moves forward: WhatsApp can re-emit an older one after a reconnect, and it must not
-  // lower a newer one. -1 (error) always applies, and an ack after an error applies too (a resend). A
-  // message stored without an ack takes the first one (SQL compares NULL with nothing, so it is
-  // asked for apart). False when nothing changed (not stored, or older).
+  // lower a newer one. -1 (error) applies only to a message that has no ack yet or is still pending
+  // (0): an error never lowers an ack that says the message was sent (1) or delivered, read or played
+  // (2-4), since a late copy of the error must not undo what WhatsApp confirmed. An ack after an
+  // error applies (a resend). A message stored without an ack takes the first one (SQL compares NULL
+  // with nothing, so it is asked for apart). False when nothing changed (not stored, or older).
   async updateAck(sessionId: string, id: string, ack: number): Promise<boolean> {
-    const moves = ack === -1 ? { NOT: { ack: -1 } } : { ack: { lt: ack } }
+    const moves = ack === -1 ? { ack: 0 } : { ack: { lt: ack } }
     const { count } = await this.prisma.storedMessage.updateMany({
       where: { sessionId, id, OR: [{ ack: null }, moves] },
       data: { ack }
