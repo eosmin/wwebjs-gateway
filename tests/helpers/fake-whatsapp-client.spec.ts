@@ -67,7 +67,11 @@ describe('FakeWhatsAppClient', () => {
     }
     for (const name of names.filter(
       n =>
-        n !== 'onEvent' && n !== 'onSkipped' && n !== 'lastLogoutReason' && !LIFECYCLE.includes(n)
+        n !== 'onEvent' &&
+        n !== 'onSkipped' &&
+        n !== 'onDrift' &&
+        n !== 'lastLogoutReason' &&
+        !LIFECYCLE.includes(n)
     )) {
       // Rejecting with WaDisconnectedError and recording proves the method goes through stub()
       await expect(method(name)()).rejects.toBeInstanceOf(WaDisconnectedError)
@@ -75,7 +79,11 @@ describe('FakeWhatsAppClient', () => {
     expect(fake.calls.map(call => call.method as string)).toEqual(
       names.filter(
         n =>
-          n !== 'onEvent' && n !== 'onSkipped' && n !== 'lastLogoutReason' && !LIFECYCLE.includes(n)
+          n !== 'onEvent' &&
+          n !== 'onSkipped' &&
+          n !== 'onDrift' &&
+          n !== 'lastLogoutReason' &&
+          !LIFECYCLE.includes(n)
       )
     )
   })

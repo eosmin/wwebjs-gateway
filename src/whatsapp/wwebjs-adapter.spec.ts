@@ -760,6 +760,32 @@ describe('calls', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('5215512345678')
   })
 
+  it('tells the drift listeners which function WhatsApp Web no longer has, and survives a listener that throws', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    ready(h)
+    const seen: unknown[] = []
+    h.adapter.onDrift(() => {
+      throw new Error('listener bug')
+    })
+    const stop = h.adapter.onDrift(drift => seen.push(drift))
+
+    stub(h.client, 'getChats').mockRejectedValueOnce(
+      new Error(
+        '[signature] WAWebContactStatusBridge.getStatus is not available in WhatsApp Web 2.3000.1'
+      )
+    )
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
+    stub(h.client, 'getChats').mockRejectedValueOnce(new TypeError('x is undefined'))
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
+    stop()
+    stub(h.client, 'getChats').mockRejectedValueOnce(new Error('[signature] A.b is gone'))
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaOperationError)
+
+    expect(seen).toEqual([{ kind: 'signature', target: 'WAWebContactStatusBridge.getStatus' }])
+    expect(warn).toHaveBeenCalledWith('A drift listener failed (Error)')
+  })
+
   it('returns a sanitized reason when createGroup answers a text, and logs it', async () => {
     const h = harness()
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()

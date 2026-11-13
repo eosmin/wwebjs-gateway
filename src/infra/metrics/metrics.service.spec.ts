@@ -48,6 +48,7 @@ describe('MetricsService', () => {
     metrics.webhookDurationSeconds.observe(0.3)
     metrics.waCallDurationSeconds.observe({ op: 'sendMessage' }, 0.4)
     metrics.waCallErrors.inc({ op: 'sendMessage', type: 'timeout' })
+    metrics.waWebDrift.inc({ kind: 'signature', target: 'WAWebX.fn' })
     metrics.watchdogRestarts.inc()
     metrics.reconcileRecovered.inc()
 
@@ -68,6 +69,7 @@ describe('MetricsService', () => {
       'gw_webhook_duration_seconds_count 1',
       'gw_wa_call_duration_seconds_count{op="sendMessage"} 1',
       'gw_wa_call_errors_total{op="sendMessage",type="timeout"} 1',
+      'gw_wa_web_drift_errors_total{kind="signature",target="WAWebX.fn"} 1',
       'gw_watchdog_restarts_total 1',
       'gw_reconcile_recovered_total 1',
       'gw_events_skipped_total{event="message"} 1'

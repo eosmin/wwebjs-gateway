@@ -1,5 +1,6 @@
 import {
   describeCause,
+  driftOf,
   isPuppeteerFailure,
   mapping,
   notReady,
@@ -389,5 +390,56 @@ describe('sanitize', () => {
 
     expect(out).not.toContain('5215512345678')
     expect(out.length).toBeLessThanOrEqual(200)
+  })
+})
+
+describe('driftOf', () => {
+  it('names the function WhatsApp Web no longer has', () => {
+    const error = new Error(
+      '[signature] WAWebContactStatusBridge.setMyStatus is not available in WhatsApp Web 2.3000.1054456698'
+    )
+
+    expect(driftOf(error)).toEqual({
+      kind: 'signature',
+      target: 'WAWebContactStatusBridge.setMyStatus'
+    })
+  })
+
+  it('names the module a bundle did not load', () => {
+    const error = new Error(
+      '[lazy-module] WAWebChatForwardMessage is not available in WhatsApp Web 2.3000.1054456698 (its bundle X did not load it)'
+    )
+
+    expect(driftOf(error)).toEqual({ kind: 'lazy_module', target: 'WAWebChatForwardMessage' })
+  })
+
+  it('reads the cause of a failure after dispatch and of a mapper failure', () => {
+    const cause = new Error('[signature] WAWebGroupQueryJob.resetGroupInviteCode is not available')
+
+    expect(driftOf(new MapperFailure(cause))?.target).toBe(
+      'WAWebGroupQueryJob.resetGroupInviteCode'
+    )
+  })
+
+  it('keeps the series bounded: a target that is not a name of ours is `other`', () => {
+    expect(driftOf(new Error('[signature] a b c'))?.target).toBe('a')
+    expect(driftOf(new Error(`[signature] ${'x'.repeat(200)}.fn is gone`))?.target).toBe('other')
+    expect(driftOf(new Error('[signature] 55 1234 5678 is gone'))?.target).toBe('other')
+    expect(driftOf(new Error('[signature] <script>alert(1)</script>'))?.target).toBe('other')
+  })
+
+  it('reads the message when Puppeteer puts its own words in front', () => {
+    expect(driftOf(new Error('Evaluation failed: Error: [signature] WAWebX.fn is gone'))).toEqual({
+      kind: 'signature',
+      target: 'WAWebX.fn'
+    })
+    expect(driftOf(new Error('Error: [lazy-module] WAWebY is gone'))?.kind).toBe('lazy_module')
+  })
+
+  it('answers nothing for any other failure', () => {
+    expect(driftOf(new Error('Protocol error: Target closed.'))).toBeUndefined()
+    expect(driftOf(new Error('see [signature] later'))).toBeUndefined()
+    expect(driftOf(undefined)).toBeUndefined()
+    expect(driftOf({ message: '[signature] A.b' })).toBeUndefined()
   })
 })

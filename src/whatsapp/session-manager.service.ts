@@ -504,9 +504,15 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
         await this.teardown(id, runtime)
         return
       }
-      runtime.unsubscribe = client.onEvent(event =>
-        this.onClientEvent(id, runtime, generation, event)
-      )
+      const stopEvents = client.onEvent(event => this.onClientEvent(id, runtime, generation, event))
+      // A call that fails because WhatsApp Web changed under the patch is counted by the function
+      const stopDrift = client.onDrift(drift => {
+        this.metrics.metrics.waWebDrift.inc({ kind: drift.kind, target: drift.target })
+      })
+      runtime.unsubscribe = () => {
+        stopEvents()
+        stopDrift()
+      }
       runtime.phaseStartedAt = Date.now()
       await this.transition(id, 'starting', {})
       // Not awaited: a browser that is slow to start must not hold the queue of the session

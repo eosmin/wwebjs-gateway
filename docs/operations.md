@@ -53,11 +53,31 @@ WhatsApp Web is not a fixed program. It ships a new build every few hours (three
 **Steps.**
 1. **Confirm the build.** `GET /ready` and `GET /v1/system/info` (the `wwebVersion` of each session) and `gw_wa_web_build_info`. Compare with `WWEB_VERIFIED_BUILD` if you set it: a session on another build logs a warning when it becomes ready. The last build checked live is in `sessions.md`.
 2. **Do not retry blindly.** A failure after a send was dispatched has an unknown outcome; sends are idempotent with `Idempotency-Key`, so repeat only with the same key. After a logout, do not link the number again at once.
-3. **Look at the release watch.** The job `wwebjs release watch` (`.github/workflows/wwebjs-watch.yml`) opens one issue when npm has a newer `whatsapp-web.js`. It does **not** look at the WhatsApp Web build: a break can come without any release. If a newer library exists, read its notes; fixes for new builds often arrive there first.
+3. **Look at the two watches.** `wwebjs release watch` (`.github/workflows/wwebjs-watch.yml`) opens one issue when npm has a newer `whatsapp-web.js`: if a newer library exists, read its notes, since fixes for new builds often arrive there first. `WhatsApp Web build watch` (`.github/workflows/wa-web-watch.yml`) looks at the build WhatsApp serves; see "Watching the WhatsApp Web build" below. A break can come without any release of the library.
 4. **Find what changed, without an account.** Follow the procedure of `sessions.md` ("Checking an upgrade of whatsapp-web.js with a real account", step 5 and the probe for modules): open WhatsApp Web in a browser of your own with a throwaway profile (never a profile of a session), without linking anything, and read the signature of the functions in the `[signature]` message. Compare with what `node_modules/whatsapp-web.js/src` passes. The findings of earlier rounds are in the plan (`IMPLEMENTATION_PLAN.md`, 10.4) and in the patch (`patches/whatsapp-web.js@1.34.8.patch`): a function that changed from positional arguments to one object is fixed there, with a test that uses a fake `window`.
 5. **Put the fix in the patch, test it, verify it live.** Change the patch with `pnpm patch whatsapp-web.js@<version>` and `pnpm patch-commit`, add the test, and run the live checks of `sessions.md` with a test account before it reaches production.
 6. **Meanwhile, stop the damage.** Stop sending on the sessions that fail, and keep the rest. For a feature that is known to be risky, use its flag (`ENABLE_GROUP_WRITES` for the group changes).
 7. **Pin a build that was checked, to stop moving.** See the next part.
+
+### Watching the WhatsApp Web build
+
+A build can move the functions `whatsapp-web.js` calls, and WhatsApp ships one every day or two. The workflow `WhatsApp Web build watch` (`.github/workflows/wa-web-watch.yml`, daily and by hand) reads the live build and, when it is **not** the verified one (`ops/wa-web-verified-build.txt`), sweeps it: it lists every `window.require('Module').fn(...)` call of the library (as patched), finds each module in the scripts of that build and compares what the page declares with what the library passes (`scripts/wa-web-sweep.ts`; run it yourself with `CHROME_PATH=<chrome> pnpm wa-web:sweep`).
+
+- **No account.** The browser of the job is a throwaway profile on the QR screen: it never scans, links or stores a login, and the job has no secret. The scripts of WhatsApp are kept in memory only; the artifact `wa-web-sweep` (30 days) and the job summary hold names of modules and functions, nothing else.
+- **One issue per build, only for something new.** `ops/wa-web-sweep-known.json` lists the targets that are already tracked (each with where). The workflow opens the issue `WhatsApp Web build <build>: the signature sweep found new changes` when the build differs from the verified one **and** the sweep shows a target that is not in that list. It never opens a second one for the same build (open or closed), and it closes the issue of an older build as superseded. Write a target into the known list **in the pull request that tracks it**, with the plan step that owns it.
+- **What it does not see.** A change in the type of an argument, a module that loads on demand (about a sixth of the calls are not judged: the count is in the report) and everything that needs a linked account. A clean sweep is not a verified build.
+- **It says when it cannot look.** If the sweep fails (the page changed, no Chrome, or fewer than 60% of the calls could be judged, so "nothing changed" would be a guess) the job opens one issue, `WhatsApp Web build watch: the sweep failed`; close it when repaired.
+- **What it does at run time.** `GatewayWhatsAppWebDrift` (`gw_wa_web_drift_errors_total{kind,target}`) counts the calls the patch refused because a function or a module is gone, by target. Together with `gw_wa_web_build_info` it says which function broke on which build.
+
+### Moving the verified build
+
+A person, never the workflow. Do it when a build has passed the checks, or when the sweep of the build now live is clean and you want the warning `WhatsApp Web build X is not the verified build Y` to stop.
+
+1. Take the build from `gw_wa_web_build_info` or `GET /v1/system/info`, and the report of the sweep for that build (the issue, or the job summary of the last run).
+2. Every new finding is fixed (patch and test), or written to `ops/wa-web-sweep-known.json` with the plan step that owns it.
+3. Run the live checks of `sessions.md` on that build with a spare number (never a number the business cannot lose). Do not use a number that was just linked.
+4. In **one** pull request, change `ops/wa-web-verified-build.txt` and the value of `WWEB_VERIFIED_BUILD` of the deployment to the same build, and say in the description which checks ran and on which date. If you also pin the page (next part), the same pull request moves `WWEB_VERSION`.
+5. Keep the previous value in the description: the rollback of a verified build is the previous pull request.
 
 ### Pinning a WhatsApp Web build
 

@@ -1,4 +1,5 @@
 import type { MessageDto } from '../../src/types/dto.js'
+import type { DriftError } from '../../src/whatsapp/wa-call.js'
 import {
   WaDisconnectedError,
   type WaOperationError,
@@ -8,6 +9,7 @@ import type {
   ClientEvent,
   ClientEventListener,
   ClientEventName,
+  DriftListener,
   SkippedEventListener,
   OutboundContent,
   WhatsAppClientFactory,
@@ -15,7 +17,10 @@ import type {
   WhatsAppClientPort
 } from '../../src/whatsapp/whatsapp-client.port.js'
 
-type PortMethod = Exclude<keyof WhatsAppClientPort, 'onEvent' | 'onSkipped' | 'lastLogoutReason'>
+type PortMethod = Exclude<
+  keyof WhatsAppClientPort,
+  'onEvent' | 'onSkipped' | 'onDrift' | 'lastLogoutReason'
+>
 type Args<K extends PortMethod> = Parameters<WhatsAppClientPort[K]>
 type Result<K extends PortMethod> = Awaited<ReturnType<WhatsAppClientPort[K]>>
 
@@ -109,6 +114,7 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
   private connected = true
   private readonly listeners = new Set<ClientEventListener>()
   private readonly skippedListeners = new Set<SkippedEventListener>()
+  private readonly driftListeners = new Set<DriftListener>()
   private readonly scripts: Scripts = {}
   private readonly failures = new Map<
     PortMethod,
@@ -218,6 +224,18 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
     return () => {
       this.skippedListeners.delete(listener)
     }
+  }
+
+  onDrift(listener: DriftListener): () => void {
+    this.driftListeners.add(listener)
+    return () => {
+      this.driftListeners.delete(listener)
+    }
+  }
+
+  // A call failed because WhatsApp Web no longer has the function or module
+  drift(drift: DriftError): void {
+    for (const listener of [...this.driftListeners]) listener(drift)
   }
 
   // The adapter could not map an event of that name and dropped it

@@ -28,6 +28,7 @@ an admin key is also accepted, and when `METRICS_TOKEN` is unset only an admin k
 | `gw_auth_quarantined_total` | counter | - | Saved logins the gateway moved to quarantine on its own because WhatsApp refused them (the account was unlinked while the gateway was stopped). |
 | `gw_logout_total` | counter | `reason` | Sessions WhatsApp Web logged out on its own, by the reason it gave (client_fatal, sync_fail, history_sync_timeout, account_locked, unspecified when it gave none, other). |
 | `gw_wa_web_build_info` | gauge | `version` | Sessions running each WhatsApp Web build, by version (2.3000.<number>, or unknown). |
+| `gw_wa_web_drift_errors_total` | counter | `kind`, `target` | Calls that failed because WhatsApp Web changed under the patch of whatsapp-web.js, by kind (signature: a function it no longer exports; lazy_module: a module no bundle loaded) and target (Module.function, or other). |
 | `gw_policy_decisions_total` | counter | `rule`, `decision` | Decisions of the send policy that are not a plain allow at enqueue, by rule (`none` for an allow) and decision (allow, delay, reject). |
 | `gw_policy_delay_seconds` | histogram | - | Seconds the send policy asked a job to wait. |
 | `gw_suppressed_chats` | gauge | - | Chats on the suppression lists of all sessions. |

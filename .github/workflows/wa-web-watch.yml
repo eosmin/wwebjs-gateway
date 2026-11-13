@@ -1,0 +1,147 @@
+name: WhatsApp Web build watch
+
+# WhatsApp Web ships a new build every day or two and a build can move the functions whatsapp-web.js
+# calls. This workflow reads the build that is live now and, when it is not the verified one
+# (ops/wa-web-verified-build.txt), runs the signature sweep (scripts/wa-web-sweep.ts) against it and
+# opens ONE issue, once per build, when the sweep finds something that is not already known
+# (ops/wa-web-sweep-known.json).
+#
+# - The browser has NO account, no secret and no session: a throwaway profile on the QR screen that
+#   never scans. Nothing of WhatsApp's page is saved; the artifact holds names of modules and functions.
+# - The sweep job can only read the repository. Only the report job can write issues, and it has no
+#   checkout and no code of the repository: it reads the report the sweep uploaded.
+# - Promotion of a build to "verified" is a person (docs/operations.md, "Moving the verified build").
+# - GitHub disables scheduled workflows after 60 days without repository activity; re-enable it in the
+#   Actions tab (or run it by hand) if the issues stop coming.
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  # The Git hooks are for laptops
+  HUSKY: '0'
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      build: ${{ steps.read.outputs.build }}
+      issue: ${{ steps.read.outputs.issue }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Sweep the live build
+        run: |
+          CHROME_PATH=$(command -v google-chrome) || { echo 'google-chrome is not on the runner' >&2; exit 1; }
+          export CHROME_PATH
+          pnpm wa-web:sweep --out sweep-out
+      - name: Read the result
+        id: read
+        run: |
+          build=$(jq -r .build sweep-out/report.json)
+          issue=$(jq -r .issue sweep-out/report.json)
+          # Both go to a later job and to a title: only their exact forms pass
+          [[ $build =~ ^2\.3000\.[0-9]{1,20}$ ]] || { echo 'Unexpected build' >&2; exit 1; }
+          [[ $issue == true || $issue == false ]] || { echo 'Unexpected issue flag' >&2; exit 1; }
+          { echo "build=$build"; echo "issue=$issue"; } >> "$GITHUB_OUTPUT"
+          cat sweep-out/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wa-web-sweep
+          path: sweep-out
+          retention-days: 30
+          if-no-files-found: error
+
+  report:
+    needs: sweep
+    if: needs.sweep.outputs.issue == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    env:
+      # Both are read by the gh CLI
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      LABEL: wa-web-build
+      BUILD: ${{ needs.sweep.outputs.build }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wa-web-sweep
+          path: sweep-out
+      - name: Open the issue of this build, once
+        run: |
+          [[ $BUILD =~ ^2\.3000\.[0-9]{1,20}$ ]] || { echo 'Unexpected build' >&2; exit 1; }
+          title="WhatsApp Web build $BUILD: the signature sweep found new changes"
+
+          # Create the label once; any failure other than "already exists" shows up here, not later
+          if ! gh label list --limit 200 --json name --jq '.[].name' | grep -qx "$LABEL"; then
+            gh label create "$LABEL" --color D93F0B --description 'A WhatsApp Web build changed what whatsapp-web.js calls'
+          fi
+
+          # One issue per build, open or closed: a closed one means a person already decided about it
+          if gh issue list --label "$LABEL" --state all --limit 200 --json title --jq '.[].title' | grep -Fxq "$title"; then
+            echo "The issue of build $BUILD already exists"
+            exit 0
+          fi
+
+          # Only the newest build stays open: the older ones were superseded
+          for number in $(gh issue list --label "$LABEL" --state open --json number --jq '.[].number'); do
+            gh issue close "$number" --comment "Superseded by the sweep of build $BUILD."
+          done
+
+          {
+            cat sweep-out/report.md
+            printf '\n\nChecklist (a person, never automatic):\n\n'
+            printf -- '- [ ] Read each new finding; a function that is gone or reshaped needs a patch (`patches/`, TDD §2.5) or a line in `ops/wa-web-sweep-known.json` with the plan step that owns it\n'
+            printf -- '- [ ] Run the live checks of `docs/sessions.md` on this build with a spare number\n'
+            printf -- '- [ ] If they pass, promote the build (`docs/operations.md`, "Moving the verified build")\n'
+            printf '\n_Opened by the `WhatsApp Web build watch` workflow from an unlinked page (no account). Artifact: `wa-web-sweep` of this run._\n'
+          } > body.md
+          gh issue create --title "$title" --body-file body.md --label "$LABEL"
+
+  # A sweep that cannot run (the page changed, no Chrome, too few calls judged) would leave the watch
+  # silently dead: one open issue says so, and a person closes it when it is repaired
+  sweep-failed:
+    needs: sweep
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      LABEL: wa-web-build
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open one issue about the failed sweep
+        run: |
+          title='WhatsApp Web build watch: the sweep failed'
+          if ! gh label list --limit 200 --json name --jq '.[].name' | grep -qx "$LABEL"; then
+            gh label create "$LABEL" --color D93F0B --description 'A WhatsApp Web build changed what whatsapp-web.js calls'
+          fi
+          if gh issue list --label "$LABEL" --state open --limit 200 --json title --jq '.[].title' | grep -Fxq "$title"; then
+            echo 'The issue about a failed sweep is already open'
+            exit 0
+          fi
+          printf 'The daily sweep of the live WhatsApp Web build did not finish: %s\n\nRead the log. Usual causes: the page changed and the sweep no longer reads it, the runner has no Chrome, or the sweep judged too few calls to say that nothing changed (`scripts/wa-web-sweep.ts`). Until it is repaired there is no watch of the build; close this issue when it is.\n' "$RUN_URL" > body.md
+          gh issue create --title "$title" --body-file body.md --label "$LABEL"

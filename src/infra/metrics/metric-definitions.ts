@@ -177,6 +177,12 @@ export const METRIC_DEFINITIONS = {
     help: 'Sessions running each WhatsApp Web build, by version (2.3000.<number>, or unknown).',
     labels: ['version']
   },
+  waWebDrift: {
+    name: 'gw_wa_web_drift_errors_total',
+    type: 'counter',
+    help: 'Calls that failed because WhatsApp Web changed under the patch of whatsapp-web.js, by kind (signature: a function it no longer exports; lazy_module: a module no bundle loaded) and target (Module.function, or other).',
+    labels: ['kind', 'target']
+  },
   policyDecisions: {
     name: 'gw_policy_decisions_total',
     type: 'counter',

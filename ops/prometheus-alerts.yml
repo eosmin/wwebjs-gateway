@@ -91,6 +91,25 @@ groups:
             GET /v1/system/info and look at wwebVersion; read the "Reading the WhatsApp Web build failed"
             warning; run the signature sweep (docs/operations.md) before more sends.
 
+      - alert: GatewayWhatsAppWebDrift
+        # `increase` has no earlier sample for a series that appears already at 1 (the first failure of a
+        # target, or after a restart): the second part catches a series that was not there an hour ago
+        expr: increase(gw_wa_web_drift_errors_total[1h]) > 0 or (gw_wa_web_drift_errors_total unless gw_wa_web_drift_errors_total offset 1h)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: A call failed because WhatsApp Web no longer has a function or module
+          description: >-
+            gw_wa_web_drift_errors_total counts the calls the patch of whatsapp-web.js refused before they
+            reached WhatsApp (`kind="signature"`: the function is gone; `kind="lazy_module"`: no bundle loaded
+            the module), by `target`. Any value means a feature answers 502 on the build now in use, until the
+            patch or the build changes. It is not a person's error.
+          action: >-
+            Read `target` and the build in gw_wa_web_build_info. Find the target in the issue that the
+            `WhatsApp Web build watch` workflow opened for that build (or run the sweep, docs/operations.md),
+            then repair the patch (new pull request) or move WWEB_VERSION to the last verified build.
+
       - alert: GatewayEventsDropped
         expr: increase(gw_events_skipped_total[1h]) > 5
         for: 0m
