@@ -547,9 +547,8 @@ describe('SessionManager status machine', () => {
     await flush()
 
     const metric = await built.metrics.metrics.logouts.get()
-    expect(metric.values).toEqual([
-      expect.objectContaining({ labels: { reason: label }, value: 1 })
-    ])
+    const counted = metric.values.filter(value => value.value > 0)
+    expect(counted).toEqual([expect.objectContaining({ labels: { reason: label }, value: 1 })])
   })
 
   it('does not count a disconnect that is not a logout', async () => {
@@ -561,7 +560,9 @@ describe('SessionManager status machine', () => {
     client.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
     await flush()
 
-    expect((await built.metrics.metrics.logouts.get()).values).toEqual([])
+    expect(
+      (await built.metrics.metrics.logouts.get()).values.every(value => value.value === 0)
+    ).toBe(true)
   })
 
   describe('the WhatsApp Web build of each session', () => {
@@ -585,6 +586,30 @@ describe('SessionManager status machine', () => {
 
       client.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
       await flush()
+      expect(await buildOf(built)).toEqual({})
+    })
+
+    it('does not keep the build of a session that left ready while the page was asked for it', async () => {
+      const built = build()
+      built.sessions.seed({ id: ID, linkedAt: NOW })
+      const client = await startSession(built)
+      let answer: (version: string) => void = () => undefined
+      client.script(
+        'getWWebVersion',
+        () =>
+          new Promise<string>(resolve => {
+            answer = resolve
+          })
+      )
+      const ready = makeReady(built, client)
+      await flush()
+
+      client.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
+      await flush()
+      answer('2.3000.7')
+      await ready
+      await flush()
+
       expect(await buildOf(built)).toEqual({})
     })
 
@@ -939,7 +964,7 @@ describe('SessionManager reconnect', () => {
     await flush()
 
     const recoveries = await built.metrics.metrics.browserRecoveries.get()
-    expect(recoveries.values).toEqual([
+    expect(recoveries.values.filter(value => value.value > 0)).toEqual([
       expect.objectContaining({ labels: { code: 'BROWSER_DISCONNECTED' }, value: 1 })
     ])
     expect((await built.metrics.metrics.watchdogRestarts.get()).values[0]?.value).toBe(0)

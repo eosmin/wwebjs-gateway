@@ -766,6 +766,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // when no navigation follows) and whether the frame went to the logout address. Two booleans: no
   // address and no account data. It only looks; the logout goes on as it always did.
   private logLogout(): void {
+    this.logoutReason = undefined
     try {
       const flagStale = (this.client as { lastLoggedOut?: unknown }).lastLoggedOut === true
       const address = this.client.pupPage?.url() ?? ''

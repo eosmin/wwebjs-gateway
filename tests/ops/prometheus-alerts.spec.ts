@@ -3,10 +3,13 @@ import { join } from 'node:path'
 
 import { parse } from 'yaml'
 
+import { ErrorCode } from '../../src/common/errors.js'
 import {
   METRIC_DEFINITIONS,
   type MetricDefinition
 } from '../../src/infra/metrics/metric-definitions.js'
+import { SESSION_STATUSES } from '../../src/types/dto.js'
+import { WA_EVENT_NAMES } from '../../src/types/events.js'
 
 // ops/prometheus-alerts.yml is the rules file an operator loads into Prometheus. These tests fail when
 // it does not parse, when a rule lacks what a person on call needs, or when it names a series or a
@@ -109,6 +112,80 @@ describe('ops/prometheus-alerts.yml', () => {
             known: true
           })
         }
+      }
+    }
+  })
+
+  // A label value that no series has makes a rule that never fires, and the check of the names above
+  // cannot see it: the values of the labels with a fixed set are checked here
+  const KNOWN_VALUES: Record<string, ReadonlySet<string>> = {
+    'gw_sessions.status': new Set(SESSION_STATUSES),
+    'gw_send_total.result': new Set(['sent', ...Object.values(ErrorCode)]),
+    'gw_webhook_deliveries_total.result': new Set(['success', 'retry', 'failed', 'dropped']),
+    'gw_events_total.event': new Set(WA_EVENT_NAMES),
+    'gw_logout_total.reason': new Set(
+      (METRIC_DEFINITIONS.logouts.seed ?? []).map(labels => labels['reason'] ?? '')
+    )
+  }
+
+  it('uses only values of fixed labels that the gateway can write', () => {
+    for (const rule of rules) {
+      for (const match of (rule.expr ?? '').matchAll(/\b(gw_[a-z0-9_]+)\{([^}]*)\}/g)) {
+        for (const matcher of (match[2] ?? '').matchAll(
+          /([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*"([^"]*)"/g
+        )) {
+          const allowed = KNOWN_VALUES[`${match[1]}.${matcher[1]}`]
+          if (allowed === undefined) continue
+          // A pattern of the form a|b|c is a set of values; `5..` style patterns are not of these labels
+          for (const value of (matcher[3] ?? '').split('|')) {
+            expect({
+              alert: rule.alert,
+              series: match[1],
+              label: matcher[1],
+              value,
+              known: allowed.has(value)
+            }).toEqual({
+              alert: rule.alert,
+              series: match[1],
+              label: matcher[1],
+              value,
+              known: true
+            })
+          }
+        }
+      }
+    }
+  })
+
+  it('is valid for the shapes Prometheus rejects at load: balanced brackets and quotes, a duration', () => {
+    for (const rule of rules) {
+      const expr = rule.expr ?? ''
+      const count = (character: string): number => expr.split(character).length - 1
+      expect({ alert: rule.alert, round: count('(') - count(')') }).toEqual({
+        alert: rule.alert,
+        round: 0
+      })
+      expect({ alert: rule.alert, curly: count('{') - count('}') }).toEqual({
+        alert: rule.alert,
+        curly: 0
+      })
+      expect({ alert: rule.alert, square: count('[') - count(']') }).toEqual({
+        alert: rule.alert,
+        square: 0
+      })
+      expect({ alert: rule.alert, quotes: count('"') % 2 }).toEqual({
+        alert: rule.alert,
+        quotes: 0
+      })
+      expect({ alert: rule.alert, for: /^\d+[smhd]$/.test(rule.for ?? '') }).toEqual({
+        alert: rule.alert,
+        for: true
+      })
+      for (const range of expr.matchAll(/\[([^\]]*)\]/g)) {
+        expect({ alert: rule.alert, range: /^\d+[smhd]$/.test(range[1] ?? '') }).toEqual({
+          alert: rule.alert,
+          range: true
+        })
       }
     }
   })

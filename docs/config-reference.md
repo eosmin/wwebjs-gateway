@@ -33,7 +33,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `WWEB_VERSION_CACHE_TYPE` | `local`, `remote`, `none` | no | `local` | Where the pinned WhatsApp Web HTML snapshot is read from |
 | `WWEB_CACHE_PATH` | string, 1 character or more | no | `./.wwebjs_cache` | Folder holding the local WhatsApp Web HTML snapshots |
 | `WWEB_VERSION_REMOTE_PATH` | string, 1 character or more | no |  | https URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote. The page it serves runs inside the logged-in browser: trust the host |
-| `WWEB_VERIFIED_BUILD` | string, 1 character or more | no |  | The WhatsApp Web build last checked with a real account (for example 2.3000.1054292354). A session that runs another build logs a warning when it becomes ready; nothing else changes. Empty means no comparison |
+| `WWEB_VERIFIED_BUILD` | string, 1 character or more | no |  | The WhatsApp Web build last checked with a real account (for example 2.3000.1054292354). A session that runs another build logs a warning when it becomes ready; nothing else changes. Unset means no comparison |
 | `WWEB_VERSION_STRICT` | `true`, `false` | no | `true` | Fail the session start when the pinned WhatsApp Web version cannot be loaded, instead of running the live latest build |
 | `QR_MAX_RETRIES` | integer, 0 or more | no | `6` | QR codes refreshed before a session gives up pairing (wwebjs shows this number plus one); 0 never gives up and keeps the browser running |
 | `TAKEOVER_ON_CONFLICT` | `true`, `false` | no | `false` | Take the session back when WhatsApp Web is opened elsewhere |

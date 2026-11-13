@@ -43,19 +43,20 @@ groups:
             stays in the quarantine folder of WWEBJS_DATA_PATH; do not restore it without looking.
 
       - alert: GatewayNoReadySession
-        expr: sum(gw_sessions{status="ready"}) == 0 and sum(gw_sessions{status=~"starting|qr|pairing_code|authenticating|disconnected|failed"}) > 0
+        expr: sum(gw_sessions{status="ready"}) == 0 and sum(gw_sessions{status=~"starting|authenticating|disconnected|failed"}) > 0
         for: 10m
         labels:
           severity: critical
         annotations:
           summary: No session is ready and some are trying to be
           description: >-
-            Sessions exist that are starting, waiting for a QR code, authenticating, disconnected or failed,
-            and none has been ready for 10 minutes. Nothing is being sent or received. 10 minutes covers a
-            normal restart and a reconnect with its backoff.
+            Sessions exist that are starting, authenticating, disconnected or failed, and none has been ready
+            for 10 minutes. Nothing is being sent or received. 10 minutes covers a normal restart and a
+            reconnect with its backoff. A session that waits for a QR code or a pairing code is not counted:
+            it waits for a person, not for the gateway.
           action: >-
-            GET /ready and GET /v1/sessions: read each session's status and lastError. A `qr` means someone
-            must scan; `failed` or `disconnected` for long means look at the logs for the cause.
+            GET /ready and GET /v1/sessions: read each session's status and lastError. `failed` or
+            `disconnected` for long means look at the logs for the cause; a session in `qr` needs a scan.
 
   - name: wwebjs-gateway-whatsapp-web
     rules:
@@ -183,19 +184,35 @@ groups:
             than raising the limits of the policy: a faster send rate is what gets a number restricted.
 
       - alert: GatewaySendFailures
-        expr: sum(increase(gw_send_total{result=~"WHATSAPP_ERROR|WHATSAPP_TIMEOUT|SESSION_NOT_READY|INTERNAL"}[30m])) > 5 and sum(increase(gw_send_total{result=~"WHATSAPP_ERROR|WHATSAPP_TIMEOUT|SESSION_NOT_READY|INTERNAL"}[30m])) / sum(increase(gw_send_total[30m])) > 0.2
+        expr: sum(increase(gw_send_total{result=~"WHATSAPP_ERROR|WHATSAPP_TIMEOUT|INTERNAL"}[30m])) > 5 and sum(increase(gw_send_total{result=~"WHATSAPP_ERROR|WHATSAPP_TIMEOUT|INTERNAL"}[30m])) / sum(increase(gw_send_total[30m])) > 0.2
         for: 0m
         labels:
           severity: critical
         annotations:
           summary: More than a fifth of the sends failed in WhatsApp Web
           description: >-
-            More than 5 sends and over 20% of them in 30 minutes ended as WHATSAPP_ERROR, WHATSAPP_TIMEOUT,
-            SESSION_NOT_READY or INTERNAL. Refusals of the send policy are not counted: this is the page or
-            the session failing, typically after a WhatsApp Web build changed a function.
+            More than 5 sends and over 20% of them in 30 minutes ended as WHATSAPP_ERROR, WHATSAPP_TIMEOUT or
+            INTERNAL. Refusals of the send policy are not counted, nor is SESSION_NOT_READY (a restart window
+            has it, and the queue retries it): this is the page or the session failing, typically after a
+            WhatsApp Web build changed a function.
           action: >-
             Look for `[signature]` or `[lazy-module]` in the causes of the logs; if found, follow "What to do
             when WhatsApp Web changes". Stop sending to the session if it is not ready.
+
+      - alert: GatewaySendUnknownOutcome
+        expr: increase(gw_send_total{result="UNKNOWN_OUTCOME"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: A send ended with an unknown outcome
+          description: >-
+            A send was dispatched to WhatsApp Web and the answer was lost (the page went away or failed after
+            the message was added), so nobody knows whether it was delivered. The gateway never retries such
+            a send by itself, to avoid a duplicate; one is enough to look at.
+          action: >-
+            Find the job in the send queue, ask the recipient or look at the chat on the phone, and resend with
+            the same Idempotency-Key only if the message is not there.
 
       - alert: GatewayHttpServerErrors
         expr: sum(rate(gw_http_requests_total{status=~"5.."}[5m])) / sum(rate(gw_http_requests_total[5m])) > 0.05 and sum(rate(gw_http_requests_total[5m])) > 0.05

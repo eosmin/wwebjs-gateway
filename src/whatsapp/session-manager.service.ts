@@ -892,7 +892,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     const row = await this.sessions.findById(id)
     if (row && !row.linkedAt) patch.linkedAt = new Date()
     await this.transition(id, 'ready', patch)
-    await this.recordBuild(id, client)
+    await this.recordBuild(id, runtime, client)
     await this.applySettings(id, client, parseSettings(row?.settings))
   }
 
@@ -1001,11 +1001,18 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   private lastBuild: string | undefined
   private readonly unverifiedReported = new Set<string>()
 
-  private async recordBuild(id: string, client: WhatsAppClientPort): Promise<void> {
+  private async recordBuild(
+    id: string,
+    runtime: Runtime,
+    client: WhatsAppClientPort
+  ): Promise<void> {
     try {
       const build = buildLabel(
         await withTimeout(client.getWWebVersion(), CALL_TIMEOUT_MS, 'getWWebVersion')
       )
+      // The page was asked while the session could still leave: a session that is no longer ready on
+      // this client has nothing to report, and writing it would leave a series behind
+      if (this.statuses.get(id) !== 'ready' || runtime.client !== client) return
       this.builds.set(id, build)
       this.refreshBuildGauge()
       if (build === 'unknown') return

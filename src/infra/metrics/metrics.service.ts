@@ -5,8 +5,16 @@ import { METRIC_DEFINITIONS, type MetricDefinition } from './metric-definitions.
 
 type Definition<L extends string> = MetricDefinition & { labels: readonly L[] }
 
-const counter = <L extends string>(registry: Registry, def: Definition<L>): Counter<L> =>
-  new Counter({ name: def.name, help: def.help, labelNames: def.labels, registers: [registry] })
+const counter = <L extends string>(registry: Registry, def: Definition<L>): Counter<L> => {
+  const made = new Counter({
+    name: def.name,
+    help: def.help,
+    labelNames: def.labels,
+    registers: [registry]
+  })
+  for (const labels of def.seed ?? []) (made as unknown as Counter<string>).inc(labels, 0)
+  return made
+}
 
 const gauge = <L extends string>(registry: Registry, def: Definition<L>): Gauge<L> =>
   new Gauge({ name: def.name, help: def.help, labelNames: def.labels, registers: [registry] })
