@@ -88,10 +88,11 @@ const optionalId = (id: IdLike | null | undefined): string | undefined =>
 const toIso = (value: Date | number): string => new Date(value).toISOString()
 const unixToIso = (seconds: number): string => toIso(seconds * 1000)
 
+// A whole number of seconds (the DTOs are `.int()`: a fraction would fail the response of a message that is otherwise fine).
 // The ISO string must stay a 4-digit year (RFC 3339, the DTO schema and Postgres): 0 to 9999-12-31
 const MAX_UNIX_SECONDS = 253_402_300_799
 const isUsableUnixTime = (seconds: number): boolean =>
-  Number.isFinite(seconds) && seconds >= 0 && seconds <= MAX_UNIX_SECONDS
+  Number.isInteger(seconds) && seconds >= 0 && seconds <= MAX_UNIX_SECONDS
 
 // Copies the listed keys, leaving out the ones that are undefined or null so that a field WhatsApp
 // did not fill is absent from the DTO instead of failing its schema
@@ -757,11 +758,17 @@ export interface ChatSource extends Omit<
   lastMessage?: MessageSource | null
 }
 
-const CHAT_FIELDS = ['muteExpiration', 'name'] as const satisfies readonly (keyof ChatSource)[]
+const usableChatTime = (value: number | null | undefined): number | null =>
+  value !== undefined && value !== null && isUsableUnixTime(value) ? value : null
+
+const CHAT_FIELDS = ['name'] as const satisfies readonly (keyof ChatSource)[]
 
 // The last message of a chat is shown only when it fits its schema: one odd message must not
 // turn a listing of every chat into a 500 (ADR 0006). The message stays in `messages` and the events.
-function mapLastMessage(source: MessageSource, options: MessageMapOptions): MessageDto | undefined {
+function mapTolerantMessage(
+  source: MessageSource,
+  options: MessageMapOptions
+): MessageDto | undefined {
   try {
     const message = mapMessage(source, options)
     const parsed = MessageSchema.safeParse(message)
@@ -789,35 +796,54 @@ export function mapChat(source: ChatSource, options: MessageMapOptions): ChatDto
     archived: source.archived ?? false,
     isReadOnly: source.isReadOnly ?? false,
     isLocked: source.isLocked ?? false,
-    timestamp: source.timestamp ?? null
+    timestamp: usableChatTime(source.timestamp)
   }
-  const lastMessage = source.lastMessage ? mapLastMessage(source.lastMessage, options) : undefined
+  if (
+    source.muteExpiration !== undefined &&
+    source.muteExpiration !== null &&
+    isUsableUnixTime(source.muteExpiration)
+  ) {
+    chat.muteExpiration = source.muteExpiration
+  }
+  const lastMessage = source.lastMessage
+    ? mapTolerantMessage(source.lastMessage, options)
+    : undefined
   if (lastMessage) chat.lastMessage = lastMessage
   return chat
 }
 
 export interface GroupChatSource extends Omit<ChatSource, never> {
   owner?: IdLike | null
-  createdAt: Date | number
+  createdAt?: Date | number | null
   description?: string | null
-  participants: (Omit<GroupChatDto['participants'][number], 'id' | 'isAdmin' | 'isSuperAdmin'> & {
+  participants?: (Omit<GroupChatDto['participants'][number], 'id' | 'isAdmin' | 'isSuperAdmin'> & {
     id: IdLike
     isAdmin?: boolean | null
     isSuperAdmin?: boolean | null
   })[]
 }
 
+function creationOf(value: Date | number | null | undefined): { createdAt?: string } {
+  if (value === undefined || value === null) return {}
+  const time = new Date(value)
+  return Number.isNaN(time.getTime()) ? {} : { createdAt: time.toISOString() }
+}
+
 export function mapGroupChat(source: GroupChatSource, options: MessageMapOptions): GroupChatDto {
   return {
     ...mapChat(source, options),
     owner: source.owner === undefined || source.owner === null ? null : serializeId(source.owner),
-    createdAt: toIso(source.createdAt),
+    // GroupChat.createdAt is `new Date(creation * 1000)`: an Invalid Date when WhatsApp sent no `creation`
+    ...creationOf(source.createdAt),
     description: source.description ?? null,
-    participants: source.participants.map(participant => ({
-      id: serializeId(participant.id),
-      isAdmin: participant.isAdmin ?? false,
-      isSuperAdmin: participant.isSuperAdmin ?? false
-    }))
+    // wwebjs itself reads a group without participants as empty (`participants || []`)
+    participants: (Array.isArray(source.participants) ? source.participants : []).map(
+      participant => ({
+        id: serializeId(participant.id),
+        isAdmin: participant.isAdmin ?? false,
+        isSuperAdmin: participant.isSuperAdmin ?? false
+      })
+    )
   }
 }
 
@@ -852,7 +878,9 @@ export function mapChannel(source: ChannelSource, options: MessageMapOptions): C
     unreadCount: source.unreadCount ?? 0,
     isMuted: source.isMuted ?? false
   }
-  const lastMessage = source.lastMessage ? mapLastMessage(source.lastMessage, options) : undefined
+  const lastMessage = source.lastMessage
+    ? mapTolerantMessage(source.lastMessage, options)
+    : undefined
   if (lastMessage) channel.lastMessage = lastMessage
   return channel
 }
@@ -899,23 +927,41 @@ export function mapLabel(source: LabelDto): LabelDto {
   return { ...pick(source, ['hexColor'] as const), id: source.id, name: source.name }
 }
 
-export interface BroadcastSource extends Omit<BroadcastDto, 'id' | 'msgs'> {
+export interface BroadcastSource extends Omit<
+  BroadcastDto,
+  'id' | 'msgs' | 'totalCount' | 'unreadCount'
+> {
   id: IdLike
-  msgs: MessageSource[]
+  // Broadcast.js builds `msgs` with `data.msgs?.map(...)` and copies the counts without a default
+  msgs?: MessageSource[]
+  totalCount?: number | null
+  unreadCount?: number | null
 }
 
 export function mapBroadcast(source: BroadcastSource, options: MessageMapOptions): BroadcastDto {
+  // One status that does not fit its schema is left out, as the last message of a chat is: it must not
+  // turn the listing of every broadcast into a 500
+  const msgs = (Array.isArray(source.msgs) ? source.msgs : []).flatMap(message => {
+    const mapped = mapTolerantMessage(message, options)
+    return mapped === undefined ? [] : [mapped]
+  })
   return {
     id: serializeId(source.id),
     timestamp: source.timestamp,
-    totalCount: source.totalCount,
-    unreadCount: source.unreadCount,
-    msgs: source.msgs.map(message => mapMessage(message, options))
+    totalCount: source.totalCount ?? msgs.length,
+    unreadCount: source.unreadCount ?? 0,
+    msgs
   }
 }
 
 // `from` is `data.peerJid` in Call.js, the wid WhatsApp Web holds, though the typings say string
-export type CallSource = Omit<CallDto, 'from' | 'participants'> & {
+export type CallSource = Omit<
+  CallDto,
+  'from' | 'participants' | 'isVideo' | 'isGroup' | 'fromMe'
+> & {
+  isVideo?: boolean | null
+  isGroup?: boolean | null
+  fromMe?: boolean | null
   from?: IdLike | null
   participants?: object | null
 }
@@ -931,7 +977,13 @@ const CALL_FIELDS = [
 ] as const satisfies readonly (keyof CallSource)[]
 
 export function mapCall(source: CallSource): CallDto {
-  const call: CallDto = pick(source, CALL_FIELDS)
+  // Call.js copies the flags without a default: a missing one is false, as `outgoing` is in the patched hook
+  const call: CallDto = {
+    ...pick(source, CALL_FIELDS),
+    isVideo: source.isVideo ?? false,
+    isGroup: source.isGroup ?? false,
+    fromMe: source.fromMe ?? false
+  }
   const from = optionalId(source.from)
   if (from !== undefined) call.from = from
   const participants = toJson(source.participants)
@@ -955,13 +1007,13 @@ export function mapProduct(source: ProductDto): ProductDto {
 }
 
 export interface OrderSource extends Omit<OrderDto, 'products'> {
-  products: ProductDto[]
+  products?: ProductDto[] // Order.js sets it only `if (data.products)`
 }
 
 export function mapOrder(source: OrderSource): OrderDto {
   return {
     ...pick(source, ['subtotal', 'total', 'currency', 'createdAt'] as const),
-    products: source.products.map(mapProduct)
+    products: (source.products ?? []).map(mapProduct)
   }
 }
 
