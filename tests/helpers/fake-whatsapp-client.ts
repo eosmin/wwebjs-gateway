@@ -386,7 +386,7 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
   readonly getBroadcasts = this.stub('getBroadcasts', () => [])
   readonly getBroadcastById = this.notScripted('getBroadcastById')
   readonly createCallLink = this.stub('createCallLink', () => 'https://call.example.com/fake')
-  readonly rejectCall = this.stub('rejectCall', () => true)
+  readonly rejectCall = this.stub('rejectCall', () => 'confirmed')
 
   // ---- Internals -------------------------------------------------------------------------------
 

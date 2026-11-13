@@ -459,7 +459,7 @@ index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..996fcf1f4c2108000982380b2ec4dc6694c7a195 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..aef4ebe55f3e882ad5cf129f6ad08f7682c0cfcc 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
 @@ -110,6 +110,113 @@ exports.LoadUtils = () => {
@@ -737,7 +737,192 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..996fcf1f4c2108000982380b2ec4dc66
          const response = await window
              .require('WAWebNewsletterMetadataQueryJob')
              .queryNewsletterMetadataByInviteCode(inviteCode, role);
-@@ -1742,20 +1868,30 @@ exports.LoadUtils = () => {
+@@ -1334,28 +1460,164 @@ exports.LoadUtils = () => {
+         return undefined;
+     };
+ 
++    // F30 (H-LIVE-11): the library wrote a `call/reject` stanza by hand and sent it without waiting
++    // for an answer, so the caller kept ringing while the gateway said it was done. WhatsApp Web
++    // rejects through its VoIP stack, which owns the state of the call and acts on the call it
++    // holds (no ids). `peerJid` is kept only because `Call.reject` passes it.
++    // Answers { result: 'rejected', confirmed, diag }. `confirmed` is true ONLY when the page listed
++    // the call before the reject and no longer lists it within 3 s. On WhatsApp Web 2.3000.1054491369
++    // the collection never lists the call, so the reject is handed to the stack and cannot be
++    // confirmed from the page (the live checks of 2026-11-14 saw the phone of the caller stop each
++    // time). `lastEndedCall` is NOT a signal: it was already the call while it still rang, and it was
++    // the call after the caller hung up before the reject. `diag` says what the stack and the
++    // collection look like (ids cut short, booleans, keys and types, never a value or a name).
+     window.WWebJS.rejectCall = async (peerJid, id) => {
+-        const _meUser = window
+-            .require('WAWebUserPrefsMeUser')
+-            .getMaybeMePnUser();
+-        let userId = _meUser._serialized || _meUser.$1;
++        const build = (window.Debug && window.Debug.VERSION) || 'unknown';
++        const fail = (why) =>
++            new Error(`[call-reject] ${why} (WhatsApp Web ${build})`);
++        const calls = window.require('WAWebCallCollection');
++        if (!calls) throw fail('the call collection is not available');
++        const text = (value) =>
++            value == null
++                ? ''
++                : typeof value === 'object'
++                  ? String(value._serialized ?? value.$1 ?? value.id ?? '')
++                  : String(value);
++        const models = () => {
++            try {
++                return typeof calls.getModelsArray === 'function'
++                    ? calls.getModelsArray()
++                    : [];
++            } catch (e) {
++                return [];
++            }
++        };
++        const listed = () => {
++            if (typeof calls.get === 'function' && calls.get(id) != null)
++                return true;
++            return models().some((model) => text(model && model.id) === id);
++        };
++        const endedIsIt = () =>
++            text(calls.lastEndedCall && calls.lastEndedCall.id) === id;
++        const active = calls.activeCall;
++        if (active && text(active.id) !== id)
++            throw fail('another call is the one the VoIP stack holds');
++        const wasListed = listed();
++        const endedBefore = endedIsIt();
++
++        const stackModule = window.require('WAWebVoipStackInterface');
++        const stack =
++            stackModule && typeof stackModule.getVoipStackInterface === 'function'
++                ? await stackModule.getVoipStackInterface()
++                : null;
++        if (!stack) throw fail('the VoIP stack is not available');
++        if (stack.type !== 'web')
++            throw fail(`the VoIP stack is of the type ${String(stack.type)}`);
++
++        // What the stack says about the call, for the log only and never on the critical path: it
++        // gets 1 s, and a failure or a silence changes nothing. Keys and types of an object; for a
++        // string only whether it names this call, never what it says.
++        const callInfo = async () => {
++            if (typeof stack.getCallInfo !== 'function') return 'absent';
++            try {
++                const info = await Promise.race([
++                    stack.getCallInfo(),
++                    new Promise((resolve) =>
++                        setTimeout(() => resolve('__timeout__'), 1000),
++                    ),
++                ]);
++                if (info === '__timeout__') return 'timeout';
++                if (info == null) return 'null';
++                if (typeof info === 'string')
++                    return info.includes(id) ? 'string:names-the-call' : 'string:other';
++                if (typeof info !== 'object') return typeof info;
++                return Object.keys(info)
++                    .slice(0, 40)
++                    .map((key) => `${key}:${typeof info[key]}`);
++            } catch (e) {
++                return 'failed';
++            }
++        };
++        const infoBefore = await callInfo();
++
++        if (typeof stack.rejectCallWithEndReason === 'function') {
++            const enums = window.require('WAWebVoipWaCallEnums');
++            const reason = enums && enums.RejectEndReason && enums.RejectEndReason.Self;
++            if (reason === undefined) throw fail('RejectEndReason.Self is not available');
++            await stack.rejectCallWithEndReason(reason);
++        } else if (typeof stack.rejectCall === 'function') {
++            await stack.rejectCall();
++        } else {
++            const names = new Set();
++            for (let o = stack; o && o !== Object.prototype; o = Object.getPrototypeOf(o))
++                for (const name of Object.getOwnPropertyNames(o))
++                    if (/reject|decline|end|hang|call/i.test(name) && typeof stack[name] === 'function')
++                        names.add(name);
++            throw fail(
++                `the VoIP stack has no function to reject a call; it has: ${[...names].slice(0, 20).join(', ') || 'none'}`,
++            );
++        }
+ 
+-        const stanza = window.require('WAWap').wap(
+-            'call',
+-            {
+-                id: window.require('WAWap').generateId(),
+-                from: userId,
+-                to: peerJid,
+-            },
+-            [
+-                window.require('WAWap').wap('reject', {
+-                    'call-id': id,
+-                    'call-creator': peerJid,
+-                    count: '0',
+-                }),
+-            ],
+-        );
+-        await window.require('WADeprecatedSendIq').deprecatedCastStanza(stanza);
++        const gone = () => wasListed && !listed();
++        let confirmed = false;
++        for (let waited = 0; waited < 3000; waited += 100) {
++            if (gone()) {
++                confirmed = true;
++                break;
++            }
++            await new Promise((resolve) => setTimeout(resolve, 100));
++        }
++        if (!confirmed) confirmed = gone();
++
++        const cut = (value) => {
++            const t = text(value);
++            return t ? `${t.slice(0, 8)}…(${t.length})` : null;
++        };
++        const members = (target) => {
++            const found = [];
++            const seen = new Set();
++            for (let o = target; o && o !== Object.prototype; o = Object.getPrototypeOf(o))
++                for (const name of Object.getOwnPropertyNames(o)) {
++                    if (seen.has(name)) continue;
++                    seen.add(name);
++                    let type = 'unreadable';
++                    try {
++                        type = typeof target[name];
++                    } catch (e) {}
++                    found.push(`${name}:${type}`);
++                }
++            return found.slice(0, 60);
++        };
++        // The report is for the log: the reject is done, so nothing in it may turn into an error
++        try {
++            const all = models();
++            return {
++                result: 'rejected',
++                confirmed,
++                diag: {
++                    build,
++                    wasListed,
++                    idType: typeof id,
++                    idLength: String(id).length,
++                    id: cut(id),
++                    lastEnded: { before: endedBefore, after: endedIsIt() },
++                    callInfo: { before: infoBefore, after: await callInfo() },
++                    stack: { type: stack.type, members: members(stack) },
++                    collection: {
++                        size: all.length,
++                        ids: all.slice(0, 6).map((model) => cut(model && model.id)),
++                        idTypes: all.slice(0, 6).map((model) => typeof (model && model.id)),
++                        modelKeys: all[0] ? Object.keys(all[0]).slice(0, 25) : [],
++                        members: members(calls).filter((m) => !m.endsWith(':function')),
++                    },
++                    activeCall: cut(calls.activeCall && calls.activeCall.id),
++                    lastActiveCall: cut(calls.lastActiveCall && calls.lastActiveCall.id),
++                    lastEndedCall: cut(calls.lastEndedCall && calls.lastEndedCall.id),
++                },
++            };
++        } catch (e) {
++            return { result: 'rejected', confirmed, diag: { build, note: 'report failed' } };
++        }
+     };
+ 
+     window.WWebJS.cropAndResizeImage = async (media, options = {}) => {
+@@ -1742,20 +2004,30 @@ exports.LoadUtils = () => {
  
          if (typeof duration !== 'number') return false;
  

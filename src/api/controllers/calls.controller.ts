@@ -1,10 +1,13 @@
-import { Body, Controller, HttpCode, HttpStatus, Inject, Param, Post } from '@nestjs/common'
+import { Body, Controller, HttpCode, HttpStatus, Inject, Param, Post, Res } from '@nestjs/common'
+import { ApiAcceptedResponse } from '@nestjs/swagger'
+import type { FastifyReply } from 'fastify'
 import { ZodResponse } from 'nestjs-zod'
 
 import type { ErrorCode } from '../../common/errors.js'
 import { CallsService } from '../../services/calls.service.js'
 import {
   CallLinkResponseDto,
+  CallRejectResponseDto,
   CreateCallLinkBodyDto,
   SessionCallParamsDto
 } from '../../types/calls.dto.js'
@@ -51,15 +54,20 @@ export class CallsController {
   }
 
   @Post(':sessionId/calls/:callId/reject')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
+  @ZodResponse({ type: CallRejectResponseDto })
+  @ApiAcceptedResponse({
+    type: CallRejectResponseDto,
+    description: 'The reject was handed over but nothing shows that the call ended'
+  })
   @WaOperation({
     id: 'calls.reject',
     scope: 'manage',
     summary: 'Reject an incoming call',
     description:
-      'Rejects a call the `call` event delivered. The gateway keeps the most recent incoming calls only (`CALL_CACHE_SIZE`): a call it no longer holds, never saw, or already rejected is `404 NOT_FOUND`.',
+      'Rejects a call the `call` event delivered, through the VoIP stack of WhatsApp Web. WhatsApp gives no answer to a reject, so the answer says what the page showed afterwards: `200 { confirmed: true }` when the page listed the call and it left the list, `202 { confirmed: false, note }` when the reject was handed over and nothing shows that the call ended, including a call the page does not list under that id (do not assume the caller stopped ringing). `404 NOT_FOUND` when the gateway no longer holds the call (`CALL_CACHE_SIZE`), never saw it, or already rejected it. `502 WHATSAPP_ERROR` (`[call-reject]` in the cause) when this WhatsApp Web build has no way to reject. The effect on a real phone is not yet confirmed live (plan 10.4, F30b).',
     errors: ON_SESSION,
-    examples: { request: null, response: null },
+    examples: { request: null, response: { confirmed: true } },
     wwebjs: [
       'Call.reject',
       'Call.id',
@@ -73,7 +81,12 @@ export class CallsController {
       'Call.participants'
     ]
   })
-  reject(@Param() { sessionId, callId }: SessionCallParamsDto): Promise<void> {
-    return this.calls.reject(sessionId, callId)
+  async reject(
+    @Param() { sessionId, callId }: SessionCallParamsDto,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<CallRejectResponseDto> {
+    const answer = await this.calls.reject(sessionId, callId)
+    if (!answer.confirmed) void reply.status(HttpStatus.ACCEPTED)
+    return answer
   }
 }

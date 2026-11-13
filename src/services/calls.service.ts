@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common'
 
 import { NotFoundError } from '../common/errors.js'
+import type { CallRejectResponse } from '../types/calls.dto.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
 
 // The calls of a session: a link for a scheduled call, and rejecting an incoming one. wwebjs can
@@ -14,9 +15,19 @@ export class CallsService {
     return this.sessions.requireReady(sessionId).createCallLink(new Date(startTime), callType)
   }
 
-  // A call the adapter no longer holds (too old, already rejected, or never seen) is a 404
-  async reject(sessionId: string, callId: string): Promise<void> {
-    const rejected = await this.sessions.requireReady(sessionId).rejectCall(callId)
-    if (!rejected) throw new NotFoundError('NOT_FOUND', `No recent incoming call ${callId}`)
+  // WhatsApp gives no answer to a reject, so what is answered is what the page shows afterwards:
+  // `confirmed` when the call left its list, `confirmed: false` with a note when the reject was
+  // handed over and nothing shows that the call ended. A call the adapter no longer holds (too old,
+  // already rejected, or never seen) is a 404.
+  async reject(sessionId: string, callId: string): Promise<CallRejectResponse> {
+    const result = await this.sessions.requireReady(sessionId).rejectCall(callId)
+    if (result === 'not_held')
+      throw new NotFoundError('NOT_FOUND', `No recent incoming call ${callId}`)
+    return result === 'confirmed'
+      ? { confirmed: true }
+      : { confirmed: false, note: UNCONFIRMED_NOTE }
   }
 }
+
+export const UNCONFIRMED_NOTE =
+  'The reject was handed to the VoIP stack of WhatsApp Web; its effect cannot be confirmed from the page, so do not assume the caller stopped ringing.'
