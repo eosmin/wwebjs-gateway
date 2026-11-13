@@ -292,10 +292,35 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
              },
              startTime,
 diff --git a/src/structures/GroupChat.js b/src/structures/GroupChat.js
-index 6bc64ff4cce181344785b63d6777328fde75a991..06997b24f98bf98b159e3bbf63791ff993ad207d 100644
+index 6bc64ff4cce181344785b63d6777328fde75a991..76b3beb3475b914d02c934d3e37632acdd8b8572 100644
 --- a/src/structures/GroupChat.js
 +++ b/src/structures/GroupChat.js
-@@ -577,10 +577,12 @@ class GroupChat extends Chat {
+@@ -417,14 +417,16 @@ class GroupChat extends Chat {
+                 let descId = chat.groupMetadata.descId;
+                 let newId = await window.require('WAWebMsgKey').newId();
+                 try {
+-                    await window
+-                        .require('WAWebGroupModifyInfoJob')
+-                        .setGroupDescription(
+-                            chatWid,
+-                            description,
+-                            newId,
+-                            descId,
+-                        );
++                    // WhatsApp Web 2.3000.1054445547 takes one object (null deletes the description)
++                    await window.WWebJS.requireFunction(
++                        'WAWebGroupModifyInfoJob',
++                        'setGroupDescription',
++                    )({
++                        desc: description,
++                        groupWid: chatWid,
++                        newDescId: newId,
++                        prevDescId: descId,
++                    });
+                     return true;
+                 } catch (err) {
+                     if (err.name === 'ServerStatusCodeError') return false;
+@@ -577,10 +579,12 @@ class GroupChat extends Chat {
       */
      async getInviteCode() {
          const codeRes = await this.client.pupPage.evaluate(async (chatId) => {
@@ -325,10 +350,10 @@ index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fcad986bbd 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108fbbf6d4b 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
-@@ -110,6 +110,73 @@ exports.LoadUtils = () => {
+@@ -110,6 +110,97 @@ exports.LoadUtils = () => {
          },
      );
  
@@ -399,10 +424,34 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
 +        return module;
 +    };
 +
++    /**
++     * WhatsApp Web changes the signature of its internal functions between builds (F23: positional
++     * arguments became one object). A function that is gone must say so, not run with wrong arguments.
++     * @param {string} moduleName
++     * @param {string} name
++     * @returns {Function} The function, bound to its module
++     */
++    window.WWebJS.requireFunction = (moduleName, name) => {
++        let module;
++        try {
++            module = window.require(moduleName);
++        } catch (error) {
++            module = undefined;
++        }
++        if (!module || typeof module[name] !== 'function') {
++            const build =
++                (window.Debug && window.Debug.VERSION) || 'unknown';
++            throw new Error(
++                `[signature] ${moduleName}.${name} is not available in WhatsApp Web ${build}`,
++            );
++        }
++        return module[name].bind(module);
++    };
++
      window.WWebJS.forwardMessage = async (chatId, msgId) => {
          const msg =
              window.require('WAWebCollections').Msg.get(msgId) ||
-@@ -119,7 +186,11 @@ exports.LoadUtils = () => {
+@@ -119,7 +210,11 @@ exports.LoadUtils = () => {
                      .Msg.getMessagesById([msgId])
              )?.messages?.[0];
          const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
@@ -415,7 +464,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
              chat: chat,
              msgs: [msg],
              multicast: true,
-@@ -269,9 +340,11 @@ exports.LoadUtils = () => {
+@@ -269,9 +364,11 @@ exports.LoadUtils = () => {
                  eventJoinLink:
                      eventSendOptions.callType === 'none'
                          ? null
@@ -430,7 +479,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
                                    startTimeTs,
                                    eventSendOptions.callType,
                                ),
-@@ -508,35 +581,40 @@ exports.LoadUtils = () => {
+@@ -508,35 +605,40 @@ exports.LoadUtils = () => {
              chat.msgs.add(msg);
              chat.t = msg.t;
  
@@ -499,7 +548,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
              return msg;
          }
  
-@@ -552,9 +630,7 @@ exports.LoadUtils = () => {
+@@ -552,9 +654,7 @@ exports.LoadUtils = () => {
                      messageSecret: window.crypto.getRandomValues(
                          new Uint8Array(32),
                      ),
@@ -510,7 +559,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
                  },
              );
  
-@@ -568,13 +644,18 @@ exports.LoadUtils = () => {
+@@ -568,13 +668,18 @@ exports.LoadUtils = () => {
                  text: msg.body,
              };
  
@@ -536,7 +585,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
  
              return msg;
          }
-@@ -584,7 +665,14 @@ exports.LoadUtils = () => {
+@@ -584,7 +689,14 @@ exports.LoadUtils = () => {
              .addAndSendMsgToChat(chat, message);
          await msgPromise;
  
@@ -552,7 +601,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
  
          return window
              .require('WAWebCollections')
-@@ -890,9 +978,7 @@ exports.LoadUtils = () => {
+@@ -890,9 +1002,7 @@ exports.LoadUtils = () => {
      };
  
      window.WWebJS.getChannelMetadata = async (inviteCode) => {
@@ -563,6 +612,50 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..44d2d1dba760d82c78a128ae8aa651fc
          const response = await window
              .require('WAWebNewsletterMetadataQueryJob')
              .queryNewsletterMetadataByInviteCode(inviteCode, role);
+@@ -1742,20 +1852,30 @@ exports.LoadUtils = () => {
+ 
+         if (typeof duration !== 'number') return false;
+ 
+-        const originalFunction = window.require(
+-            'WAWebPinMsgConstants',
+-        ).getPinExpiryDuration;
+-        window.require('WAWebPinMsgConstants').getPinExpiryDuration = () =>
+-            duration;
+-
+-        const response = await window
+-            .require('WAWebSendPinMessageAction')
+-            .sendPinInChatMsg(message, action, duration);
+-
+-        window.require('WAWebPinMsgConstants').getPinExpiryDuration =
+-            originalFunction;
++        // WhatsApp Web 2.3000.1054445547 takes one object, the expiry as the name of an option:
++        // getPinExpiryOption throws for a duration other than 5, 15, 60, 86400, 604800, 2592000, 0
++        const PinType = (window.require('WAWebProtobufsE2E.pb') || {})
++            .Message$PinInChatMessage$Type;
++        if (!PinType || PinType.PIN_FOR_ALL == null || PinType.UNPIN_FOR_ALL == null) {
++            throw new Error(
++                `[signature] WAWebProtobufsE2E.pb Message$PinInChatMessage$Type is not available in WhatsApp Web ${(window.Debug && window.Debug.VERSION) || 'unknown'}`,
++            );
++        }
++        const isPin = action === 1;
++        const response = await window.WWebJS.requireFunction(
++            'WAWebSendPinMessageAction',
++            'sendPinInChatMsg',
++        )({
++            msg: message,
++            pinType: isPin ? PinType.PIN_FOR_ALL : PinType.UNPIN_FOR_ALL,
++            pinExpiryDurationOption: isPin
++                ? window.require('WAWebPinMsgConstants').getPinExpiryOption(
++                      duration,
++                  )
++                : undefined,
++        });
+ 
+-        return response.messageSendResult === 'OK';
++        return response?.messageSendResult === 'OK';
+     };
+ 
+     window.WWebJS.getStatusModel = (status) => {
 diff --git a/src/util/Puppeteer.js b/src/util/Puppeteer.js
 index 54df7005b474f00cd4e290eecd941e40caaf434e..5b495a954b844e4a81fd9066cf7d556279225402 100644
 --- a/src/util/Puppeteer.js

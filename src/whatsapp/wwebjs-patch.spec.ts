@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runInNewContext } from 'node:vm'
 
+import { PIN_DURATIONS } from '../types/messages.dto.js'
+
 // The patch in patches/whatsapp-web.js@1.34.8.patch (TDD §2.5) is what makes the library work with
 // the current WhatsApp Web. These tests fail when a dependency refresh drops it. The library is
 // read as files, not imported: only the adapter may import it.
@@ -1068,6 +1070,225 @@ describe('the patched whatsapp-web.js', () => {
         'boom'
       )
       expect(other).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // F23: WhatsApp Web 2.3000.1054445547 moved `sendPinInChatMsg` and `setGroupDescription` from
+  // positional arguments to one object. The fakes below throw the TypeError of the real page when
+  // they get the old shape, so a refresh that drops the patch fails here
+  describe('the functions of WhatsApp Web that take one object (F23)', () => {
+    const client = { client: { pupPage: { evaluate: evaluateHere } } }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const Message = require(join(libraryRoot, 'structures/Message.js')) as {
+      prototype: { pin: (d: number) => Promise<boolean>; unpin: () => Promise<boolean> }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const GroupChat = require(join(libraryRoot, 'structures/GroupChat.js')) as {
+      prototype: { setDescription: (d: string) => Promise<boolean> }
+    }
+
+    const options: Record<number, string> = {
+      5: 'FiveSeconds',
+      15: 'FifteenSeconds',
+      60: 'OneMinute',
+      86400: 'OneDay',
+      604800: 'SevenDays',
+      2592000: 'ThirtyDays',
+      0: 'Never'
+    }
+    const pinModules = (
+      sendPinInChatMsg: jest.Mock,
+      constants: Record<string, unknown> = {}
+    ): Record<string, unknown> => ({
+      WAWebCollections: { Msg: { get: () => ({ id: 'the-message' }) } },
+      'WAWebProtobufsE2E.pb': {
+        Message$PinInChatMessage$Type: { UNKNOWN_TYPE: 0, PIN_FOR_ALL: 1, UNPIN_FOR_ALL: 2 }
+      },
+      WAWebPinMsgConstants: {
+        getPinExpiryOption: (seconds: number) => {
+          if (!(seconds in options)) throw new Error('Unexpeded pin expiry duration')
+          return options[seconds]
+        },
+        getPinExpiryDuration: (option: string) => option,
+        ...constants
+      },
+      WAWebSendPinMessageAction: { sendPinInChatMsg }
+    })
+    // What the real function does with the shape of before: it reads `msg` of the first argument
+    const realPin = (response: unknown): jest.Mock =>
+      jest.fn((arg: { msg?: { id: unknown } }) => {
+        if (arg?.msg === undefined)
+          throw new TypeError("Cannot read properties of undefined (reading 'id')")
+        return Promise.resolve(response)
+      })
+    const pin = (modules: Record<string, unknown>, duration: number): Promise<boolean> =>
+      withPage(modules, () =>
+        Message.prototype.pin.call({ ...client, id: { _serialized: 'm1' } }, duration)
+      )
+    const unpin = (modules: Record<string, unknown>): Promise<boolean> =>
+      withPage(modules, () =>
+        Message.prototype.unpin.call({ ...client, id: { _serialized: 'm1' } })
+      )
+
+    it('pins with the object WhatsApp Web reads, the type and the option of the duration', async () => {
+      const send = realPin({ messageSendResult: 'OK' })
+
+      await expect(pin(pinModules(send), 86400)).resolves.toBe(true)
+
+      expect(send).toHaveBeenCalledTimes(1)
+      expect(send).toHaveBeenCalledWith({
+        msg: { id: 'the-message' },
+        pinType: 1,
+        pinExpiryDurationOption: 'OneDay'
+      })
+    })
+
+    it('unpins with the unpin type and no option', async () => {
+      const send = realPin({ messageSendResult: 'OK' })
+
+      await expect(unpin(pinModules(send))).resolves.toBe(true)
+
+      expect(send).toHaveBeenCalledWith({
+        msg: { id: 'the-message' },
+        pinType: 2,
+        pinExpiryDurationOption: undefined
+      })
+    })
+
+    it('answers false, not a TypeError, when WhatsApp Web answers nothing or a refusal', async () => {
+      await expect(pin(pinModules(realPin(null)), 86400)).resolves.toBe(false)
+      await expect(pin(pinModules(realPin({ messageSendResult: 'ERROR' })), 86400)).resolves.toBe(
+        false
+      )
+    })
+
+    it('lets a duration WhatsApp Web does not know fail before anything is sent', async () => {
+      const send = realPin({ messageSendResult: 'OK' })
+
+      await expect(pin(pinModules(send), 7)).rejects.toThrow('Unexpeded pin expiry duration')
+
+      expect(send).not.toHaveBeenCalled()
+    })
+
+    it('never replaces getPinExpiryDuration of WhatsApp Web, not even when the send fails', async () => {
+      const getPinExpiryDuration = jest.fn((option: string) => option)
+      const modules = pinModules(
+        jest.fn(() => Promise.reject(new Error('send failed'))),
+        { getPinExpiryDuration }
+      )
+
+      await expect(pin(modules, 86400)).rejects.toThrow('send failed')
+
+      expect((modules.WAWebPinMsgConstants as Record<string, unknown>).getPinExpiryDuration).toBe(
+        getPinExpiryDuration
+      )
+    })
+
+    it('answers the page error with its cause when the module has another shape again', async () => {
+      const modules = pinModules(realPin({ messageSendResult: 'OK' }))
+      delete (modules.WAWebSendPinMessageAction as Record<string, unknown>).sendPinInChatMsg
+
+      await expect(pin(modules, 86400)).rejects.toThrow(
+        '[signature] WAWebSendPinMessageAction.sendPinInChatMsg is not available in WhatsApp Web'
+      )
+    })
+
+    // The description: setGroupDescription reads groupWid of its object (`widToGroupJid(groupWid)`)
+    const describeModules = (setGroupDescription: jest.Mock): Record<string, unknown> => ({
+      WAWebWidFactory: { createWid: (id: string) => ({ wid: id }) },
+      WAWebCollections: { Chat: { get: () => ({ groupMetadata: { descId: 'prev' } }) } },
+      WAWebMsgKey: { newId: () => Promise.resolve('new') },
+      WAWebGroupModifyInfoJob: { setGroupDescription }
+    })
+    const realDescribe = (): jest.Mock =>
+      jest.fn((arg: { groupWid?: unknown }) => {
+        if (arg?.groupWid === undefined)
+          throw new TypeError("Cannot read properties of undefined (reading 'toJid')")
+        return Promise.resolve()
+      })
+    const setDescription = (modules: Record<string, unknown>, text: string): Promise<boolean> =>
+      withPage(modules, () =>
+        GroupChat.prototype.setDescription.call(
+          { ...client, id: { _serialized: 'g@g.us' }, groupMetadata: {} },
+          text
+        )
+      )
+
+    it('sets the description with the object WhatsApp Web reads', async () => {
+      const set = realDescribe()
+
+      await expect(setDescription(describeModules(set), 'hello')).resolves.toBe(true)
+
+      expect(set).toHaveBeenCalledTimes(1)
+      expect(set).toHaveBeenCalledWith({
+        desc: 'hello',
+        groupWid: { wid: 'g@g.us' },
+        newDescId: 'new',
+        prevDescId: 'prev'
+      })
+    })
+
+    it('keeps the empty text as it was handed over, without turning it into null', async () => {
+      const set = realDescribe()
+
+      await setDescription(describeModules(set), '')
+
+      expect(set).toHaveBeenCalledWith(expect.objectContaining({ desc: '' }))
+    })
+
+    it('answers false when the server refuses and passes any other error on', async () => {
+      const refused = Object.assign(new Error('forbidden'), { name: 'ServerStatusCodeError' })
+
+      await expect(
+        setDescription(describeModules(jest.fn(() => Promise.reject(refused))), 'x')
+      ).resolves.toBe(false)
+      await expect(
+        setDescription(describeModules(jest.fn(() => Promise.reject(new Error('boom')))), 'x')
+      ).rejects.toThrow('boom')
+    })
+
+    it('answers the page error with its cause when the module has another shape again', async () => {
+      const modules = describeModules(realDescribe())
+      delete (modules.WAWebGroupModifyInfoJob as Record<string, unknown>).setGroupDescription
+
+      await expect(setDescription(modules, 'x')).rejects.toThrow(
+        '[signature] WAWebGroupModifyInfoJob.setGroupDescription is not available in WhatsApp Web'
+      )
+    })
+
+    // The page throws for a duration it has no option for, which would be a 502: the body of the
+    // pin endpoint only lets through durations WhatsApp Web knows (the others are a 400)
+    it('only lets the pin body hand over durations that WhatsApp Web has an option for', () => {
+      for (const seconds of PIN_DURATIONS) expect(options).toHaveProperty(String(seconds))
+    })
+
+    it('names the enum of the pin type when WhatsApp Web no longer has it', async () => {
+      const modules = pinModules(realPin({ messageSendResult: 'OK' }))
+      modules['WAWebProtobufsE2E.pb'] = {}
+
+      await expect(pin(modules, 86400)).rejects.toThrow(
+        '[signature] WAWebProtobufsE2E.pb Message$PinInChatMessage$Type is not available'
+      )
+    })
+
+    it('answers [signature] when requiring the module throws', async () => {
+      const modules = pinModules(realPin({ messageSendResult: 'OK' }))
+      const original = modules.WAWebSendPinMessageAction
+      Object.defineProperty(modules, 'WAWebSendPinMessageAction', {
+        get: () => {
+          throw new Error('boom from WhatsApp Web')
+        }
+      })
+      expect(original).toBeDefined()
+
+      await expect(pin(modules, 86400)).rejects.toThrow(
+        '[signature] WAWebSendPinMessageAction.sendPinInChatMsg is not available'
+      )
+    })
+
+    it('has no call with the positional shape left in the source', () => {
+      expect(source('util/Injected/Utils.js')).not.toMatch(/sendPinInChatMsg\(message, action/)
+      expect(source('structures/GroupChat.js')).not.toMatch(/setGroupDescription\(\s*chatWid/)
     })
   })
 })
