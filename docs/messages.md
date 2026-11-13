@@ -46,7 +46,7 @@ Every type also takes `quotedMessageId`, `ignoreQuoteErrors`, `mentions`, `group
 
 ## Actions
 
-`react` (empty `reaction` removes it), `forward` (below), `star`, `unstar`, `pin` (`duration` 86400, 604800 or 2592000 seconds), `unpin`, `PATCH` (edit the text of your own message), `DELETE` (`everyone`, `clearMedia`) and `DELETE …/status-messages/:messageId`. They answer `204` unless noted (`forward` answers like a send, `edit` with the message).
+`react` (empty `reaction` removes it), `forward` (below), `star`, `unstar`, `pin` (`duration` 86400, 604800 or 2592000 seconds, any other value is a `400`), `unpin`, `PATCH` (edit the text of your own message), `DELETE` (`everyone`, `clearMedia`) and `DELETE …/status-messages/:messageId`. The pin call was repaired for WhatsApp Web 2.3000.1054445547 and is not verified with a live account yet (smoke test 5b in `sessions.md`). They answer `204` unless noted (`forward` answers like a send, `edit` with the message).
 
 A **forward** is a send like any other: it goes through the queue, the policy, the pacing and the idempotency of the session, takes `?wait` and `Idempotency-Key`, and answers 201 or 202 like `messages.send`. WhatsApp does not say which message the forward created, and the gateway does not guess, so a finished forward is `{ jobId, status: "sent" }` with no `message` (the `message_sent` event has no `message` either). The forwarded copy reaches the event stream as its own `message_create`.
 
