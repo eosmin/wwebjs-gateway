@@ -1,29 +1,19 @@
-import { readdirSync, readFileSync } from 'node:fs'
 import { exit } from 'node:process'
 
-import { findTransactionProblems, type MigrationFile } from './lib/migration-transactions.js'
+import { readMigrationFiles } from './lib/migration-files.js'
+import { findTransactionProblems } from './lib/migration-transactions.js'
 
 const DIRECTORY = 'prisma/migrations'
 
-// A directory that does not exist yet is an empty one; any other failure is not "empty"
-function migrationFiles(): MigrationFile[] {
-  try {
-    return readdirSync(DIRECTORY, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => ({
-        name: entry.name,
-        sql: readFileSync(`${DIRECTORY}/${entry.name}/migration.sql`, 'utf8')
-      }))
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return []
-    throw error
+try {
+  const files = readMigrationFiles(DIRECTORY)
+  const problems = findTransactionProblems(files)
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(problem)
+    exit(1)
   }
-}
-
-const files = migrationFiles()
-const problems = findTransactionProblems(files)
-if (problems.length > 0) {
-  for (const problem of problems) console.error(problem)
+  console.log(`${files.length} migrations, each atomic`)
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
   exit(1)
 }
-console.log(`${files.length} migrations, each atomic`)

@@ -34,6 +34,6 @@ overrides:
   'glob@<14.0.2': 14.0.2
 
 # 1.34.8 is newer than the release-age gate; it was reviewed by hand (diff of 1.34.7..1.34.8) and the
-# entry goes in the next dependency PR (IMPLEMENTATION_PLAN 10.4, F9a)
+# entry is removed at the first dependency PR after the gate has passed (IMPLEMENTATION_PLAN 10.4, F20)
 minimumReleaseAgeExclude:
   - whatsapp-web.js@1.34.8

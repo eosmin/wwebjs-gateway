@@ -3,7 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { z } from 'zod'
 
-import { InternalError, NotFoundError, ValidationError } from '../common/errors.js'
+import {
+  InternalError,
+  NotFoundError,
+  ServiceBusyError,
+  ValidationError
+} from '../common/errors.js'
+import { APP_CONFIG } from '../config/config.module.js'
+import type { AppConfig } from '../config/env.schema.js'
 import type { Webhook, WebhookDelivery } from '../database/models.js'
 import type { DeliveryCursor } from '../database/repositories/deliveries.repository.js'
 import { DeliveriesRepository } from '../database/repositories/deliveries.repository.js'
@@ -30,6 +37,10 @@ const RETRY_PAGE_SIZE = 100
 const PING_SEQ = 0
 
 const NOT_QUEUED = 'The delivery could not be queued'
+
+const PING_WINDOW_MS = 60_000
+// Past this many webhooks in the table of pings, the ones that have not been pinged for a window go
+const PING_TABLE_SWEEP_AT = 256
 
 const CursorPayload = z.strictObject({ createdAt: z.iso.datetime(), id: z.uuid() })
 
@@ -75,16 +86,21 @@ export function toDeliveryDto(row: WebhookDelivery): DeliveryDto {
 export class WebhookDeliveriesService {
   private readonly logger = new Logger(WebhookDeliveriesService.name)
 
+  // When each webhook was last pinged, within the window: this is one instance, so memory is enough
+  private readonly pings = new Map<string, number[]>()
+
   constructor(
     @Inject(DeliveriesRepository) private readonly deliveries: DeliveriesRepository,
     @Inject(SessionsRepository) private readonly sessions: SessionsRepository,
-    @Inject(DeliveryQueueService) private readonly queue: DeliveryQueueService
+    @Inject(DeliveryQueueService) private readonly queue: DeliveryQueueService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   // A `ping` delivery through the whole path, so the receiver, the signature and the SSRF check
   // are tried for real. It is a delivery like the others: it shows in the list and can be retried.
   async test(webhook: Webhook, body: TestWebhookBodyDto): Promise<DeliveryDto> {
     const sessionId = await this.pingSession(webhook, body.sessionId)
+    const at = this.takePing(webhook.id)
     const envelope: DeliveryEnvelope = {
       id: `evt_${randomUUID()}`,
       event: 'ping',
@@ -93,15 +109,55 @@ export class WebhookDeliveriesService {
       timestamp: new Date().toISOString(),
       data: {}
     }
-    const row = await this.deliveries.create({
-      webhookId: webhook.id,
-      sessionId,
-      event: envelope.event,
-      seq: BigInt(envelope.seq),
-      payload: envelope
-    })
-    await this.enqueue(row, envelope)
-    return toDeliveryDto(row)
+    try {
+      const row = await this.deliveries.create({
+        webhookId: webhook.id,
+        sessionId,
+        event: envelope.event,
+        seq: BigInt(envelope.seq),
+        payload: envelope
+      })
+      await this.enqueue(row, envelope)
+      return toDeliveryDto(row)
+    } catch (error: unknown) {
+      // Nothing was sent: a failure of the database or the queue must not use up the allowance
+      this.refundPing(webhook.id, at)
+      throw error
+    }
+  }
+
+  // A ping is a request to the URL of the webhook whenever the caller asks, so the number of them
+  // per webhook is bounded: a key could otherwise send a stream of POSTs to a third party, or probe
+  // an internal host the operator allowed for webhooks (the deliveries show the status of each)
+  private takePing(webhookId: string): number {
+    const now = Date.now()
+    const recent = (this.pings.get(webhookId) ?? []).filter(at => now - at < PING_WINDOW_MS)
+    const oldest = recent[0]
+    if (oldest !== undefined && recent.length >= this.config.WEBHOOK_TEST_MAX_PER_MINUTE) {
+      this.pings.set(webhookId, recent)
+      throw new ServiceBusyError(
+        'RATE_LIMITED',
+        Math.ceil((oldest + PING_WINDOW_MS - now) / 1000),
+        true,
+        `A webhook can be pinged ${this.config.WEBHOOK_TEST_MAX_PER_MINUTE} times a minute`
+      )
+    }
+    this.pings.set(webhookId, [...recent, now])
+    if (this.pings.size > PING_TABLE_SWEEP_AT) this.sweepPings(now)
+    return now
+  }
+
+  private refundPing(webhookId: string, at: number): void {
+    const times = this.pings.get(webhookId)
+    if (times === undefined) return
+    const index = times.lastIndexOf(at)
+    if (index >= 0) times.splice(index, 1)
+  }
+
+  private sweepPings(now: number): void {
+    for (const [id, times] of this.pings) {
+      if (times.every(at => now - at >= PING_WINDOW_MS)) this.pings.delete(id)
+    }
   }
 
   // Newest first, a page at a time: the cursor is the last delivery of the previous page

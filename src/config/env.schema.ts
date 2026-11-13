@@ -348,6 +348,9 @@ export const envSchema = z
     WEBHOOKS_MAX_PER_SESSION: count(20, { min: 1 }).describe(
       'Webhooks a session can have, and as many for those of every session; creating one past it is refused'
     ),
+    WEBHOOK_TEST_MAX_PER_MINUTE: count(6, { min: 1 }).describe(
+      'Test pings (POST /v1/webhooks/:id/test) a webhook accepts per minute; one more is refused with 429 RATE_LIMITED. Each one is a signed request to the URL of the webhook'
+    ),
     WEBHOOK_TIMEOUT_MS: count(10000, { min: 1 }).describe(
       'Milliseconds a webhook endpoint has to answer'
     ),
@@ -369,6 +372,13 @@ export const envSchema = z
     ALLOW_PRIVATE_WEBHOOK_TARGETS: flag(false).describe(
       'Allow webhook URLs that resolve to private addresses; development only, refused in production'
     ),
+    MEDIA_PRIVATE_HOST_ALLOWLIST: list()
+      .refine(items => items.every(isValidAllowlistEntry), {
+        message: 'Every entry must be a hostname, an IP address or a CIDR such as 10.0.0.0/8'
+      })
+      .describe(
+        'Comma-separated hosts a send may download media from although they are private. Empty by default and apart from WEBHOOK_PRIVATE_HOST_ALLOWLIST: the media URL comes from the caller of a send, and the file is sent on to a WhatsApp chat, so any host listed here can be read by every key that may send. A range that covers every address (/0) is refused in production'
+      ),
     CALL_CACHE_SIZE: count(50, { min: 1 }).describe('Recent calls kept in memory to reject them'),
 
     // Retention
@@ -448,6 +458,14 @@ export const envSchema = z
       env.NODE_ENV !== 'production' || !env.WEBHOOK_PRIVATE_HOST_ALLOWLIST.some(coversEveryAddress),
     {
       path: ['WEBHOOK_PRIVATE_HOST_ALLOWLIST'],
+      error: 'must not contain a range that covers every address (a /0 prefix) in production'
+    }
+  )
+  .refine(
+    env =>
+      env.NODE_ENV !== 'production' || !env.MEDIA_PRIVATE_HOST_ALLOWLIST.some(coversEveryAddress),
+    {
+      path: ['MEDIA_PRIVATE_HOST_ALLOWLIST'],
       error: 'must not contain a range that covers every address (a /0 prefix) in production'
     }
   )

@@ -1,4 +1,10 @@
-import { InternalError, NotFoundError, ValidationError } from '../common/errors.js'
+import {
+  InternalError,
+  NotFoundError,
+  ServiceBusyError,
+  ValidationError
+} from '../common/errors.js'
+import type { AppConfig } from '../config/env.schema.js'
 import type { Webhook, WebhookDelivery } from '../database/models.js'
 import type {
   DeliveriesRepository,
@@ -104,7 +110,8 @@ function setup() {
   const service = new WebhookDeliveriesService(
     deliveries as unknown as DeliveriesRepository,
     sessions as unknown as SessionsRepository,
-    queue as unknown as DeliveryQueueService
+    queue as unknown as DeliveryQueueService,
+    { WEBHOOK_TEST_MAX_PER_MINUTE: 3 } as AppConfig
   )
   const seed = (...rows: WebhookDelivery[]): void => {
     for (const row of rows) store.set(row.id, row)
@@ -189,6 +196,71 @@ describe('WebhookDeliveriesService.test', () => {
     await expect(service.test(webhook(), {})).rejects.toThrow('redis down')
 
     expect(deliveries.failUnqueued).toHaveBeenCalledWith(uuid(900), expect.any(String))
+  })
+})
+
+// A ping goes out to the URL of the webhook with the signature of the gateway: without a limit of its
+// own, a key could use it to send a stream of POSTs to a third party, or to probe an internal host
+// the operator allowed for webhooks, as fast as the general rate limit lets it
+describe('WebhookDeliveriesService.test, the limit of pings', () => {
+  const START = Date.parse('2026-03-01T00:00:00Z')
+  let now = START
+  beforeEach(() => {
+    now = START
+    jest.spyOn(Date, 'now').mockImplementation(() => now)
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it('refuses the ping after WEBHOOK_TEST_MAX_PER_MINUTE in a minute, saying when to try again', async () => {
+    const { service, queue } = setup()
+    for (let i = 0; i < 3; i += 1) await service.test(webhook(), {})
+
+    const error = await rejection(service.test(webhook(), {}))
+
+    expect(error).toBeInstanceOf(ServiceBusyError)
+    expect(error).toMatchObject({ code: 'RATE_LIMITED', retryAfterSeconds: 60 })
+    expect(queue.enqueue).toHaveBeenCalledTimes(3)
+  })
+
+  it('counts a refused ping out, and lets a ping through again as the minute passes', async () => {
+    const { service, queue } = setup()
+    await service.test(webhook(), {})
+    now += 20_000
+    await service.test(webhook(), {})
+    await service.test(webhook(), {})
+    expect(await rejection(service.test(webhook(), {}))).toMatchObject({ retryAfterSeconds: 40 })
+
+    now += 40_000
+    await service.test(webhook(), {})
+
+    expect(queue.enqueue).toHaveBeenCalledTimes(4)
+  })
+
+  it('gives the ping back when the queue or the database fails, so a dead Redis does not turn into a 429', async () => {
+    const { service, queue } = setup()
+    queue.enqueue.mockRejectedValue(new Error('redis down'))
+    for (let i = 0; i < 5; i += 1) {
+      await expect(service.test(webhook(), {})).rejects.toThrow('redis down')
+    }
+    queue.enqueue.mockResolvedValue(undefined)
+
+    await expect(service.test(webhook(), {})).resolves.toBeDefined()
+  })
+
+  it('limits each webhook apart', async () => {
+    const { service } = setup()
+    for (let i = 0; i < 3; i += 1) await service.test(webhook(), {})
+
+    await expect(service.test(webhook({ id: OTHER_WEBHOOK_ID }), {})).resolves.toBeDefined()
+  })
+
+  it('does not spend the allowance on a ping that was refused for another reason', async () => {
+    const { service } = setup()
+    for (let i = 0; i < 5; i += 1) {
+      await rejection(service.test(webhook(), { sessionId: 'other' }))
+    }
+
+    await expect(service.test(webhook(), {})).resolves.toBeDefined()
   })
 })
 

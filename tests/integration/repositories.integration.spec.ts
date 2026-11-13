@@ -416,7 +416,7 @@ describe('repositories (integration)', () => {
         mediaMode: 'reference',
         includeRaw: null
       })
-      const updated = await webhooks.update(id, {
+      const updated = await webhooks.updateIfEvents(id, ['*'], {
         enabled: false,
         events: ['message'],
         mediaMode: 'inline',
@@ -428,9 +428,28 @@ describe('repositories (integration)', () => {
         mediaMode: 'inline',
         includeRaw: false
       })
-      expect(await webhooks.update(MISSING_UUID, { enabled: false })).toBeNull()
+      expect(await webhooks.updateIfEvents(MISSING_UUID, ['*'], { enabled: false })).toBeNull()
       expect(await webhooks.delete(id)).toBe(true)
       expect(await webhooks.delete(id)).toBe(false)
+    })
+
+    it('changes a webhook only while its events are the ones that were read', async () => {
+      const id = await newWebhook(null)
+      await webhooks.updateIfEvents(id, ['*'], { events: ['message', 'qr'] })
+
+      // A write checked against the old events must not land on a webhook that listens to more now
+      expect(
+        await webhooks.updateIfEvents(id, ['*'], { url: 'https://other.test/hook' })
+      ).toBeNull()
+      expect(await webhooks.updateIfEvents(id, ['qr', 'message'], { enabled: false })).toBeNull()
+      expect(await webhooks.findById(id)).toMatchObject({
+        url: 'https://example.test/hook',
+        enabled: true
+      })
+
+      expect(
+        await webhooks.updateIfEvents(id, ['message', 'qr'], { url: 'https://other.test/hook' })
+      ).toMatchObject({ url: 'https://other.test/hook' })
     })
 
     it('answers null for a session that does not exist', async () => {
@@ -449,7 +468,7 @@ describe('repositories (integration)', () => {
       const first = await newWebhook(a)
       await newWebhook(a)
       await newWebhook(b)
-      await webhooks.update(first, { enabled: false })
+      await webhooks.updateIfEvents(first, ['*'], { enabled: false })
       const globals = await webhooks.countFor(null)
       await newWebhook(null)
 
@@ -465,7 +484,7 @@ describe('repositories (integration)', () => {
       const global = await newWebhook(null)
       const other = await newWebhook(b)
       const disabled = await newWebhook(a)
-      await webhooks.update(disabled, { enabled: false })
+      await webhooks.updateIfEvents(disabled, ['*'], { enabled: false })
 
       const forA = (await webhooks.listEnabledFor(a)).map(w => w.id)
 

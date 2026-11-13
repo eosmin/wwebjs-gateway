@@ -55,14 +55,15 @@ and [`.env.example`](.env.example) declares all of them.
 
 ## Develop
 
-| Command                 | What it does                                                          |
-| ----------------------- | --------------------------------------------------------------------- |
-| `pnpm validate:all`     | Everything CI checks, on the whole repository                         |
-| `pnpm lint`             | ESLint with zero warnings allowed                                     |
-| `pnpm type-check`       | TypeScript, strict                                                    |
-| `pnpm test:cov`         | Unit tests with the coverage gates                                    |
-| `pnpm test:integration` | Integration suites (need `pnpm infra:up`)                             |
-| `pnpm docs:gen`         | Regenerates the generated docs; `pnpm validate:docs` fails when stale |
+| Command                     | What it does                                                              |
+| --------------------------- | ------------------------------------------------------------------------- |
+| `pnpm validate:all`         | Everything CI checks, on the whole repository                             |
+| `pnpm lint`                 | ESLint with zero warnings allowed                                         |
+| `pnpm type-check`           | TypeScript, strict                                                        |
+| `pnpm test:cov`             | Unit tests with the coverage gates                                        |
+| `pnpm test:integration`     | Integration suites (need `pnpm infra:up`)                                 |
+| `pnpm test:integration:cov` | Integration suites with the coverage thresholds of the critical code (CI) |
+| `pnpm docs:gen`             | Regenerates the generated docs; `pnpm validate:docs` fails when stale     |
 
 Git hooks run on every commit and push (secret scan, lint, commit message, checks); they are never
 bypassed. Commits follow [Conventional Commits](https://www.conventionalcommits.org/).

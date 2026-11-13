@@ -17,6 +17,21 @@ export interface SsrfPolicy {
   resolve?: (hostname: string) => Promise<readonly string[]>
 }
 
+// The cloud metadata services and the link-local range: no allowlist and no switch opens them. One
+// list for the three guards below, so an address added here closes in all of them.
+const METADATA_RANGES: readonly (readonly [string, number, Family])[] = [
+  // Includes the metadata address 169.254.169.254 of AWS, GCP and Azure
+  ['169.254.0.0', 16, 'ipv4'],
+  // The metadata service of Alibaba Cloud, inside the shared range 100.64.0.0/10
+  ['100.100.100.200', 32, 'ipv4'],
+  ['fe80::', 10, 'ipv6'],
+  // The IPv6 metadata address of AWS, inside the unique-local range fc00::/7
+  ['fd00:ec2::254', 128, 'ipv6'],
+  // The WireServer of Azure (it hands out the credentials of the VM extensions): a public address that
+  // only answers from inside Azure, so no other rule would catch it
+  ['168.63.129.16', 32, 'ipv4']
+]
+
 const BLOCKED_RANGES: readonly (readonly [string, number, Family])[] = [
   ['0.0.0.0', 8, 'ipv4'],
   ['10.0.0.0', 8, 'ipv4'],
@@ -55,21 +70,9 @@ const BLOCKED_RANGES: readonly (readonly [string, number, Family])[] = [
 
 // BlockList also matches an IPv4-mapped IPv6 address (::ffff:127.0.0.1) against the IPv4 rules
 const blockedRanges = new BlockList()
-for (const [network, prefix, family] of BLOCKED_RANGES) {
+for (const [network, prefix, family] of [...BLOCKED_RANGES, ...METADATA_RANGES]) {
   blockedRanges.addSubnet(network, prefix, family)
 }
-
-// The cloud metadata services and the link-local range: no allowlist and no switch opens them. One
-// list for both guards below, so an address added here closes in both.
-const METADATA_RANGES: readonly (readonly [string, number, Family])[] = [
-  // Includes the metadata address 169.254.169.254 of AWS, GCP and Azure
-  ['169.254.0.0', 16, 'ipv4'],
-  // The metadata service of Alibaba Cloud, inside the shared range 100.64.0.0/10
-  ['100.100.100.200', 32, 'ipv4'],
-  ['fe80::', 10, 'ipv6'],
-  // The IPv6 metadata address of AWS, inside the unique-local range fc00::/7
-  ['fd00:ec2::254', 128, 'ipv6']
-]
 
 // Never reachable, not even through the allowlist: the cloud metadata service lives here
 const neverAllowed = new BlockList()
