@@ -76,3 +76,48 @@ describe('the event call type', () => {
     expect(() => SendMessageBody.parse(event)).not.toThrow()
   })
 })
+
+// H-LIVE-09: a voice note is `audio/ogg; codecs=opus`, a type with parameters
+describe('the type of an inline media source', () => {
+  const media = (mimetype: unknown): unknown =>
+    SendMessageBody.safeParse({
+      to: text.to,
+      type: 'media',
+      source: { base64: 'QUJD', mimetype }
+    })
+  const typeOf = (mimetype: string): string => {
+    const parsed = SendMessageBody.parse({
+      to: text.to,
+      type: 'media',
+      source: { base64: 'QUJD', mimetype }
+    }) as { source: { mimetype: string } }
+    return parsed.source.mimetype
+  }
+
+  it('accepts a type with parameters and keeps only a safe form of it', () => {
+    expect(typeOf('audio/ogg; codecs=opus')).toBe('audio/ogg; codecs=opus')
+    expect(typeOf('Image/PNG')).toBe('image/png')
+    expect(typeOf('image/jpeg; charset=utf-8')).toBe('image/jpeg')
+    expect(typeOf('application/pdf;x="a;b"')).toBe('application/pdf')
+  })
+
+  it.each([
+    '',
+    'nonsense',
+    'image/',
+    'image png',
+    'image/png\r\nSet-Cookie: a=b',
+    'image/png\n',
+    'image/png;',
+    'audio/ogg;;',
+    'image/png; x',
+    'image/png; x="y',
+    `image/${'a'.repeat(130)}`
+  ])('still refuses %j', mimetype => {
+    expect((media(mimetype) as { success: boolean }).success).toBe(false)
+  })
+
+  it('refuses a type that is not a string', () => {
+    expect((media(7) as { success: boolean }).success).toBe(false)
+  })
+})

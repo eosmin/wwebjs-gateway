@@ -15,6 +15,14 @@ describe('resolveMimetype', () => {
     expect(resolveMimetype('application/pdf', png)).toBe('image/png')
   })
 
+  it('believes a type with parameters under its bare type, and a voice note keeps its codec', () => {
+    const ogg = Buffer.from('OggS\0\0\0\0')
+    expect(resolveMimetype('audio/ogg; codecs=opus', ogg)).toBe('audio/ogg; codecs=opus')
+    expect(resolveMimetype('image/PNG; charset=binary', png)).toBe('image/png')
+    expect(resolveMimetype('text/html; charset=utf-8', png)).toBe('image/png')
+    expect(resolveMimetype('application/octet-stream; x=y', png)).toBe('image/png')
+  })
+
   it('ignores a type that is not well formed', () => {
     expect(resolveMimetype('image/png\r\nx-evil: 1', png)).toBe('image/png')
     expect(resolveMimetype('nonsense', Buffer.from('plain'))).toBeUndefined()

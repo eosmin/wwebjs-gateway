@@ -164,6 +164,36 @@ describe('messages API (integration)', () => {
         }
       ],
       [
+        'a voice note whose type has the codec (H-LIVE-09)',
+        {
+          to: PEER,
+          type: 'media',
+          source: {
+            base64: Buffer.from('abc').toString('base64'),
+            mimetype: 'Audio/OGG; codecs=opus'
+          },
+          asVoice: true
+        },
+        content =>
+          expect(content).toEqual({
+            type: 'media',
+            media: { mimetype: 'audio/ogg; codecs=opus', data: 'YWJj' }
+          })
+      ],
+      [
+        'media whose type has parameters of the sender (only the bare type goes on)',
+        {
+          to: PEER,
+          type: 'media',
+          source: {
+            base64: Buffer.from('abc').toString('base64'),
+            mimetype: 'image/png; charset=binary; x="a;b"'
+          }
+        },
+        content =>
+          expect(content).toEqual({ type: 'media', media: { mimetype: 'image/png', data: 'YWJj' } })
+      ],
+      [
         'a location',
         { to: PEER, type: 'location', latitude: 19.43, longitude: -99.13, name: 'Zócalo' },
         content =>
