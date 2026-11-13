@@ -771,7 +771,11 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
 
   private async refreshDepth(lane: Lane): Promise<void> {
     try {
-      const counts = await lane.queue.getJobCounts('waiting', 'delayed', 'active', 'prioritized')
+      const counts = await withTimeout(
+        lane.queue.getJobCounts('waiting', 'delayed', 'active', 'prioritized'),
+        this.config.SEND_ENQUEUE_TIMEOUT_MS,
+        'send queue depth'
+      )
       const depth = (counts.waiting ?? 0) + (counts.delayed ?? 0)
       this.metrics.metrics.sendQueueDepth.set({ session: lane.sessionId }, depth)
       this.pending.set(lane.sessionId, depth + (counts.active ?? 0) + (counts.prioritized ?? 0))

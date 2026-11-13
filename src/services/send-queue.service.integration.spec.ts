@@ -261,16 +261,17 @@ describe('send queue (integration)', () => {
       const service = await boot()
       holdFirstColdSend(OTHER_CHAT, 3000, 'cold_send_gap')
       const aside = jest.spyOn(Job.prototype, 'moveToDelayed')
+      const startedAt = Date.now()
 
       await service.submit(text('frio 1', { chatId: OTHER_CHAT }))
       await service.submit(text('frio 2', { chatId: OTHER_CHAT }))
       await service.submit(text('frio 3', { chatId: OTHER_CHAT }))
-      await new Promise(resolve => setTimeout(resolve, 2300))
+      await until(() => aside.mock.calls.length >= 3)
 
-      // One for the held job and one for each later message; a turn every second would make 7 by now
-      expect(aside.mock.calls.length).toBeLessThanOrEqual(4)
+      // Every put-aside is due about when the held job is (3 s), none a second ahead as before
+      for (const [dueAt] of aside.mock.calls) expect(dueAt - startedAt).toBeGreaterThan(2000)
       expect(sentBodies()).toEqual([])
-      await until(() => sentBodies().length === 3, 6000)
+      await until(() => sentBodies().length === 3, 8000)
       expect(sentBodies()).toEqual(['frio 1', 'frio 2', 'frio 3'])
       aside.mockRestore()
     }, 15_000)
@@ -616,6 +617,35 @@ describe('send queue (integration)', () => {
       await until(() => sentBodies().includes('atrapado'))
       expect(sentBodies()).toEqual(['atrapado'])
       expect(published.some(item => item.event === 'message_failed')).toBe(false)
+    })
+
+    it('stays put aside once, and is sent once, when the move to the delayed set took effect but its answer was lost', async () => {
+      const first = await boot()
+      ready = false
+      await first.submit(text('atrapado'))
+      await new Promise(resolve => setTimeout(resolve, 200))
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the job as `this` below
+      const realMove = Job.prototype.moveToDelayed
+      const lost = jest
+        .spyOn(Job.prototype, 'moveToDelayed')
+        .mockImplementationOnce(async function (
+          this: Job,
+          ...args: Parameters<Job['moveToDelayed']>
+        ) {
+          await realMove.apply(this, args)
+          throw new Error('answer lost')
+        })
+      try {
+        await shutdown(first)
+      } finally {
+        lost.mockRestore()
+      }
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+
+      ready = true
+      await boot()
+      await until(() => sentBodies().includes('atrapado'))
+      expect(sentBodies()).toEqual(['atrapado'])
     })
 
     it('keeps a cold send held by the policy when Redis fails once while it leaves the lane', async () => {
