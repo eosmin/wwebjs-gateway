@@ -1,3 +1,5 @@
+import type { z } from 'zod'
+
 import {
   BroadcastDto,
   BusinessContactDto,
@@ -18,6 +20,7 @@ import {
 } from '../types/dto.js'
 
 import {
+  failedFields,
   mapBroadcast,
   mapBusinessContact,
   mapCall,
@@ -199,6 +202,102 @@ describe('an invite as 1.34.8 delivers it (every key a string)', () => {
   )
 })
 
+// The keys a response schema requires, read from the schema itself: a new required field of a DTO joins
+// the loop below by itself, and no mapper can quietly stop filling one
+function requiredKeys(schema: { shape: Record<string, z.ZodType> }): string[] {
+  return Object.entries(schema.shape)
+    .filter(([, field]) => !field.safeParse(undefined).success)
+    .map(([key]) => key)
+}
+
+const GROUP = {
+  ...CHAT,
+  id: id('120000000000000001@g.us'),
+  archived: false,
+  isReadOnly: false,
+  isLocked: false,
+  timestamp: 1_792_000_000,
+  owner: id('100000000000001@lid'),
+  createdAt: 1_761_577_446,
+  description: 'About',
+  participants: [{ id: id('100000000000001@lid'), isAdmin: true, isSuperAdmin: false }]
+}
+
+const BROADCAST = {
+  id: id('status@broadcast'),
+  timestamp: 1_792_000_000,
+  totalCount: 1,
+  unreadCount: 0,
+  msgs: [MESSAGE]
+}
+
+const CALL = { id: 'c1', timestamp: 1, isVideo: false, isGroup: false, fromMe: false }
+
+// What a mapper may refuse instead of inventing: the id of anything, and where a message belongs
+const REFUSED: Record<string, string[]> = { message: ['id', 'to'] }
+const ALWAYS_REFUSED = ['id'] // nothing is told apart without its id
+
+describe.each([
+  [
+    'message',
+    MessageDto,
+    MESSAGE,
+    (source: unknown) =>
+      mapMessage(sparse<MessageSource>(source as Record<string, unknown>), OPTIONS)
+  ],
+  [
+    'contact',
+    ContactDto,
+    CONTACT,
+    (source: unknown) => mapContact(sparse(source as Record<string, unknown>))
+  ],
+  [
+    'chat',
+    ChatDto,
+    CHAT,
+    (source: unknown) => mapChat(sparse(source as Record<string, unknown>), OPTIONS)
+  ],
+  [
+    'group chat',
+    GroupChatDto,
+    GROUP,
+    (source: unknown) => mapGroupChat(sparse(source as Record<string, unknown>), OPTIONS)
+  ],
+  [
+    'broadcast',
+    BroadcastDto,
+    BROADCAST,
+    (source: unknown) => mapBroadcast(sparse(source as Record<string, unknown>), OPTIONS)
+  ],
+  ['call', CallDto, CALL, (source: unknown) => mapCall(sparse(source as Record<string, unknown>))]
+] as const)('every required field of the %s DTO', (name, schema, fixture, map) => {
+  const refused = [...ALWAYS_REFUSED, ...(REFUSED[name] ?? [])]
+
+  it('is a field the mapper fills or refuses on purpose, never one that fails the response', () => {
+    const keys = requiredKeys(schema as never).filter(key => key in fixture)
+
+    expect(keys.length).toBeGreaterThan(0)
+    for (const key of keys) {
+      const source = without(fixture as Record<string, unknown>, key)
+      const mapped = ((): unknown => {
+        try {
+          return map(source)
+        } catch (error: unknown) {
+          if (refused.includes(key)) return 'refused'
+          throw new Error(`${name} without ${key} made the mapper throw`, { cause: error })
+        }
+      })()
+      if (mapped === 'refused') continue
+      const parsed = (schema as z.ZodType).safeParse(mapped)
+      if (!parsed.success) {
+        throw new Error(
+          `${name} without ${key} breaks its schema: ${failedFields(parsed.error).join(', ')}`
+        )
+      }
+    }
+  })
+})
+
 describe('a message of a special type that lacks what Message.js copies without a default', () => {
   it.each(['isStarred', 'links', 'vCards', 'isStatus', 'isGif', 'forwardingScore'])(
     'is delivered without %s, which is false, empty or 0',
@@ -208,6 +307,66 @@ describe('a message of a special type that lacks what Message.js copies without 
       expect(MessageDto.parse(dto)).toEqual(dto)
     }
   )
+})
+
+// The structured types of WhatsApp Web, with the least a real message of each carries (made up, no
+// real data): none may throw, and each must still pass the schema of the response
+describe.each<[string, Record<string, unknown>]>([
+  ['vcard', { type: 'vcard', body: 'BEGIN:VCARD\nEND:VCARD', vCards: ['BEGIN:VCARD\nEND:VCARD'] }],
+  ['multi_vcard', { type: 'multi_vcard', body: '', vCards: ['BEGIN:VCARD', 'BEGIN:VCARD'] }],
+  ['ciphertext', { type: 'ciphertext', body: '' }],
+  ['call_log', { type: 'call_log', body: '' }],
+  ['reaction', { type: 'reaction', body: '👍', hasReaction: true }],
+  ['product', { type: 'product', body: '', productId: 'p1', title: 'Item', description: 'd' }],
+  ['order', { type: 'order', body: '', orderId: 'o1', title: 'Order' }],
+  [
+    'template',
+    {
+      type: 'template_button_reply',
+      body: '',
+      selectedButtonId: 'b1',
+      dynamicReplyButtons: [{ buttonId: 'b1' }]
+    }
+  ],
+  [
+    'poll_creation',
+    {
+      type: 'poll_creation',
+      body: '',
+      pollName: 'Q',
+      pollOptions: [{ name: 'A', localId: 0 }, 'B']
+    }
+  ],
+  ['groups_v4_invite', { type: 'groups_v4_invite', body: '', inviteV4: undefined }]
+])('a %s message', (_name, extra) => {
+  it('is delivered with the least WhatsApp Web hands over', () => {
+    const minimal = {
+      id: MESSAGE.id,
+      from: MESSAGE.from,
+      to: MESSAGE.to,
+      fromMe: false,
+      timestamp: MESSAGE.timestamp,
+      ...extra
+    }
+    const dto = mapMessage(sparse<MessageSource>(minimal), OPTIONS)
+
+    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dto.type).toBe(extra['type'])
+  })
+
+  it('is delivered with its payload fields of another type, which are left out', () => {
+    const odd = Object.fromEntries(
+      Object.keys(extra)
+        .filter(key => key !== 'type')
+        .map(key => [key, { odd: 1 }])
+    )
+    const dto = mapMessage(
+      sparse<MessageSource>({ ...MESSAGE, type: extra['type'], ...odd, body: 'x' }),
+      OPTIONS
+    )
+
+    expect(MessageDto.parse(dto)).toEqual(dto)
+  })
 })
 
 describe('a last message that does not fit its schema', () => {

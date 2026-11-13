@@ -565,7 +565,9 @@ function mapMessageFields(source: MessageSource, options: MessageMapOptions): Me
     ack: source.ack ?? null,
     isStarred: source.isStarred ?? false,
     links: source.links ?? [],
-    vCards: (source.vCards ?? []).filter((card): card is string => typeof card === 'string'),
+    vCards: (Array.isArray(source.vCards) ? source.vCards : []).filter(
+      (card): card is string => typeof card === 'string'
+    ),
     isStatus: source.isStatus ?? false,
     isGif: source.isGif ?? false,
     forwardingScore: source.forwardingScore ?? 0,
@@ -578,18 +580,19 @@ function mapMessageFields(source: MessageSource, options: MessageMapOptions): Me
     // A message without a usable timestamp is dated by its arrival so that it still has a place in the order
     sentAt: timestamp === null ? toIso(options.receivedAt) : unixToIso(timestamp),
     receivedAt: toIso(options.receivedAt),
-    mentionedIds: (source.mentionedIds ?? []).map(serializeId),
-    groupMentions: (source.groupMentions ?? []).flatMap(mention =>
-      mention && typeof mention.groupSubject === 'string' && mention.groupJid
-        ? [{ groupSubject: mention.groupSubject, groupJid: serializeId(mention.groupJid) }]
-        : []
+    mentionedIds: (Array.isArray(source.mentionedIds) ? source.mentionedIds : []).map(serializeId),
+    groupMentions: (Array.isArray(source.groupMentions) ? source.groupMentions : []).flatMap(
+      mention =>
+        mention && typeof mention.groupSubject === 'string' && mention.groupJid
+          ? [{ groupSubject: mention.groupSubject, groupJid: serializeId(mention.groupJid) }]
+          : []
     )
   }
   const businessOwnerJid = optionalId(source.businessOwnerJid)
   if (businessOwnerJid !== undefined) message.businessOwnerJid = businessOwnerJid
   const dynamicReplyButtons = toJson(source.dynamicReplyButtons)
   if (dynamicReplyButtons !== undefined) message.dynamicReplyButtons = dynamicReplyButtons
-  if (source.pollOptions) {
+  if (Array.isArray(source.pollOptions)) {
     message.pollOptions = source.pollOptions.flatMap(option => {
       const name = typeof option === 'string' ? option : option?.name
       return typeof name === 'string' ? [name] : []
@@ -1059,6 +1062,8 @@ const CALL_FIELDS = [
 ] as const satisfies readonly (keyof CallSource)[]
 
 export function mapCall(source: CallSource): CallDto {
+  // The id is what a call is told apart by: without one there is nothing to deliver
+  if (typeof source.id !== 'string' || source.id === '') throw new Error('A call has no id')
   // Call.js copies the flags without a default: a missing one is false, as `outgoing` is in the patched hook
   const call: CallDto = {
     ...pick(source, CALL_FIELDS),
