@@ -150,6 +150,30 @@ export function describeCause(error: unknown): Cause {
   return { code: 'UNKNOWN', kind, message }
 }
 
+// A failure the patch of whatsapp-web.js raises when WhatsApp Web changed under it (`[signature]` a
+// function it no longer exports, `[lazy-module]` a module no bundle loaded). The target is a name
+// the patch wrote, never a text of the page, and anything else is `other`, so a series stays bounded.
+export interface DriftError {
+  kind: 'signature' | 'lazy_module'
+  target: string
+}
+
+// Puppeteer can put "Evaluation failed: " and the name of the error in front of what the page threw
+const DRIFT_PREFIX = /^(?:Evaluation failed: )?(?:\w*Error: )?\[(signature|lazy-module)\] (\S+)/
+const DRIFT_TARGET = /^[A-Za-z][\w$]{0,79}(?:\.[\w$]{1,80})?$/
+
+export function driftOf(error: unknown): DriftError | undefined {
+  const source = original(error)
+  if (!(source instanceof Error) && typeof source !== 'string') return undefined
+  const match = DRIFT_PREFIX.exec(messageOf(source))
+  if (!match) return undefined
+  const [, kind, target = ''] = match
+  return {
+    kind: kind === 'signature' ? 'signature' : 'lazy_module',
+    target: DRIFT_TARGET.test(target) ? target : 'other'
+  }
+}
+
 // Runs a mapper of ours: whatever it throws becomes a MapperFailure, which is not WhatsApp Web failing
 export function mapping<T>(map: () => T): T {
   try {

@@ -19,6 +19,8 @@ import type {
 } from '../types/dto.js'
 import type { WaEventName, WaEventPayloadMap } from '../types/events.js'
 
+import type { DriftError } from './wa-call.js'
+
 // The only WhatsApp abstraction the rest of the app sees. It mirrors the whatsapp-web.js 1.34.8
 // surface (TDD §6.12) with our DTOs in and out, and it never mentions a wwebjs type, so that
 // `wwebjs-adapter.ts` stays the single file that imports the library. Ids are WhatsApp ids such as
@@ -48,6 +50,7 @@ export type ClientEvent = {
 
 export type ClientEventListener = (event: ClientEvent) => void
 export type SkippedEventListener = (event: ClientEventName) => void
+export type DriftListener = (drift: DriftError) => void
 
 // ---- Content and options -----------------------------------------------------------------------
 
@@ -285,6 +288,8 @@ export interface WhatsAppClientPort {
   onEvent(listener: ClientEventListener): () => void
   // Tells which event the adapter could not map and dropped, so that the drop is counted
   onSkipped(listener: SkippedEventListener): () => void
+  // Tells which function or module WhatsApp Web no longer has when a call fails because of it, so that it is counted
+  onDrift(listener: DriftListener): () => void
 
   // Presence and profile
   sendPresenceAvailable(): Promise<void>

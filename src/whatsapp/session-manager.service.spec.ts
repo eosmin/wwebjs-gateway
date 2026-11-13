@@ -565,6 +565,34 @@ describe('SessionManager status machine', () => {
     ).toBe(true)
   })
 
+  it('counts the calls that failed because WhatsApp Web changed, by kind and target, and stops after the client is gone', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    const client = await startSession(built)
+    await makeReady(built, client)
+
+    client.drift({ kind: 'signature', target: 'WAWebX.fn' })
+    client.drift({ kind: 'signature', target: 'WAWebX.fn' })
+    client.drift({ kind: 'lazy_module', target: 'WAWebY' })
+
+    const drift = async (): Promise<(string | number | undefined)[][]> =>
+      (await built.metrics.metrics.waWebDrift.get()).values.map(value => {
+        const labels: Partial<Record<string, string | number>> = value.labels
+        return [labels['kind'], labels['target'], value.value]
+      })
+    const values = await drift()
+    expect(values).toEqual(
+      expect.arrayContaining([
+        ['signature', 'WAWebX.fn', 2],
+        ['lazy_module', 'WAWebY', 1]
+      ])
+    )
+
+    await built.manager.beforeApplicationShutdown()
+    client.drift({ kind: 'signature', target: 'WAWebX.fn' })
+    expect(await drift()).toEqual(values)
+  })
+
   describe('the WhatsApp Web build of each session', () => {
     const buildOf = async (built: Built): Promise<Record<string, number>> => {
       const metric = await built.metrics.metrics.waWebBuild.get()

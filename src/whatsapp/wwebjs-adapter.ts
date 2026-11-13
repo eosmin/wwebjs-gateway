@@ -81,6 +81,7 @@ import { releaseProfileLock } from './profile-lock.js'
 import {
   type CauseCode,
   describeCause,
+  driftOf,
   sanitize,
   isPageWaitTimeout,
   isPuppeteerFailure,
@@ -107,6 +108,7 @@ import type {
   ClientEvent,
   ClientEventListener,
   ClientEventName,
+  DriftListener,
   SkippedEventListener,
   CreateChannelOptions,
   CreateChannelResult,
@@ -328,6 +330,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   private readonly logger: Logger
   private readonly listeners = new Set<ClientEventListener>()
   private readonly skippedListeners = new Set<SkippedEventListener>()
+  private readonly driftListeners = new Set<DriftListener>()
   // Calls received, so that `rejectCall` finds the wwebjs object of the call it is asked about
   private readonly calls = new Map<string, wwebjs.Call>()
   private readonly guardedBrowsers = new WeakSet<object>()
@@ -366,6 +369,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       : this.config.WA_CALL_TIMEOUT_MS
     return await runWaCall(operation, timeoutMs, call, error => {
       this.logCause(operation, error)
+      this.notifyDrift(error)
     })
   }
 
@@ -379,6 +383,20 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     // busy gateway keeps the faults: the library failing, a mapper of ours, an unknown outcome
     if (QUIET_CAUSES.has(code)) this.logger.debug(line)
     else this.logger.warn(line)
+  }
+
+  // A call that failed because WhatsApp Web changed under the patch, for the counter; apart from the
+  // log, so that a change of the log level or of its text never changes the count
+  private notifyDrift(error: unknown): void {
+    const drift = driftOf(error)
+    if (drift === undefined) return
+    for (const listener of [...this.driftListeners]) {
+      try {
+        listener(drift)
+      } catch (listenerError: unknown) {
+        this.logger.warn(`A drift listener failed (${errorKind(listenerError)})`)
+      }
+    }
   }
 
   // The participants outcomes, read field by field. The action already happened, so an odd answer is
@@ -694,6 +712,13 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     } catch (error: unknown) {
       this.logger.warn(`Mapping the ${name} event failed (${errorKind(error)})`)
       this.notifySkipped(name as ClientEventName)
+    }
+  }
+
+  onDrift(listener: DriftListener): () => void {
+    this.driftListeners.add(listener)
+    return () => {
+      this.driftListeners.delete(listener)
     }
   }
 
