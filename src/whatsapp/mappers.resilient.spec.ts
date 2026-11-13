@@ -1,4 +1,4 @@
-import { BroadcastDto, CallDto, ChatDto, GroupChatDto, OrderDto } from '../types/dto.js'
+import { BroadcastDto, CallDto, ChatDto, GroupChatDto, MessageDto, OrderDto } from '../types/dto.js'
 
 import {
   mapBroadcast,
@@ -89,7 +89,7 @@ describe('mapBroadcast with the statuses missing', () => {
     expect(dto.unreadCount).toBe(0)
   })
 
-  it('leaves out one message that does not fit and says which fields', () => {
+  it('leaves out one message that cannot be mapped and says so', () => {
     const unreadable = jest.fn()
     const dto = mapBroadcast(
       sparse({
@@ -97,13 +97,13 @@ describe('mapBroadcast with the statuses missing', () => {
         timestamp: 1,
         totalCount: 2,
         unreadCount: 0,
-        msgs: [{ ...MESSAGE, duration: { odd: true } }, MESSAGE]
+        msgs: [{ ...MESSAGE, from: undefined }, MESSAGE]
       }),
       { ...OPTIONS, onUnreadableMessage: unreadable }
     )
 
     expect(dto.msgs).toHaveLength(1)
-    expect(unreadable).toHaveBeenCalledWith(expect.stringContaining('duration'))
+    expect(unreadable).toHaveBeenCalledWith(expect.stringContaining('mapping failed'))
     expect(BroadcastDto.parse(dto)).toEqual(dto)
   })
 })
@@ -151,5 +151,84 @@ describe('a fractional unix time', () => {
     expect(dto.timestamp).toBeNull()
     expect(dto).not.toHaveProperty('muteExpiration')
     expect(ChatDto.parse(dto)).toEqual(dto)
+  })
+})
+
+describe('mapMessage with fields of the wrong type or missing', () => {
+  const dropped = jest.fn()
+  const options = { ...OPTIONS, onDroppedField: dropped }
+  beforeEach(() => dropped.mockClear())
+
+  it('leaves out an optional field of another type and names it, never its value', () => {
+    const dto = mapMessage(
+      sparse<MessageSource>({ ...MESSAGE, duration: 12, title: { odd: 'secret value' } }),
+      options
+    )
+
+    expect(dto).not.toHaveProperty('duration')
+    expect(dto).not.toHaveProperty('title')
+    expect(MessageDto.parse(dto)).toEqual(dto)
+    expect(dropped.mock.calls.flat().sort()).toEqual(['duration', 'title'])
+    expect(JSON.stringify(dropped.mock.calls)).not.toContain('secret')
+  })
+
+  it('gives a missing body, type and device type a stated default', () => {
+    const dto = mapMessage(
+      sparse<MessageSource>({
+        ...MESSAGE,
+        body: undefined,
+        type: undefined,
+        deviceType: undefined
+      }),
+      options
+    )
+
+    expect(dto).toMatchObject({ body: '', type: 'unknown', deviceType: 'unknown' })
+    expect(MessageDto.parse(dto)).toEqual(dto)
+  })
+
+  it('reads a missing flag as false', () => {
+    const dto = mapMessage(
+      sparse<MessageSource>({ ...MESSAGE, hasMedia: undefined, hasQuotedMsg: null }),
+      options
+    )
+
+    expect(dto).toMatchObject({ hasMedia: false, hasQuotedMsg: false })
+  })
+
+  it('refuses a message that names no chat: there is no safe default for where it belongs', () => {
+    expect(() =>
+      mapMessage(sparse<MessageSource>({ ...MESSAGE, from: undefined }), options)
+    ).toThrow(/chat/)
+    expect(() =>
+      mapMessage(sparse<MessageSource>({ ...MESSAGE, fromMe: true, to: undefined }), options)
+    ).toThrow(/chat/)
+  })
+
+  it('keeps the other side of the conversation empty when only it is missing', () => {
+    const dto = mapMessage(sparse<MessageSource>({ ...MESSAGE, to: undefined }), options)
+
+    expect(dto.chatId).toBe(MESSAGE.from)
+    expect(dto.to).toBe('')
+    expect(MessageDto.parse(dto)).toEqual(dto)
+  })
+
+  it('survives arrays that are missing or hold odd entries', () => {
+    const dto = mapMessage(
+      sparse<MessageSource>({
+        ...MESSAGE,
+        mentionedIds: undefined,
+        groupMentions: [null, { groupSubject: 'g' }],
+        vCards: ['BEGIN:VCARD', undefined],
+        pollOptions: [null, 'A', { name: 'B' }, { id: 1 }]
+      }),
+      options
+    )
+
+    expect(dto.mentionedIds).toEqual([])
+    expect(dto.groupMentions).toEqual([])
+    expect(dto.vCards).toEqual(['BEGIN:VCARD'])
+    expect(dto.pollOptions).toEqual(['A', 'B'])
+    expect(MessageDto.parse(dto)).toEqual(dto)
   })
 })

@@ -105,6 +105,36 @@ function pick<T extends object, K extends keyof T>(source: T, keys: readonly K[]
   return out as Pick<T, K> // every key was copied from `source`, so the partial is complete
 }
 
+type FieldKind = 'string' | 'boolean' | 'number' | 'unixSeconds' | 'numbers' | 'any'
+
+const KIND_CHECKS: Record<FieldKind, (value: unknown) => boolean> = {
+  string: value => typeof value === 'string',
+  boolean: value => typeof value === 'boolean',
+  number: value => typeof value === 'number' && Number.isFinite(value),
+  unixSeconds: value => typeof value === 'number' && isUsableUnixTime(value),
+  numbers: value =>
+    Array.isArray(value) && value.every(item => typeof item === 'number' && Number.isFinite(item)),
+  any: () => true
+}
+
+// Like `pick`, but a value of another type than the DTO declares is left out too, and its name is
+// reported (never its value): WhatsApp Web changes shapes without notice and one drifted field must not
+// turn the response of a message that is otherwise fine into a 500
+function pickTyped<T extends object>(
+  source: T,
+  kinds: Readonly<Partial<Record<keyof T & string, FieldKind>>>,
+  onDropped?: (field: string) => void
+): Partial<T> {
+  const out: Partial<T> = {}
+  for (const [key, kind] of Object.entries(kinds) as [keyof T & string, FieldKind][]) {
+    const value = source[key]
+    if (value === undefined || value === null) continue
+    if (KIND_CHECKS[kind](value)) out[key] = value
+    else onDropped?.(key)
+  }
+  return out
+}
+
 // A DTO whose id fields arrive as wwebjs ids
 type WithIds<D, K extends keyof D> = Omit<D, K> & { [P in K]: IdLike }
 
@@ -301,8 +331,29 @@ export interface MessageSource extends Omit<
   | 'isStatus'
   | 'isGif'
   | 'forwardingScore'
+  | 'deviceType'
+  | 'body'
+  | 'from'
+  | 'to'
+  | 'type'
+  | 'fromMe'
+  | 'hasMedia'
+  | 'hasQuotedMsg'
+  | 'hasReaction'
+  | 'mentionedIds'
+  | 'groupMentions'
 > {
   id: IdLike
+  // Message.js copies these without a default, so a real account can lack any of them (see `mapMessageFields`)
+  deviceType?: string | null
+  body?: string | null
+  from?: string | null
+  to?: string | null
+  type?: string | null
+  fromMe?: boolean | null
+  hasMedia?: boolean | null
+  hasQuotedMsg?: boolean | null
+  hasReaction?: boolean | null
   location?: LocationSource | null
   // Message.js copies these as they come (`this.isStarred = data.star`, `this.links = data.links`)
   // and a message of a special type can lack them: absent is false, empty or 0
@@ -320,8 +371,8 @@ export interface MessageSource extends Omit<
   // Some incoming messages come without one
   ack?: number | null
   // The typings of wwebjs say string, but Message.js copies what WhatsApp Web holds, which can be wids
-  mentionedIds: IdLike[]
-  groupMentions: { groupSubject: string; groupJid: IdLike }[]
+  mentionedIds?: IdLike[] | null
+  groupMentions?: ({ groupSubject: string; groupJid: IdLike } | null)[] | null
   businessOwnerJid?: IdLike | null
   // Typed string[], but Message.js copies the `{ name, localId }` options WhatsApp Web holds
   pollOptions?: (string | { name: string })[] | null
@@ -348,38 +399,36 @@ export interface MessageMapOptions {
   // Called with the names of the fields (never the values) when the last message of a chat does not
   // fit its schema: it is left out of the chat instead of turning the whole listing into a 500
   onUnreadableMessage?: (fields: string) => void
+  // Called with the NAME of an optional field WhatsApp filled with another type (never the value):
+  // the field is left out of the message instead of failing its schema
+  onDroppedField?: (field: string) => void
 }
 
-const MESSAGE_FIELDS = [
-  'ack',
-  'author',
-  'deviceType',
-  'body',
-  'from',
-  'fromMe',
-  'hasMedia',
-  'hasQuotedMsg',
-  'hasReaction',
-  'duration',
-  'mediaKey',
-  'to',
-  'type',
-  'orderId',
-  'title',
-  'description',
-  'productId',
-  'latestEditSenderTimestampMs',
-  'selectedButtonId',
-  'selectedRowId',
-  'pollName',
-  'allowMultipleAnswers',
-  'eventStartTime',
-  'eventEndTime',
-  'eventDescription',
-  'eventLocation',
-  'eventJoinLink',
-  'messageSecret'
-] as const satisfies readonly (keyof MessageSource)[]
+// The optional fields copied as they come, and the type each must have to be copied
+const MESSAGE_OPTIONAL_KINDS = {
+  author: 'string',
+  duration: 'string',
+  mediaKey: 'string',
+  orderId: 'string',
+  title: 'string',
+  description: 'string',
+  productId: 'string',
+  latestEditSenderTimestampMs: 'number',
+  selectedButtonId: 'string',
+  selectedRowId: 'string',
+  pollName: 'string',
+  allowMultipleAnswers: 'boolean',
+  eventStartTime: 'unixSeconds',
+  eventEndTime: 'unixSeconds',
+  eventDescription: 'string',
+  eventLocation: 'any',
+  eventJoinLink: 'string',
+  messageSecret: 'numbers'
+} as const satisfies Partial<Record<keyof MessageSource, FieldKind>>
+
+const textOr = (value: unknown, fallback: string): string =>
+  typeof value === 'string' ? value : fallback
+const flag = (value: unknown): boolean => value === true
 
 const LOCATION_FIELDS = [
   'latitude',
@@ -491,13 +540,30 @@ export function mapMessage(source: MessageSource, options: MessageMapOptions): M
 
 function mapMessageFields(source: MessageSource, options: MessageMapOptions): MessageDto {
   const timestamp = usableTimestamp(source.timestamp, options)
+  // A message is placed by its chat: without one there is no safe default (it would be stored and
+  // published under the wrong conversation), so it is refused and the caller leaves it out
+  const chatId = source.fromMe === true ? source.to : source.from
+  if (typeof chatId !== 'string' || chatId === '') {
+    throw new Error('A message names no chat (from or to is missing)')
+  }
   const message: MessageDto = {
-    ...(pick(source, MESSAGE_FIELDS) as MessageDto), // required fields are filled by wwebjs
+    ...(pickTyped(source, MESSAGE_OPTIONAL_KINDS, options.onDroppedField) as Partial<MessageDto>),
+    // The type and the device are labels: a missing one is 'unknown' and the body is empty
+    deviceType: textOr(source.deviceType, 'unknown'),
+    body: textOr(source.body, ''),
+    type: textOr(source.type, 'unknown'),
+    // The other side of the conversation stays empty when only it is missing
+    from: textOr(source.from, ''),
+    to: textOr(source.to, ''),
+    fromMe: flag(source.fromMe),
+    hasMedia: flag(source.hasMedia),
+    hasQuotedMsg: flag(source.hasQuotedMsg),
+    hasReaction: flag(source.hasReaction),
     id: serializeId(source.id),
     ack: source.ack ?? null,
     isStarred: source.isStarred ?? false,
     links: source.links ?? [],
-    vCards: source.vCards ?? [],
+    vCards: (source.vCards ?? []).filter((card): card is string => typeof card === 'string'),
     isStatus: source.isStatus ?? false,
     isGif: source.isGif ?? false,
     forwardingScore: source.forwardingScore ?? 0,
@@ -506,24 +572,26 @@ function mapMessageFields(source: MessageSource, options: MessageMapOptions): Me
     isForwarded: source.isForwarded ?? false,
     timestamp,
     // For a group chat `from` is the group, `author` the sender
-    chatId: source.fromMe ? source.to : source.from,
+    chatId,
     // A message without a usable timestamp is dated by its arrival so that it still has a place in the order
     sentAt: timestamp === null ? toIso(options.receivedAt) : unixToIso(timestamp),
     receivedAt: toIso(options.receivedAt),
-    mentionedIds: source.mentionedIds.map(serializeId),
-    groupMentions: source.groupMentions.map(({ groupSubject, groupJid }) => ({
-      groupSubject,
-      groupJid: serializeId(groupJid)
-    }))
+    mentionedIds: (source.mentionedIds ?? []).map(serializeId),
+    groupMentions: (source.groupMentions ?? []).flatMap(mention =>
+      mention && typeof mention.groupSubject === 'string' && mention.groupJid
+        ? [{ groupSubject: mention.groupSubject, groupJid: serializeId(mention.groupJid) }]
+        : []
+    )
   }
   const businessOwnerJid = optionalId(source.businessOwnerJid)
   if (businessOwnerJid !== undefined) message.businessOwnerJid = businessOwnerJid
   const dynamicReplyButtons = toJson(source.dynamicReplyButtons)
   if (dynamicReplyButtons !== undefined) message.dynamicReplyButtons = dynamicReplyButtons
   if (source.pollOptions) {
-    message.pollOptions = source.pollOptions.map(option =>
-      typeof option === 'string' ? option : option.name
-    )
+    message.pollOptions = source.pollOptions.flatMap(option => {
+      const name = typeof option === 'string' ? option : option?.name
+      return typeof name === 'string' ? [name] : []
+    })
   }
   const location = mapLocation(source.location)
   if (location) message.location = location
