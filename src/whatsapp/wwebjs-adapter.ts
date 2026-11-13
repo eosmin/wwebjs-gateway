@@ -294,12 +294,18 @@ const toIdLike = (value: unknown): IdLike =>
 const toIdLikeOrNull = (value: unknown): IdLike | null =>
   value === null || value === undefined ? null : toIdLike(value)
 
-// The result of `addParticipants` is typed wrongly in wwebjs 1.34.8 (`{ [id]: { [id]: … } }`); this is
-// what WhatsApp answers
-const ParticipantOutcomes = z.record(
-  z.string(),
-  z.looseObject({ code: z.number(), message: z.string(), isInviteV4Sent: z.boolean() })
-)
+// The outcomes of `addParticipants` and `createGroup` are typed wrongly in wwebjs 1.34.8 (`{ [id]: { [id]: … } }`);
+// this is what WhatsApp answers. Each field is read on its own: one of another type is left out, never
+// a failure, because the action (participants added, group created) has already happened
+const outcomeOf = (codeKey: 'code' | 'statusCode') =>
+  z.looseObject({
+    [codeKey]: z.number().optional().catch(undefined),
+    message: z.string().optional().catch(undefined),
+    isGroupCreator: z.boolean().optional().catch(undefined),
+    isInviteV4Sent: z.boolean().optional().catch(undefined)
+  })
+const Outcomes = (codeKey: 'code' | 'statusCode') =>
+  z.record(z.string(), outcomeOf(codeKey).catch({}))
 
 const isChannel = (chat: Chat | Channel): chat is Channel =>
   'isChannel' in chat && chat.isChannel === true
@@ -357,6 +363,23 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     // busy gateway keeps the faults: the library failing, a mapper of ours, an unknown outcome
     if (QUIET_CAUSES.has(code)) this.logger.debug(line)
     else this.logger.warn(line)
+  }
+
+  // The participants outcomes, read field by field. The action already happened, so an odd answer is
+  // delivered with what is known and logged, never turned into a failure
+  private outcomes(
+    operation: string,
+    codeKey: 'code' | 'statusCode',
+    raw: unknown
+  ): Record<string, Record<string, unknown>> {
+    const parsed = Outcomes(codeKey).safeParse(raw)
+    if (!parsed.success) {
+      this.logger.warn(
+        `[${this.sessionId}] ${operation}: the participant outcomes had an unexpected shape`
+      )
+      return {}
+    }
+    return parsed.data
   }
 
   // The library answers a text instead of throwing, and the text can quote ids, numbers or the names
@@ -1551,7 +1574,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     return this.run('createGroup', async () => {
       const result = await this.client.createGroup(title, participantIds, { ...options })
       if (typeof result === 'string') return this.refusedReason('createGroup', result, [title])
-      return { title: result.title, gid: result.gid._serialized, participants: result.participants }
+      return {
+        title: result.title,
+        gid: result.gid._serialized,
+        participants: this.outcomes('createGroup', 'statusCode', result.participants)
+      }
     })
   }
 
@@ -1565,7 +1592,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       const result: unknown = await group.addParticipants(participantIds, { ...options })
       return typeof result === 'string'
         ? this.refusedReason('addParticipants', result)
-        : ParticipantOutcomes.parse(result)
+        : this.outcomes('addParticipants', 'code', result)
     })
   }
 

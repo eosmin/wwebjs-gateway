@@ -592,6 +592,33 @@ describe('calls', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('createGroup'))
   })
 
+  it('does not report a group action that happened as failed when the outcomes are odd', async () => {
+    const h = harness()
+    stub(h.client, 'getChatById').mockResolvedValue({
+      ...waChat({ isGroup: true }),
+      participants: [],
+      addParticipants: jest
+        .fn()
+        .mockResolvedValue({ 'a@c.us': { code: '200', message: 'added' }, 'b@c.us': 'odd' })
+    })
+    stub(h.client, 'createGroup').mockResolvedValue({
+      title: 'G',
+      gid: { _serialized: 'g@g.us' },
+      participants: { 'a@c.us': { statusCode: 200, isGroupCreator: 'no' } }
+    })
+    ready(h)
+
+    // The action went through: the outcome is delivered with what is known, never a failure
+    await expect(h.adapter.addParticipants('g@g.us', ['a@c.us'])).resolves.toEqual({
+      'a@c.us': { message: 'added' },
+      'b@c.us': {}
+    })
+    await expect(h.adapter.createGroup('G', ['a@c.us'])).resolves.toMatchObject({
+      gid: 'g@g.us',
+      participants: { 'a@c.us': { statusCode: 200 } }
+    })
+  })
+
   it('masks the text answers of addParticipants and createChannel too', async () => {
     const h = harness()
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
@@ -1628,22 +1655,28 @@ describe('sending', () => {
 })
 
 describe('boundaries', () => {
-  it('turns a bad participants answer into WaOperationError without echoing it', async () => {
+  it('delivers a bad participants answer without its odd fields and never echoes them', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
     const h = harness()
-    const group = {
+    const addParticipants = jest
+      .fn()
+      .mockResolvedValueOnce({ 'a@c.us': { code: 'secret-5215500000001' } })
+      .mockResolvedValueOnce(42)
+    stub(h.client, 'getChatById').mockResolvedValue({
       ...waChat({ isGroup: true }),
       participants: [],
-      addParticipants: jest.fn().mockResolvedValue({ 'a@c.us': { code: 'secret-5215500000001' } })
-    }
-    stub(h.client, 'getChatById').mockResolvedValue(group)
+      addParticipants
+    })
     ready(h)
 
-    const error: unknown = await h.adapter
-      .addParticipants('g@g.us', ['a@c.us'])
-      .catch((e: unknown) => e)
+    const odd = await h.adapter.addParticipants('g@g.us', ['a@c.us'])
+    const notARecord = await h.adapter.addParticipants('g@g.us', ['a@c.us'])
 
-    expect(error).toBeInstanceOf(WaOperationError)
-    expect((error as Error).message).not.toContain('5215500000001')
+    expect(JSON.stringify(odd)).not.toContain('5215500000001')
+    expect(odd).toEqual({ 'a@c.us': {} })
+    expect(notARecord).toEqual({})
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unexpected shape'))
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('5215500000001')
   })
 
   it('keeps the text answers of createGroup and addParticipants', async () => {

@@ -217,10 +217,14 @@ export class CreateGroupResultDto extends createZodDto(
       .record(
         z.string(),
         z.object({
-          statusCode: z.number().int().describe('200 when added; another code says why not'),
-          message: z.string(),
-          isGroupCreator: z.boolean(),
-          isInviteV4Sent: z.boolean()
+          statusCode: z
+            .number()
+            .int()
+            .optional()
+            .describe('200 when added; another code says why not'),
+          message: z.string().optional(),
+          isGroupCreator: z.boolean().optional(),
+          isInviteV4Sent: z.boolean().optional()
         })
       )
       .describe('What WhatsApp answered for each participant, by id')
@@ -238,9 +242,9 @@ export class ParticipantsResultDto extends createZodDto(
       .record(
         z.string(),
         z.object({
-          code: z.number().int().describe('200 when added; another code says why not'),
-          message: z.string(),
-          isInviteV4Sent: z.boolean()
+          code: z.number().int().optional().describe('200 when added; another code says why not'),
+          message: z.string().optional(),
+          isInviteV4Sent: z.boolean().optional()
         })
       )
       .optional()
