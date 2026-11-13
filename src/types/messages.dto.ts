@@ -127,14 +127,9 @@ const hasExactlyOneContactSource = (contact: object): boolean =>
 const MimeType = z
   .string()
   .max(127)
-  .transform((value, ctx) => {
-    const type = outgoingMediaType(value)
-    if (type === undefined) {
-      ctx.addIssue({ code: 'custom', message: 'Not a media type such as image/png' })
-      return z.NEVER
-    }
-    return type
-  })
+  .refine(value => outgoingMediaType(value) !== undefined, 'Not a media type such as image/png')
+  // The schema stays a plain string for the OpenAPI document; the value is rewritten after the check
+  .overwrite(value => outgoingMediaType(value) ?? value)
 
 export const MediaSource = z.union([
   z.strictObject({

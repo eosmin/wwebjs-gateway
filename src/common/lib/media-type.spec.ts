@@ -37,6 +37,11 @@ describe('parseMediaType', () => {
     'image/png\u0000',
     'image/png\t',
     'image/png x=y',
+    '*/*',
+    'a/b%',
+    "image/png'",
+    '\timage/png',
+    '.image/png',
     'image/png, text/html',
     `image/png; x=${'a'.repeat(300)}`
   ])('refuses %j', value => {

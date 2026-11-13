@@ -5,11 +5,11 @@
 
 const MAX_MEDIA_TYPE_LENGTH = 200
 const TOKEN = "[a-z0-9!#$%&'*+.^_`|~-]+"
+// The type and the subtype are RFC 6838 restricted names: no `*`, `'`, `%`, `|`, `~` or backtick
+const NAME = '[a-z0-9][a-z0-9!#$&^_.+-]*'
 // A quoted value: no escapes, no control characters
 const QUOTED = '"[^"\\\\\\u0000-\\u001f\\u007f]*"'
-const MEDIA_TYPE = new RegExp(
-  `^(${TOKEN}/${TOKEN})((?:\\s*;\\s*${TOKEN}=(?:${TOKEN}|${QUOTED}))*)$`
-)
+const MEDIA_TYPE = new RegExp(`^(${NAME}/${NAME})((?:\\s*;\\s*${TOKEN}=(?:${TOKEN}|${QUOTED}))*)$`)
 const PARAMETER = new RegExp(`;\\s*(${TOKEN})=(${TOKEN}|${QUOTED})`, 'g')
 // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/

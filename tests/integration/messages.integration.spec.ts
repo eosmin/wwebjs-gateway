@@ -278,6 +278,21 @@ describe('messages API (integration)', () => {
     })
   })
 
+  it('refuses a media type that is not well formed with a 400 on its field, and never calls the client', async () => {
+    const before = sendCalls().length
+
+    const response = await post('messages', {
+      to: PEER,
+      type: 'media',
+      source: { base64: Buffer.from('abc').toString('base64'), mimetype: 'audio/ogg\r\nx: y' }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } })
+    expect(JSON.stringify(response.json())).toContain('mimetype')
+    expect(sendCalls()).toHaveLength(before)
+  })
+
   it('refuses a media URL that points at the metadata address, and never calls the client', async () => {
     const before = sendCalls().length
 

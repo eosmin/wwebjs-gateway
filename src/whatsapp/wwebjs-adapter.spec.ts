@@ -915,7 +915,7 @@ describe('calls', () => {
       expect(answer).toMatchObject([{ id: 'r1' }])
       const logged = warn.mock.calls.map(call => String(call[0])).join('\n')
       expect(logged).toContain('getMessageReactions')
-      expect(logged).toContain('2')
+      expect(logged).toContain('left out 2 item(s)')
       expect(logged).not.toContain('SECRET-EMOJI')
       expect(logged).not.toContain('odd')
     })
