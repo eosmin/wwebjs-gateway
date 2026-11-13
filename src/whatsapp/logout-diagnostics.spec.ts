@@ -23,6 +23,13 @@ describe('logoutReasonOf', () => {
     expect(logoutReasonOf(url('logout_reason=15551234567%40c.us'))).toBeUndefined()
   })
 
+  it('leaves out a token that is a number or starts with a digit, which could be an account', () => {
+    expect(logoutReasonOf(url('logout_reason=15551234567'))).toBeUndefined()
+    expect(logoutReasonOf(url('logout_reason=1abc'))).toBeUndefined()
+    expect(logoutReasonOf(url('logout_reason=_client'))).toBeUndefined()
+    expect(logoutReasonOf(url('logout_reason=client_fatal_15551234567'))).toBeUndefined()
+  })
+
   it('accepts exactly 48 characters and takes the first of a repeated parameter', () => {
     expect(logoutReasonOf(url(`logout_reason=${'a'.repeat(48)}`))).toHaveLength(48)
     expect(logoutReasonOf(url('logout_reason=first&logout_reason=second'))).toBe('first')
@@ -55,6 +62,41 @@ describe('cleanConsoleLine', () => {
     expect(cleanConsoleLine('[reload] user 15551234567 left 12345 ago')).toBe(
       '[reload] user # left 12345 ago'
     )
+  })
+
+  it('masks a phone number split by separators, spaces or brackets', () => {
+    for (const number of ['+1 555 123 4567', '1-555-123-4567', '(555) 123-4567', '5 5 5 1 2 3 4']) {
+      expect(cleanConsoleLine(`[reload] user ${number} left`)).not.toMatch(/\d[\d\s().-]*\d{3}/)
+    }
+  })
+
+  it('masks digits of other scripts', () => {
+    expect(
+      cleanConsoleLine('[reload] \uff11\uff15\uff15\uff15\uff11\uff12\uff13\uff14\uff15\uff16 x')
+    ).toBe('[reload] # x')
+    expect(cleanConsoleLine('[reload] \u0661\u0665\u0665\u0665\u0661\u0662\u0663\u0664 x')).toBe(
+      '[reload] # x'
+    )
+  })
+
+  it('masks account ids with short numbers, and any address or token with an @', () => {
+    expect(cleanConsoleLine('[reload] 1234@c.us left 99-1@g.us now')).toBe(
+      '[reload] <id> left <id> now'
+    )
+    expect(cleanConsoleLine('[reload] abc@lid x')).toBe('[reload] <id> x')
+  })
+
+  it('masks web addresses, with their query and tokens', () => {
+    expect(cleanConsoleLine('[reload] go https://web.whatsapp.com/?t=abc123&u=bob now')).toBe(
+      '[reload] go <url> now'
+    )
+    expect(cleanConsoleLine('logging out HTTP://x.example/a')).toBe('logging out <url>')
+  })
+
+  it('does not spend time on a huge line', () => {
+    const started = Date.now()
+    expect(cleanConsoleLine(`[reload] ${'ab '.repeat(500_000)}`)).toHaveLength(160)
+    expect(Date.now() - started).toBeLessThan(500)
   })
 
   it('masks the address of an account, whatever the shape', () => {

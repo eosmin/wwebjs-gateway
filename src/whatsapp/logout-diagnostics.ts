@@ -2,18 +2,24 @@
 // address or any user data: the short reason token of the logout address, and the few fixed lines
 // the page writes to its console about a reload or a logout (H-LIVE-05, F25).
 
-const REASON_PATTERN = /^[A-Za-z0-9_]{1,48}$/
+// Starts with a letter and holds no run of six digits: a token cannot be an account id
+const REASON_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,47}$/
 const MAX_LINE_LENGTH = 160
 // eslint-disable-next-line no-control-regex -- control characters are exactly what is dropped
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g
-const LONG_NUMBER = /\d{6,}/g
+// Digits of any script, with the separators a phone number is written with, spanning six characters
+const NUMBER = /\+?\p{Nd}[\p{Nd}\s().-]{4,}\p{Nd}/gu
+const WEB_ADDRESS = /https?:\/\/\S+/gi
+const ACCOUNT_ID = /\S*@\S*/g
+// The most of a console line that is looked at: a huge line costs nothing
+const MAX_RAW_LENGTH = 1000
 
 // The value of `logout_reason` of the address, only when it is a short token of letters, digits and
 // underscores: anything else (an account id, a message, markup) is left out, never logged.
 export function logoutReasonOf(address: string): string | undefined {
   try {
     const value = new URL(address).searchParams.get('logout_reason')
-    return value !== null && REASON_PATTERN.test(value) ? value : undefined
+    return value !== null && REASON_PATTERN.test(value) && !/\d{6,}/.test(value) ? value : undefined
   } catch {
     return undefined
   }
@@ -27,12 +33,15 @@ export function isLogoutRelevant(line: string): boolean {
   )
 }
 
-// A line of the page console as it may be logged: no control characters, runs of six or more digits
-// (a phone number, an id) masked, at most 160 characters.
+// A line of the page console as it may be logged: no control characters, web addresses, account ids
+// (anything with an @) and phone-number-like digit runs of any script masked, at most 160 characters.
 export function cleanConsoleLine(line: string): string {
   return line
+    .slice(0, MAX_RAW_LENGTH)
     .replace(CONTROL_CHARACTERS, ' ')
-    .replace(LONG_NUMBER, '#')
+    .replace(WEB_ADDRESS, '<url>')
+    .replace(ACCOUNT_ID, '<id>')
+    .replace(NUMBER, '#')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MAX_LINE_LENGTH)
