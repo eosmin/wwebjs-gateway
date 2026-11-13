@@ -100,7 +100,7 @@ export class WebhookDeliveriesService {
   // are tried for real. It is a delivery like the others: it shows in the list and can be retried.
   async test(webhook: Webhook, body: TestWebhookBodyDto): Promise<DeliveryDto> {
     const sessionId = await this.pingSession(webhook, body.sessionId)
-    this.takePing(webhook.id)
+    const at = this.takePing(webhook.id)
     const envelope: DeliveryEnvelope = {
       id: `evt_${randomUUID()}`,
       event: 'ping',
@@ -109,21 +109,27 @@ export class WebhookDeliveriesService {
       timestamp: new Date().toISOString(),
       data: {}
     }
-    const row = await this.deliveries.create({
-      webhookId: webhook.id,
-      sessionId,
-      event: envelope.event,
-      seq: BigInt(envelope.seq),
-      payload: envelope
-    })
-    await this.enqueue(row, envelope)
-    return toDeliveryDto(row)
+    try {
+      const row = await this.deliveries.create({
+        webhookId: webhook.id,
+        sessionId,
+        event: envelope.event,
+        seq: BigInt(envelope.seq),
+        payload: envelope
+      })
+      await this.enqueue(row, envelope)
+      return toDeliveryDto(row)
+    } catch (error: unknown) {
+      // Nothing was sent: a failure of the database or the queue must not use up the allowance
+      this.refundPing(webhook.id, at)
+      throw error
+    }
   }
 
   // A ping is a request to the URL of the webhook whenever the caller asks, so the number of them
   // per webhook is bounded: a key could otherwise send a stream of POSTs to a third party, or probe
   // an internal host the operator allowed for webhooks (the deliveries show the status of each)
-  private takePing(webhookId: string): void {
+  private takePing(webhookId: string): number {
     const now = Date.now()
     const recent = (this.pings.get(webhookId) ?? []).filter(at => now - at < PING_WINDOW_MS)
     const oldest = recent[0]
@@ -138,6 +144,14 @@ export class WebhookDeliveriesService {
     }
     this.pings.set(webhookId, [...recent, now])
     if (this.pings.size > PING_TABLE_SWEEP_AT) this.sweepPings(now)
+    return now
+  }
+
+  private refundPing(webhookId: string, at: number): void {
+    const times = this.pings.get(webhookId)
+    if (times === undefined) return
+    const index = times.lastIndexOf(at)
+    if (index >= 0) times.splice(index, 1)
   }
 
   private sweepPings(now: number): void {

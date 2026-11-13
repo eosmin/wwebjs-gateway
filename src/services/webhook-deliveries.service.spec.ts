@@ -236,6 +236,17 @@ describe('WebhookDeliveriesService.test, the limit of pings', () => {
     expect(queue.enqueue).toHaveBeenCalledTimes(4)
   })
 
+  it('gives the ping back when the queue or the database fails, so a dead Redis does not turn into a 429', async () => {
+    const { service, queue } = setup()
+    queue.enqueue.mockRejectedValue(new Error('redis down'))
+    for (let i = 0; i < 5; i += 1) {
+      await expect(service.test(webhook(), {})).rejects.toThrow('redis down')
+    }
+    queue.enqueue.mockResolvedValue(undefined)
+
+    await expect(service.test(webhook(), {})).resolves.toBeDefined()
+  })
+
   it('limits each webhook apart', async () => {
     const { service } = setup()
     for (let i = 0; i < 3; i += 1) await service.test(webhook(), {})
