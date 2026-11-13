@@ -18,14 +18,11 @@ export class CallsService {
   // WhatsApp gives no answer to a reject, so what is answered is what the page shows afterwards:
   // `confirmed` when the call left its list, `confirmed: false` with a note when the reject was
   // handed over and nothing shows that the call ended. A call the adapter no longer holds (too old,
-  // already rejected, or never seen) or that the page no longer lists is a 404.
+  // already rejected, or never seen) is a 404.
   async reject(sessionId: string, callId: string): Promise<CallRejectResponse> {
     const result = await this.sessions.requireReady(sessionId).rejectCall(callId)
     if (result === 'not_held')
       throw new NotFoundError('NOT_FOUND', `No recent incoming call ${callId}`)
-    if (result === 'gone') {
-      throw new NotFoundError('NOT_FOUND', `The call ${callId} is no longer ringing or in progress`)
-    }
     return result === 'confirmed'
       ? { confirmed: true }
       : { confirmed: false, note: UNCONFIRMED_NOTE }

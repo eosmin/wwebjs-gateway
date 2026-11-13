@@ -43,12 +43,9 @@ describe('CallsService', () => {
     expect(answer.note).toMatch(/not.*(ended|confirm)/i)
   })
 
-  it.each(['not_held', 'gone'] as const)(
-    'answers NOT_FOUND for a call that is %s',
-    async result => {
-      const { service } = build({ rejectCall: ok(result) })
+  it('answers NOT_FOUND for a call the adapter does not hold', async () => {
+    const { service } = build({ rejectCall: ok('not_held') })
 
-      await expect(service.reject('s', 'c1')).rejects.toBeInstanceOf(NotFoundError)
-    }
-  )
+    await expect(service.reject('s', 'c1')).rejects.toBeInstanceOf(NotFoundError)
+  })
 })

@@ -2051,17 +2051,31 @@ export class WwebjsAdapter implements WhatsAppClientPort {
         if (!this.calls.has(callId)) this.calls.set(callId, call)
         throw error
       }
-      return rejectResultOf(answer)
+      const { result, diag } = rejectResultOf(answer)
+      if (diag !== undefined) {
+        this.logger.debug(
+          `rejectCall not confirmed by the page: ${JSON.stringify(diag).slice(0, 4000)}`
+        )
+      }
+      return result
     })
   }
 }
 
-// The page answers `{ result: 'gone' }` or `{ result: 'rejected', confirmed }`
-function rejectResultOf(answer: unknown): RejectCallResult {
-  if (typeof answer !== 'object' || answer === null) return 'unconfirmed'
-  const { result, confirmed } = answer as { result?: unknown; confirmed?: unknown }
-  if (result === 'gone') return 'gone'
-  return result === 'rejected' && confirmed === true ? 'confirmed' : 'unconfirmed'
+// The page answers `{ result: 'rejected', confirmed, diag? }`; `diag` is what the stack and the call
+// collection look like when the call could not be found or confirmed (ids cut short), for the log
+function rejectResultOf(answer: unknown): { result: RejectCallResult; diag: unknown } {
+  if (typeof answer !== 'object' || answer === null)
+    return { result: 'unconfirmed', diag: undefined }
+  const { result, confirmed, diag } = answer as {
+    result?: unknown
+    confirmed?: unknown
+    diag?: unknown
+  }
+  return {
+    result: result === 'rejected' && confirmed === true ? 'confirmed' : 'unconfirmed',
+    diag
+  }
 }
 
 // ---- Factory -----------------------------------------------------------------------------------

@@ -2007,8 +2007,8 @@ describe('boundaries', () => {
     expect(dto.id).toBe('b@c.us')
   })
 
-  // What the patched page answers (F30): { result: 'gone' } for a call it no longer lists, and
-  // { result: 'rejected', confirmed } once the VoIP stack took the reject
+  // What the patched page answers (F30): { result: 'rejected', confirmed } once the VoIP stack took
+  // the reject, with `diag` when it could not find or confirm the call
   it.each([
     [
       'the page confirms the call is gone from its list',
@@ -2020,7 +2020,6 @@ describe('boundaries', () => {
       { result: 'rejected', confirmed: false },
       'unconfirmed'
     ],
-    ['the page no longer lists the call', { result: 'gone' }, 'gone'],
     ['the page answers nothing (a library without the patch)', undefined, 'unconfirmed'],
     ['the page answers something unknown', { result: 'maybe' }, 'unconfirmed']
   ])('tells what came of a reject when %s', async (_name, answer, expected) => {
@@ -2038,8 +2037,32 @@ describe('boundaries', () => {
     })
 
     await expect(h.adapter.rejectCall('c1')).resolves.toBe(expected)
-    // a call that was rejected, or that is gone, is not held any more
+    // a call that was rejected is not held any more
     await expect(h.adapter.rejectCall('c1')).resolves.toBe('not_held')
+  })
+
+  it('writes what the page found at debug level when it could not confirm the call, and still answers', async () => {
+    const debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined)
+    const h = harness()
+    ready(h)
+    h.client.emit('call', {
+      id: 'c1',
+      timestamp: 1,
+      isVideo: false,
+      isGroup: false,
+      fromMe: false,
+      canHandleLocally: false,
+      webClientShouldHandle: false,
+      reject: jest.fn().mockResolvedValue({
+        result: 'rejected',
+        confirmed: false,
+        diag: { wasListed: false, collection: { size: 0 } }
+      })
+    })
+
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe('unconfirmed')
+
+    expect(debug).toHaveBeenCalledWith(expect.stringContaining('"wasListed":false'))
   })
 
   it('keeps no more calls to reject than CALL_CACHE_SIZE, dropping the oldest', async () => {

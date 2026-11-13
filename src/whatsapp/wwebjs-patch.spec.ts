@@ -435,7 +435,7 @@ describe('the patched whatsapp-web.js', () => {
     // `listed` is what the call collection of the page answers to `get`
     const page = (
       stack: Stack | null,
-      calls: { listed?: string[]; active?: string | null } = {}
+      calls: { listed?: string[]; active?: string | null; getWorks?: boolean } = {}
     ): Page => {
       const listed = new Set(calls.listed ?? ['c1'])
       return {
@@ -443,7 +443,10 @@ describe('the patched whatsapp-web.js', () => {
         modules: {
           WAWebVoipStackInterface: { getVoipStackInterface: () => Promise.resolve(stack) },
           WAWebCallCollection: {
-            get: (id: string): unknown => (listed.has(id) ? { id } : undefined),
+            // the id a lookup by `get` misses is the case of a collection keyed another way
+            get: (id: string): unknown =>
+              calls.getWorks !== false && listed.has(id) ? { id } : undefined,
+            getModelsArray: (): unknown[] => [...listed].map(id => ({ id, state: 'ringing' })),
             get activeCall(): unknown {
               return calls.active == null ? null : { id: calls.active }
             }
@@ -498,12 +501,58 @@ describe('the patched whatsapp-web.js', () => {
       expect(plain).toHaveBeenCalledTimes(1)
     })
 
-    it('says the call is gone, without touching the stack, when the page lists no such call', async () => {
-      const withReason = jest.fn(() => Promise.resolve())
-      const p = page({ type: 'web', rejectCallWithEndReason: withReason }, { listed: [] })
+    it('still asks the stack when the page does not list the call, and then cannot confirm it', async () => {
+      jest.useFakeTimers()
+      try {
+        const withReason = jest.fn(() => Promise.resolve())
+        const p = page({ type: 'web', rejectCallWithEndReason: withReason }, { listed: [] })
+        const pending = reject(p)
+        await jest.advanceTimersByTimeAsync(5000)
 
-      await expect(reject(p)).resolves.toEqual({ result: 'gone' })
-      expect(withReason).not.toHaveBeenCalled()
+        await expect(pending).resolves.toMatchObject({ result: 'rejected', confirmed: false })
+        expect(withReason).toHaveBeenCalledTimes(1)
+        expect(withReason).toHaveBeenCalledWith(SELF)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('finds the call in the models of the collection when `get` does not know its id', async () => {
+      const p = page(null, { getWorks: false })
+      const withReason = jest.fn()
+      p.modules['WAWebVoipStackInterface'] = {
+        getVoipStackInterface: () =>
+          Promise.resolve(rejectingStack(p, 'rejectCallWithEndReason', withReason))
+      }
+
+      await expect(reject(p)).resolves.toEqual({ result: 'rejected', confirmed: true })
+      expect(withReason).toHaveBeenCalledTimes(1)
+    })
+
+    // What the next live check needs when the call is not where it was looked for: the shape of the
+    // stack and of the collection, with the ids cut short and never a number or a name
+    it('reports what the stack and the collection look like when it cannot confirm, without the ids of the people', async () => {
+      jest.useFakeTimers()
+      try {
+        const p = page(
+          { type: 'web', rejectCallWithEndReason: () => Promise.resolve(), currentCall: {} },
+          { listed: ['abcdefghijklmnopqrstuvwxyz0123456789', 'other'] }
+        )
+        const pending = reject(p, 'ghost-call-id-that-is-long')
+        await jest.advanceTimersByTimeAsync(5000)
+        const outcome = (await pending) as Outcome & { diag?: Record<string, unknown> }
+        const text = JSON.stringify(outcome.diag)
+
+        expect(outcome.confirmed).toBe(false)
+        expect(text).toContain('rejectCallWithEndReason')
+        expect(text).toContain('currentCall')
+        expect(text).toContain('abcdefgh')
+        expect(text).not.toContain('abcdefghijklmnopqrstuvwxyz0123456789')
+        expect(text).not.toContain('peer@lid')
+        expect(outcome.diag).toMatchObject({ idType: 'string', collection: { size: 2 } })
+      } finally {
+        jest.useRealTimers()
+      }
     })
 
     it('refuses to reject when another call is the one the stack holds', async () => {
@@ -540,7 +589,7 @@ describe('the patched whatsapp-web.js', () => {
         const pending = reject(page({ type: 'web', rejectCallWithEndReason: withReason }))
         await jest.advanceTimersByTimeAsync(5000)
 
-        await expect(pending).resolves.toEqual({ result: 'rejected', confirmed: false })
+        await expect(pending).resolves.toMatchObject({ result: 'rejected', confirmed: false })
         expect(withReason).toHaveBeenCalledTimes(1)
       } finally {
         jest.useRealTimers()

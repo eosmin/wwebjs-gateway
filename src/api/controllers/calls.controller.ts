@@ -65,7 +65,7 @@ export class CallsController {
     scope: 'manage',
     summary: 'Reject an incoming call',
     description:
-      'Rejects a call the `call` event delivered, through the VoIP stack of WhatsApp Web. WhatsApp gives no answer to a reject, so the answer says what the page showed afterwards: `200 { confirmed: true }` when the call left its list, `202 { confirmed: false, note }` when the reject was handed over and nothing shows that the call ended (do not assume the caller stopped ringing). `404 NOT_FOUND` when the gateway no longer holds the call (`CALL_CACHE_SIZE`), never saw it, already rejected it, or the page no longer lists it. `502 WHATSAPP_ERROR` (`[call-reject]` in the cause) when this WhatsApp Web build has no way to reject. The effect on a real phone is not yet confirmed live (plan 10.4, F30b).',
+      'Rejects a call the `call` event delivered, through the VoIP stack of WhatsApp Web. WhatsApp gives no answer to a reject, so the answer says what the page showed afterwards: `200 { confirmed: true }` when the page listed the call and it left the list, `202 { confirmed: false, note }` when the reject was handed over and nothing shows that the call ended, including a call the page does not list under that id (do not assume the caller stopped ringing). `404 NOT_FOUND` when the gateway no longer holds the call (`CALL_CACHE_SIZE`), never saw it, or already rejected it. `502 WHATSAPP_ERROR` (`[call-reject]` in the cause) when this WhatsApp Web build has no way to reject. The effect on a real phone is not yet confirmed live (plan 10.4, F30b).',
     errors: ON_SESSION,
     examples: { request: null, response: { confirmed: true } },
     wwebjs: [

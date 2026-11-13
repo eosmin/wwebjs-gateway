@@ -132,17 +132,14 @@ describe('calls API (integration)', () => {
     expect(response.json<{ note: string }>().note).toMatch(/do not assume/)
   })
 
-  it.each(['not_held', 'gone'] as const)(
-    'answers 404 NOT_FOUND for a call that is %s',
-    async state => {
-      client().script('rejectCall', () => state)
+  it('answers 404 NOT_FOUND for a call the gateway does not hold', async () => {
+    client().script('rejectCall', () => 'not_held')
 
-      const response = await reject('c3')
+    const response = await reject('c3')
 
-      expect(response.statusCode).toBe(404)
-      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } })
-    }
-  )
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } })
+  })
 
   it('answers 502 WHATSAPP_ERROR with the cause when this WhatsApp Web has no way to reject', async () => {
     client().script('rejectCall', () => {
