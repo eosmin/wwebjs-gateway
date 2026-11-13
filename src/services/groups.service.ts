@@ -1,11 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import {
-  NotFoundError,
-  UnsupportedOperationError,
-  ValidationError,
-  WhatsAppError
-} from '../common/errors.js'
+import { NotFoundError, ValidationError, WhatsAppError } from '../common/errors.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { GroupChatDto, MembershipRequestDto } from '../types/dto.js'
@@ -24,6 +19,7 @@ import type {
   MembershipRequestActionResult
 } from '../whatsapp/whatsapp-client.port.js'
 
+import { assertGroupWritesEnabled } from './group-writes.js'
 import { MediaResolverService } from './media-resolver.service.js'
 
 export interface ParticipantsOutcome {
@@ -41,7 +37,8 @@ const isGroup = (chat: AnyChatDto): chat is GroupChatDto =>
   chat.isGroup === true && 'participants' in chat
 
 // What the groups routes do: reads, the changes to one group, its participants, its invite and the
-// requests to enter it; each one a call to the session's client.
+// requests to enter it; each one a call to the session's client. The writes that
+// ENABLE_GROUP_WRITES switches off (create, join, participants, revokeInvite) are refused first.
 @Injectable()
 export class GroupsService {
   constructor(
@@ -78,6 +75,7 @@ export class GroupsService {
 
   // wwebjs answers a failure with a text instead of throwing
   async create(sessionId: string, body: CreateGroupBody): Promise<CreateGroupResult> {
+    assertGroupWritesEnabled(this.config)
     const { subject, participants, ...options } = body
     const result = await this.sessions
       .requireReady(sessionId)
@@ -91,6 +89,7 @@ export class GroupsService {
   }
 
   async join(sessionId: string, inviteCode: string): Promise<string> {
+    assertGroupWritesEnabled(this.config)
     return this.sessions.requireReady(sessionId).acceptInvite(inviteCode)
   }
 
@@ -159,16 +158,7 @@ export class GroupsService {
     groupId: string,
     { action, participants, options }: GroupParticipantsBody
   ): Promise<ParticipantsOutcome> {
-    // Before the client is looked up, let alone called: two test accounts were logged out by
-    // WhatsApp right after an add (cause not proven), so an add is off unless the owner turns it on.
-    // remove, promote and demote use another WhatsApp Web module and stay as they were.
-    if (action === 'add' && !this.config.ENABLE_ADD_PARTICIPANTS) {
-      throw new UnsupportedOperationError(
-        'UNSUPPORTED_OPERATION',
-        'groups.participants add is disabled: it was followed by a logout of the account with the current WhatsApp Web build; set ENABLE_ADD_PARTICIPANTS=true to try',
-        { setting: 'ENABLE_ADD_PARTICIPANTS' }
-      )
-    }
+    assertGroupWritesEnabled(this.config)
     const client = this.sessions.requireReady(sessionId)
     switch (action) {
       case 'add': {
@@ -194,6 +184,7 @@ export class GroupsService {
   }
 
   async revokeInvite(sessionId: string, groupId: string): Promise<void> {
+    assertGroupWritesEnabled(this.config)
     await this.sessions.requireReady(sessionId).revokeGroupInvite(groupId)
   }
 

@@ -173,8 +173,8 @@ export class PollsEventsController {
     scope: 'manage',
     summary: 'Accept the group invite of a message',
     description:
-      'Joins the group of an invite the message carries (a V4 invite sent to the account). Answers 404 when the message does not exist or has no invite, and 400 when the invite has expired.',
-    errors: ON_MESSAGE,
+      'Joins the group of an invite the message carries (a V4 invite sent to the account). Answers 404 when the message does not exist or has no invite, and 400 when the invite has expired. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    errors: [...ON_MESSAGE, 'OPERATION_DISABLED'],
     examples: { request: null, response: { status: 200 } },
     wwebjs: ['Client.acceptGroupV4Invite', 'Message.acceptGroupV4Invite']
   })
