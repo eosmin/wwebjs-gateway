@@ -46,7 +46,7 @@ module.exports = {
       branches: 90
     },
     // The two files below do not reach 90 yet (measured with the unit specs and the send-queue and
-    // event-pipeline integration suites: send-queue.service.ts 81 % of the branches and 87 % of the
+    // event-pipeline integration suites: send-queue.service.ts 81 % of the branches and 86 % of the
     // functions, event-pipeline.service.ts 82 % of the branches). Much of the gap is the branches the
     // compiler emits for the decorator metadata of their constructors. Their own threshold is the floor
     // that holds today, and the 90 % stays the goal: IMPLEMENTATION_PLAN 10.4 (F20) says how it is closed.
