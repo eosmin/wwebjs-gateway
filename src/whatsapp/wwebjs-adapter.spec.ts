@@ -862,6 +862,65 @@ describe('calls', () => {
     await expect(h.adapter.starMessage('x')).rejects.toBeInstanceOf(WaOperationError)
   })
 
+  // H-LIVE-10: Message.getReactions answers undefined (not []) for a message nobody reacted to
+  describe('the reactions of a message', () => {
+    const reactionsOf = (value: unknown): Promise<unknown> => {
+      const h = harness()
+      stub(h.client, 'getMessageById').mockResolvedValue({
+        getReactions: jest.fn().mockResolvedValue(value)
+      })
+      ready(h)
+      return h.adapter.getMessageReactions('m1')
+    }
+    const reaction = {
+      id: 'r1',
+      aggregateEmoji: '\u{1F44D}',
+      hasReactionByMe: false,
+      senders: [
+        {
+          id: { _serialized: 'true_a@c.us_X_b@c.us' },
+          msgId: { _serialized: 'true_a@c.us_X' },
+          reaction: '\u{1F44D}',
+          senderId: 'b@c.us',
+          timestamp: 1,
+          ack: 1,
+          read: true,
+          orphan: 0
+        }
+      ]
+    }
+
+    it.each([[undefined], [null], ['x'], [{}], [42]])(
+      'answers an empty list when wwebjs hands over %j',
+      async value => {
+        await expect(reactionsOf(value)).resolves.toEqual([])
+      }
+    )
+
+    it('maps the reactions there are', async () => {
+      await expect(reactionsOf([reaction])).resolves.toMatchObject([
+        { id: 'r1', senders: [{ senderId: 'b@c.us' }] }
+      ])
+    })
+
+    it('leaves out an item it cannot map, says so without values, and keeps the rest', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+
+      const answer = await reactionsOf([
+        { id: 'odd', aggregateEmoji: 'SECRET-EMOJI', senders: undefined },
+        null,
+        reaction
+      ])
+
+      expect(answer).toMatchObject([{ id: 'r1' }])
+      const logged = warn.mock.calls.map(call => String(call[0])).join('\n')
+      expect(logged).toContain('getMessageReactions')
+      expect(logged).toContain('left out 2 item(s)')
+      expect(logged).not.toContain('SECRET-EMOJI')
+      expect(logged).not.toContain('odd')
+    })
+  })
+
   it('answers null for the order or payment of a message that is neither (wwebjs answers undefined)', async () => {
     const h = harness()
     const message = {

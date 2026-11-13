@@ -2,6 +2,7 @@ import { createZodDto } from 'nestjs-zod'
 import { z } from 'zod'
 
 import { ErrorCode } from '../common/errors.js'
+import { outgoingMediaType } from '../common/lib/media-type.js'
 import { isWaId } from '../common/lib/wa-id.js'
 
 import {
@@ -120,11 +121,15 @@ const commonShape = {
 const hasExactlyOneContactSource = (contact: object): boolean =>
   'contactId' in contact !== 'vcard' in contact
 
-// type/subtype with the characters of RFC 6838: it ends up in a header and in the message
+// A media type as a sender writes it, parameters included (`audio/ogg; codecs=opus`). It ends up in a
+// header and in the message, so only a safe form of it is kept: the bare type in lower case, and the
+// codec of a voice note from a constant (see outgoingMediaType).
 const MimeType = z
   .string()
   .max(127)
-  .regex(/^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/, 'Not a media type such as image/png')
+  .refine(value => outgoingMediaType(value) !== undefined, 'Not a media type such as image/png')
+  // The schema stays a plain string for the OpenAPI document; the value is rewritten after the check
+  .overwrite(value => outgoingMediaType(value) ?? value)
 
 export const MediaSource = z.union([
   z.strictObject({

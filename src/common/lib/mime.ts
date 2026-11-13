@@ -1,3 +1,5 @@
+import { outgoingMediaType } from './media-type.js'
+
 const hex = (...bytes: number[]): Buffer => Buffer.from(bytes)
 
 // The first bytes of the formats WhatsApp sends as media. A server that says nothing useful
@@ -29,9 +31,6 @@ function sniffMimetype(data: Buffer): string | undefined {
   return undefined
 }
 
-// type/subtype with the characters of RFC 6838: the value travels in headers and to WhatsApp
-const MIME_SHAPE = /^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/
-
 // The ISO base media box (`ftyp`) holds video, audio-only m4a and HEIC images alike, so on its own it
 // says nothing against a declared audio, video or image type
 const AMBIGUOUS_CONTAINERS: ReadonlySet<string> = new Set(['video/mp4'])
@@ -44,8 +43,8 @@ const topLevel = (mimetype: string): string => mimetype.slice(0, mimetype.indexO
 // wrong); otherwise what the bytes look like. Two subtypes of the same family (audio/mp4 and video/mp4
 // share a box) keep the server's answer.
 export function resolveMimetype(contentType: string | undefined, data: Buffer): string | undefined {
-  const wellFormed =
-    contentType !== undefined && MIME_SHAPE.test(contentType) ? contentType : undefined
+  // A server may add parameters (`; charset=...`): only the bare type is believed and passed on
+  const wellFormed = contentType === undefined ? undefined : outgoingMediaType(contentType)
   const sniffed = sniffMimetype(data)
   // Nothing specific was declared: the bytes, or the generic type for a file nobody can name
   if (wellFormed === undefined || GENERIC_TYPES.has(wellFormed)) return sniffed ?? wellFormed

@@ -1,4 +1,6 @@
-import { EditMessageBody, ReplyMessageBody, SendMessageBody } from './messages.dto.js'
+import { z } from 'zod'
+
+import { EditMessageBody, MediaSource, ReplyMessageBody, SendMessageBody } from './messages.dto.js'
 
 const text = { to: '5215500000001@c.us', type: 'text', body: 'hola' }
 
@@ -74,5 +76,84 @@ describe('the event call type', () => {
 
   it('accepts an event without it', () => {
     expect(() => SendMessageBody.parse(event)).not.toThrow()
+  })
+})
+
+// H-LIVE-09: a voice note is `audio/ogg; codecs=opus`, a type with parameters
+describe('the type of an inline media source', () => {
+  const media = (mimetype: unknown): unknown =>
+    SendMessageBody.safeParse({
+      to: text.to,
+      type: 'media',
+      source: { base64: 'QUJD', mimetype }
+    })
+  const typeOf = (mimetype: string): string => {
+    const parsed = SendMessageBody.parse({
+      to: text.to,
+      type: 'media',
+      source: { base64: 'QUJD', mimetype }
+    }) as { source: { mimetype: string } }
+    return parsed.source.mimetype
+  }
+
+  it('accepts a type with parameters and keeps only a safe form of it', () => {
+    expect(typeOf('audio/ogg; codecs=opus')).toBe('audio/ogg; codecs=opus')
+    expect(typeOf('Image/PNG')).toBe('image/png')
+    expect(typeOf('image/jpeg; charset=utf-8')).toBe('image/jpeg')
+    expect(typeOf('application/pdf;x="a;b"')).toBe('application/pdf')
+  })
+
+  it.each([
+    '',
+    'nonsense',
+    'image/',
+    'image png',
+    'image/png\r\nSet-Cookie: a=b',
+    'image/png\n',
+    'image/png;',
+    'audio/ogg;;',
+    'image/png; x',
+    'image/png; x="y',
+    `image/${'a'.repeat(130)}`
+  ])('still refuses %j', mimetype => {
+    expect((media(mimetype) as { success: boolean }).success).toBe(false)
+  })
+
+  it('refuses a type that is not a string', () => {
+    expect((media(7) as { success: boolean }).success).toBe(false)
+  })
+
+  it('keeps the schema of the field a string with its length, for the OpenAPI document', () => {
+    const schema = z.toJSONSchema(MediaSource, { unrepresentable: 'any' }) as {
+      anyOf: { properties: Record<string, unknown> }[]
+    }
+
+    expect(schema.anyOf[0]?.properties['mimetype']).toEqual({ type: 'string', maxLength: 127 })
+  })
+
+  it('accepts 127 characters and refuses 128', () => {
+    const type = (length: number): string => `image/${'a'.repeat(length - 'image/'.length)}`
+
+    expect((media(type(127)) as { success: boolean }).success).toBe(true)
+    expect((media(type(128)) as { success: boolean }).success).toBe(false)
+  })
+
+  it('does not give the codec of a voice note to another type', () => {
+    expect(typeOf('audio/mpeg; codecs=opus')).toBe('audio/mpeg')
+    expect(typeOf('audio/ogg; codecs=vorbis')).toBe('audio/ogg')
+  })
+
+  it('answers a refusal with the path and the message of the field', () => {
+    const result = SendMessageBody.safeParse({
+      to: text.to,
+      type: 'media',
+      source: { base64: 'QUJD', mimetype: 'image/png\r\nx: y' }
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0]).toMatchObject({
+      message: 'Not a media type such as image/png'
+    })
+    expect(result.error?.issues[0]?.path.join('.')).toContain('mimetype')
   })
 })
