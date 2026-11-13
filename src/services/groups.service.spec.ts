@@ -1,10 +1,5 @@
 import { TEST_ENV } from '../../tests/helpers/env.js'
-import {
-  NotFoundError,
-  UnsupportedOperationError,
-  ValidationError,
-  WhatsAppError
-} from '../common/errors.js'
+import { NotFoundError, ForbiddenError, ValidationError, WhatsAppError } from '../common/errors.js'
 import { parseEnv } from '../config/env.schema.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
 import type { WhatsAppClientPort } from '../whatsapp/whatsapp-client.port.js'
@@ -16,7 +11,7 @@ const ok = (value: unknown = undefined) => jest.fn(() => Promise.resolve(value))
 
 // The participant changes are off by default; the specs that use them turn them on
 const config = (env: Record<string, string> = {}) =>
-  parseEnv({ ...TEST_ENV, ENABLE_ADD_PARTICIPANTS: 'true', ...env })
+  parseEnv({ ...TEST_ENV, ENABLE_GROUP_WRITES: 'true', ...env })
 
 const build = (
   client: Partial<Record<keyof WhatsAppClientPort, jest.Mock>>,
@@ -133,62 +128,102 @@ describe('GroupsService create and participants', () => {
   })
 })
 
-describe('GroupsService adding participants while it is off', () => {
-  const calls = [
+describe('GroupsService group writes while they are off', () => {
+  const OFF = { ENABLE_GROUP_WRITES: 'false' }
+  const everyCall = [
+    'createGroup',
+    'acceptInvite',
     'addParticipants',
     'removeParticipants',
     'promoteParticipants',
-    'demoteParticipants'
+    'demoteParticipants',
+    'revokeGroupInvite'
   ] as const
+  const writes: [string, (service: GroupsService) => Promise<unknown>][] = [
+    ['create', s => s.create('s', { subject: 'G', participants: ['a@c.us'] })],
+    ['join', s => s.join('s', 'CODE')],
+    [
+      'participants add',
+      s => s.participants('s', 'g@g.us', { action: 'add', participants: ['a@c.us'] })
+    ],
+    [
+      'participants remove',
+      s => s.participants('s', 'g@g.us', { action: 'remove', participants: ['a@c.us'] })
+    ],
+    [
+      'participants promote',
+      s => s.participants('s', 'g@g.us', { action: 'promote', participants: ['a@c.us'] })
+    ],
+    [
+      'participants demote',
+      s => s.participants('s', 'g@g.us', { action: 'demote', participants: ['a@c.us'] })
+    ],
+    ['revokeInvite', s => s.revokeInvite('s', 'g@g.us')]
+  ]
 
-  it('refuses an add with UNSUPPORTED_OPERATION and never touches the client', async () => {
-    const stubs = Object.fromEntries(calls.map(name => [name, ok({ status: 200 })]))
-    const { service, requireReady } = build(stubs, jest.fn(), {
-      ENABLE_ADD_PARTICIPANTS: 'false'
-    })
+  it.each(writes)(
+    'refuses %s with OPERATION_DISABLED and never touches the client',
+    async (_name, run) => {
+      const stubs = Object.fromEntries(everyCall.map(name => [name, ok({ status: 200 })]))
+      const { service, requireReady } = build(stubs, jest.fn(), OFF)
 
-    const refusal = service.participants('s', 'g@g.us', {
-      action: 'add',
-      participants: ['a@c.us']
-    })
+      const refusal = run(service)
 
-    await expect(refusal).rejects.toBeInstanceOf(UnsupportedOperationError)
-    await expect(refusal).rejects.toMatchObject({
-      code: 'UNSUPPORTED_OPERATION',
-      status: 501,
-      message: expect.stringContaining('ENABLE_ADD_PARTICIPANTS=true') as unknown
-    })
-    expect(requireReady).not.toHaveBeenCalled()
-    for (const name of calls) expect(stubs[name]).not.toHaveBeenCalled()
-  })
+      await expect(refusal).rejects.toBeInstanceOf(ForbiddenError)
+      await expect(refusal).rejects.toMatchObject({
+        code: 'OPERATION_DISABLED',
+        status: 403,
+        message: expect.stringContaining('ENABLE_GROUP_WRITES=true') as unknown
+      })
+      expect(requireReady).not.toHaveBeenCalled()
+      for (const name of everyCall) expect(stubs[name]).not.toHaveBeenCalled()
+    }
+  )
 
-  it.each([
-    ['remove', 'removeParticipants'],
-    ['promote', 'promoteParticipants'],
-    ['demote', 'demoteParticipants']
-  ] as const)('%s still goes through with the flag off', async (action, call) => {
-    const stub = ok({ status: 200 })
-    const { service } = build({ [call]: stub }, jest.fn(), { ENABLE_ADD_PARTICIPANTS: 'false' })
+  it.each(writes)('lets %s through when the writes are on', async (_name, run) => {
+    const stubs = Object.fromEntries(
+      everyCall.map(name => [
+        name,
+        ok(
+          name === 'createGroup'
+            ? { title: 'G', gid: 'g', participants: {} }
+            : name === 'addParticipants'
+              ? {}
+              : { status: 200 }
+        )
+      ])
+    )
+    const { service } = build(stubs, jest.fn(), { ENABLE_GROUP_WRITES: 'true' })
 
-    await expect(
-      service.participants('s', 'g@g.us', { action, participants: ['a@c.us'] })
-    ).resolves.toEqual({ status: 200 })
-    expect(stub).toHaveBeenCalledWith('g@g.us', ['a@c.us'])
+    await expect(run(service)).resolves.not.toThrow()
   })
 
   it('is off when the variable is not set at all', () => {
     const env = { ...TEST_ENV }
-    delete (env as Record<string, string | undefined>)['ENABLE_ADD_PARTICIPANTS']
-    expect(parseEnv(env).ENABLE_ADD_PARTICIPANTS).toBe(false)
+    delete (env as Record<string, string | undefined>)['ENABLE_GROUP_WRITES']
+    expect(parseEnv(env).ENABLE_GROUP_WRITES).toBe(false)
   })
 
-  it('still creates a group with its first participants', async () => {
-    const createGroup = ok({ title: 'G', gid: 'g@g.us', participants: {} })
-    const { service } = build({ createGroup }, jest.fn(), { ENABLE_ADD_PARTICIPANTS: 'false' })
+  it('keeps the reads, the changes of a group and leaving, which are not switched off', async () => {
+    const client = {
+      getChats: ok([group]),
+      getChatById: ok(group),
+      getGroupInviteCode: ok('CODE'),
+      getGroupMembershipRequests: ok([]),
+      getInviteInfo: ok({}),
+      setGroupSubject: ok(true),
+      setGroupDescription: ok(true),
+      leaveGroup: ok(undefined)
+    }
+    const { service } = build(client, jest.fn(), OFF)
 
-    await service.create('s', { subject: 'G', participants: ['a@c.us'] })
-
-    expect(createGroup).toHaveBeenCalledTimes(1)
+    await expect(service.list('s')).resolves.toHaveLength(1)
+    await expect(service.get('s', 'g@g.us')).resolves.toBeDefined()
+    await expect(service.inviteCode('s', 'g@g.us')).resolves.toBe('CODE')
+    await expect(service.membershipRequests('s', 'g@g.us')).resolves.toEqual([])
+    await expect(service.inviteInfo('s', 'CODE')).resolves.toEqual({})
+    await expect(service.update('s', 'g@g.us', { subject: 'New' })).resolves.not.toThrow()
+    await expect(service.leave('s', 'g@g.us')).resolves.not.toThrow()
   })
 })
 

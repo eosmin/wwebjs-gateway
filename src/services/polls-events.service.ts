@@ -1,9 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common'
 
 import { NotFoundError, ValidationError, WhatsAppError } from '../common/errors.js'
+import { APP_CONFIG } from '../config/config.module.js'
+import type { AppConfig } from '../config/env.schema.js'
 import type { MessageDto, PollVoteDto } from '../types/dto.js'
 import type { EditEventBody } from '../types/polls-events.dto.js'
 import { SessionManager } from '../whatsapp/session-manager.service.js'
+
+import { assertGroupWritesEnabled } from './group-writes.js'
 
 // The enum of wwebjs names a scheduled event `scheduled_event_creation`, and its own sender writes
 // `event_creation`; either can be what a stored event carries
@@ -13,7 +17,10 @@ const EVENT_TYPES = ['scheduled_event_creation', 'event_creation'] as const
 // the session's client on a message that already exists.
 @Injectable()
 export class PollsEventsService {
-  constructor(@Inject(SessionManager) private readonly sessions: SessionManager) {}
+  constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(SessionManager) private readonly sessions: SessionManager
+  ) {}
 
   async pollVotes(sessionId: string, messageId: string): Promise<PollVoteDto[]> {
     const client = this.sessions.requireReady(sessionId)
@@ -71,6 +78,7 @@ export class PollsEventsService {
   }
 
   async acceptGroupInvite(sessionId: string, messageId: string): Promise<{ status: number }> {
+    assertGroupWritesEnabled(this.config)
     const client = this.sessions.requireReady(sessionId)
     const invite = (await client.getMessageById(messageId))?.inviteV4
     if (invite === undefined) {
