@@ -1425,8 +1425,24 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   getMessageReactions(messageId: string): Promise<ReactionListDto[]> {
     return this.run('getMessageReactions', async () => {
       const message = await this.messageById('getMessageReactions', messageId)
-      const reactions = await message.getReactions()
-      return mapping(() => reactions.map(mapReactionList))
+      // wwebjs answers undefined, not an empty list, for a message nobody reacted to
+      const reactions: unknown = await message.getReactions()
+      if (!Array.isArray(reactions)) return []
+      // An item the mapper cannot read is left out and counted, never logged: one odd reaction must
+      // not turn the whole answer into a failure
+      const mapped: ReactionListDto[] = []
+      let skipped = 0
+      for (const item of reactions as unknown[]) {
+        try {
+          mapped.push(mapReactionList(item as Parameters<typeof mapReactionList>[0]))
+        } catch {
+          skipped += 1
+        }
+      }
+      if (skipped > 0) {
+        this.logger.warn(`getMessageReactions left out ${skipped} item(s) it could not map`)
+      }
+      return mapped
     })
   }
 
