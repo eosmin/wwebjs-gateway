@@ -5,6 +5,7 @@ import type { SessionManager } from '../whatsapp/session-manager.service.js'
 
 import type { AuthService } from './auth.service.js'
 import { SessionsService, toSessionDto } from './sessions.service.js'
+import type { WebhookService } from './webhook.service.js'
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
@@ -69,10 +70,12 @@ describe('SessionsService', () => {
     requireLinking: jest.fn()
   }
   const auth = { invalidateSession: jest.fn() }
+  const webhooks = { invalidate: jest.fn() }
   const service = new SessionsService(
     repository as unknown as SessionsRepository, // reason: only the methods above are called
     manager as unknown as SessionManager, // reason: only the methods above are called
-    auth as unknown as AuthService // reason: same
+    auth as unknown as AuthService, // reason: same
+    webhooks as unknown as WebhookService // reason: same
   )
 
   beforeEach(() => {
@@ -220,6 +223,17 @@ describe('SessionsService', () => {
       manager.remove.mockRejectedValueOnce(new Error('a listener failed'))
       await expect(service.remove('main')).rejects.toThrow('a listener failed')
       expect(auth.invalidateSession).toHaveBeenCalledWith('main')
+    })
+
+    it('drops the cached webhooks of the session once it is deleted, even when the deletion fails after the rows went', async () => {
+      manager.remove.mockResolvedValueOnce(undefined)
+      await service.remove('main')
+      expect(webhooks.invalidate).toHaveBeenCalledTimes(1)
+
+      webhooks.invalidate.mockClear()
+      manager.remove.mockRejectedValueOnce(new Error('a listener failed'))
+      await expect(service.remove('main')).rejects.toThrow('a listener failed')
+      expect(webhooks.invalidate).toHaveBeenCalledTimes(1)
     })
   })
 

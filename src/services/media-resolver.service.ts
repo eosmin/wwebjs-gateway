@@ -73,9 +73,11 @@ export class MediaResolverService {
     const file = await this.downloads.run(
       () =>
         downloadPublicFile(source.url, {
+          // Its own policy: the URL is the caller's and the answer goes to a chat, so the hosts that
+          // webhooks may reach (and the development switch for them) are not open to it
           policy: {
-            privateHostAllowlist: this.config.WEBHOOK_PRIVATE_HOST_ALLOWLIST,
-            allowPrivate: this.config.ALLOW_PRIVATE_WEBHOOK_TARGETS
+            privateHostAllowlist: this.config.MEDIA_PRIVATE_HOST_ALLOWLIST,
+            allowPrivate: false
           },
           maxBytes: this.config.MAX_MEDIA_BYTES,
           timeoutMs: this.config.MEDIA_FETCH_TIMEOUT_MS

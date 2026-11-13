@@ -18,11 +18,14 @@ import { REDACTED_EVENTS } from './webhook-payload.js'
 export const DELIVERY_QUEUE_NAME = 'webhook-deliveries'
 export const DELIVER_JOB_NAME = 'deliver'
 
+const EVENT_NAME = /^[a-z][a-z0-9_]{0,63}$/
+
 // The event as it is POSTed. The job carries all of it (Redis persists it); the copy in the
 // database is the redacted one a manual retry starts from.
 export const DeliveryEnvelope = z.object({
   id: z.string(),
-  event: z.string(),
+  // Goes out in the X-Gateway-Event header: a name, never free text
+  event: z.string().regex(EVENT_NAME),
   sessionId: z.string(),
   seq: z.number().int(),
   timestamp: z.string(),

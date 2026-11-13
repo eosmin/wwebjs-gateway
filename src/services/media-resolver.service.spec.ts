@@ -10,15 +10,17 @@ const config = {
   MAX_MEDIA_BYTES: 12,
   MEDIA_FETCH_CONCURRENCY: 2,
   MEDIA_FETCH_TIMEOUT_MS: 5000,
-  WEBHOOK_PRIVATE_HOST_ALLOWLIST: ['media.internal'],
-  ALLOW_PRIVATE_WEBHOOK_TARGETS: false
+  // The webhook receivers the operator reached on purpose: not a place a send may fetch media from
+  WEBHOOK_PRIVATE_HOST_ALLOWLIST: ['10.1.2.3', 'media.internal'],
+  ALLOW_PRIVATE_WEBHOOK_TARGETS: true,
+  MEDIA_PRIVATE_HOST_ALLOWLIST: []
 } as unknown as AppConfig
 
-function build(downloadMedia = jest.fn()) {
+function build(downloadMedia = jest.fn(), settings: Partial<AppConfig> = {}) {
   const sessions = {
     requireReady: () => ({ downloadMedia }) as unknown as WhatsAppClientPort
   } as unknown as SessionManager
-  return new MediaResolverService(config, sessions)
+  return new MediaResolverService({ ...config, ...settings }, sessions)
 }
 
 describe('MediaResolverService', () => {
@@ -61,6 +63,32 @@ describe('MediaResolverService', () => {
     ).rejects.toBeInstanceOf(ValidationError)
   })
 
+  it('refuses a media URL on a host that is allowed for webhooks, even when private targets are allowed', async () => {
+    await expect(
+      build().resolve('s', { url: 'http://10.1.2.3/internal-report' })
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(build().resolve('s', { url: 'http://127.0.0.1/x' })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR'
+    })
+  })
+
+  it('reaches a private host only when the operator listed it for media, and never opens the dev switch', async () => {
+    const spy = jest
+      .spyOn(download, 'downloadPublicFile')
+      .mockResolvedValue({ data: Buffer.from('hello'), contentType: 'image/png' })
+
+    await build(jest.fn(), { MEDIA_PRIVATE_HOST_ALLOWLIST: ['10.2.0.0/16'] }).resolve('s', {
+      url: 'http://10.2.0.5/a.png'
+    })
+
+    expect(spy).toHaveBeenCalledWith(
+      'http://10.2.0.5/a.png',
+      expect.objectContaining({
+        policy: { privateHostAllowlist: ['10.2.0.0/16'], allowPrivate: false }
+      })
+    )
+  })
+
   it('downloads a URL with the policy, the cap and the timeout of the configuration', async () => {
     const spy = jest
       .spyOn(download, 'downloadPublicFile')
@@ -72,7 +100,7 @@ describe('MediaResolverService', () => {
     })
 
     expect(spy).toHaveBeenCalledWith('https://cdn.example.com/a', {
-      policy: { privateHostAllowlist: ['media.internal'], allowPrivate: false },
+      policy: { privateHostAllowlist: [], allowPrivate: false },
       maxBytes: 12,
       timeoutMs: 5000
     })
