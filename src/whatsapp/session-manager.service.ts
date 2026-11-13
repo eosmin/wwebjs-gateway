@@ -133,6 +133,8 @@ interface Runtime {
   probeReachedQr: boolean
   reconnectTimer: NodeJS.Timeout | undefined
   unsubscribe: (() => void) | undefined
+  // When the session last became ready; only the log of a disconnect reads it
+  readyAt: number | undefined
 }
 
 // The codes the adapter reports when its browser or page is gone; any other stays one label
@@ -600,6 +602,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     runtime.reconnectTimer = undefined
     runtime.unsubscribe?.()
     runtime.unsubscribe = undefined
+    runtime.readyAt = undefined
     runtime.phaseStartedAt = undefined
     runtime.qr = undefined
     const client = runtime.client
@@ -825,6 +828,11 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
         await this.fail(id, runtime, 'auth failure')
         return
       case 'disconnected':
+        // Before anything is done about it: a LOGOUT forgets the account, and the reason is the
+        // only trace of why. Values that say nothing about the account.
+        this.logger.warn(
+          `[${id}] disconnected (reason=${event.data.reason.slice(0, 64)}, status=${this.statuses.get(id) ?? 'unknown'}, sinceReadyMs=${runtime.readyAt === undefined ? 'none' : Date.now() - runtime.readyAt})`
+        )
         if (event.data.reason === 'LOGOUT') {
           // The login on disk is dead too: a browser started on it never reaches the QR code
           await this.markLoggedOut(id, runtime.client)
@@ -864,6 +872,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
     runtime.qr = undefined
     runtime.phaseStartedAt = undefined
     runtime.reconnectAttempts = 0
+    runtime.readyAt = Date.now()
     this.signOfLife(runtime)
     const patch: SessionPatch = { lastConnectedAt: new Date(), lastError: null }
     try {
@@ -996,7 +1005,8 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       authStalls: 0,
       probeReachedQr: false,
       reconnectTimer: undefined,
-      unsubscribe: undefined
+      unsubscribe: undefined,
+      readyAt: undefined
     }
     this.runtimes.set(id, runtime)
     return runtime

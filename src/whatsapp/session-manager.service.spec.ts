@@ -508,6 +508,62 @@ describe('SessionManager status machine', () => {
     expect(built.manager.status(ID)).toBe('created')
   })
 
+  it('logs every disconnect before it acts: reason, status, time since ready, and no account data', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW, phoneNumber: PHONE })
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const client = await startSession(built)
+    await makeReady(built, client)
+    await jest.advanceTimersByTimeAsync(1500)
+
+    client.emit({ event: 'disconnected', data: { reason: 'LOGOUT' } })
+    await flush()
+
+    const lines = warn.mock.calls.map((call: unknown[]) => String(call[0]))
+    const line = lines.find(text => text.includes('reason=LOGOUT'))
+    expect(line).toMatch(/status=ready/)
+    expect(line).toMatch(/sinceReadyMs=1[0-9]{3}\b/)
+    expect(lines.join('\n')).not.toContain(PHONE)
+    // The flow is the one it always was: forgotten, no retry
+    expect(built.manager.status(ID)).toBe('created')
+  })
+
+  it('logs the reason of a disconnect that is not a logout too', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const client = await startSession(built)
+    await makeReady(built, client)
+
+    client.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
+    await flush()
+
+    expect(warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n')).toContain(
+      'reason=NAVIGATION'
+    )
+  })
+
+  it('does not count the time since an earlier run became ready', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, linkedAt: NOW })
+    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const first = await startSession(built)
+    await makeReady(built, first)
+    first.emit({ event: 'disconnected', data: { reason: 'NAVIGATION' } })
+    await flush()
+    await untilNextClient(built, 1)
+    const second = built.factory.clients[1]
+    warn.mockClear()
+
+    second?.emit({ event: 'disconnected', data: { reason: 'CONFLICT' } })
+    await flush()
+
+    const line = warn.mock.calls
+      .map((call: unknown[]) => String(call[0]))
+      .find(text => text.includes('reason=CONFLICT'))
+    expect(line).toContain('sinceReadyMs=none')
+  })
+
   it('deletes the saved login on a logout asked through the API', async () => {
     const built = build()
     built.sessions.seed({ id: ID, linkedAt: NOW, phoneNumber: PHONE })

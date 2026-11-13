@@ -729,6 +729,23 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     }
   }
 
+  // What wwebjs saw when it reported the logout: its flag (set by an event of the page and left set
+  // when no navigation follows) and whether the frame went to the logout address. Two booleans: no
+  // address and no account data. It only looks; the logout goes on as it always did.
+  private logLogout(): void {
+    try {
+      const flagStale = (this.client as { lastLoggedOut?: unknown }).lastLoggedOut === true
+      const postLogoutUrl = this.client.pupPage?.url().includes('post_logout=1') === true
+      this.logger.warn(
+        `WhatsApp Web reported a LOGOUT (flagStale=${flagStale}, postLogoutUrl=${postLogoutUrl})`
+      )
+    } catch (error: unknown) {
+      this.logger.warn(
+        `WhatsApp Web reported a LOGOUT (reading the page failed: ${errorKind(error)})`
+      )
+    }
+  }
+
   private wireEvents(): void {
     const client = this.client
     const forward = (name: string, produce: () => ClientEvent | undefined): void => {
@@ -766,6 +783,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       }))
     })
     client.on('disconnected', reason => {
+      if (reason === 'LOGOUT') this.logLogout()
       this.ready = false
       this.ended = true
       forward('disconnected', () => ({ event: 'disconnected', data: { reason: String(reason) } }))
