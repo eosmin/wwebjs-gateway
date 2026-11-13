@@ -16,7 +16,9 @@ Redis and BullMQ, in strict TypeScript.
 - **It is unofficial.** `whatsapp-web.js` automates WhatsApp Web. Automating an account can
   violate WhatsApp's Terms of Service and can get a number banned. The intended use is
   legitimate, consent-based conversations and chatbots: no spam, no mass messaging. You use it at
-  your own risk.
+  your own risk. For anything critical (notifications, billing, authentication codes), use the
+  official route, the WhatsApp Business Platform (Cloud API), and keep this gateway for the
+  conversational part; see [`docs/operations.md`](docs/operations.md).
 - **The production instance is private.** There is no live demo, no public API documentation and
   no screenshots, on purpose. This repository only holds the code.
 - **Run exactly one replica.** A session's Chromium process belongs to a single Node process, so

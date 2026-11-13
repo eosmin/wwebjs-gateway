@@ -121,6 +121,8 @@ A live pass can cost the account. A test account was restricted by WhatsApp for 
 
 ## WhatsApp Web builds, reloads and the reason of a logout
 
+The steps to follow when a build breaks something, and how to pin one, are in [`operations.md`](operations.md).
+
 WhatsApp Web is not a fixed program: it ships a new build every few hours (three on one day in November 2026: 2.3000.1054445547, 2.3000.1054456698 and 2.3000.1054477537) and the page can reload itself to take one. The library calls functions inside the page by name, and a build can rename them, change their arguments or drop them, so a gateway that follows the live build may break between two restarts without any change on our side (H-LIVE-01, H-LIVE-02, F23).
 
 - **What is known.** Build `2.3000.1054292354` was checked with a real account in the first pass of F9b: media, groups, restarts and relogin worked. On builds `2.3000.1054445547` and `2.3000.1054477537` a session was seen to be logged out by WhatsApp Web shortly after a `participants add`; the cause is **not** proven (it can be the call, the account, or a reload of the page for a new build), and the call is to be kept off by default until it is checked again (`ENABLE_ADD_PARTICIPANTS`, default `false`: `add` answers `501 UNSUPPORTED_OPERATION`).
