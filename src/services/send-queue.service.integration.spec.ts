@@ -257,6 +257,25 @@ describe('send queue (integration)', () => {
       expect(sentBodies()).toEqual(['frio 1', 'frio 2', 'frio 3'])
     })
 
+    it('puts the later messages of the cold chat aside until the held one is due, not once a second', async () => {
+      const service = await boot()
+      holdFirstColdSend(OTHER_CHAT, 3000, 'cold_send_gap')
+      const aside = jest.spyOn(Job.prototype, 'moveToDelayed')
+      const startedAt = Date.now()
+
+      await service.submit(text('frio 1', { chatId: OTHER_CHAT }))
+      await service.submit(text('frio 2', { chatId: OTHER_CHAT }))
+      await service.submit(text('frio 3', { chatId: OTHER_CHAT }))
+      await until(() => aside.mock.calls.length >= 3)
+
+      // Every put-aside is due about when the held job is (3 s), none a second ahead as before
+      for (const [dueAt] of aside.mock.calls) expect(dueAt - startedAt).toBeGreaterThan(2000)
+      expect(sentBodies()).toEqual([])
+      await until(() => sentBodies().length === 3, 8000)
+      expect(sentBodies()).toEqual(['frio 1', 'frio 2', 'frio 3'])
+      aside.mockRestore()
+    }, 15_000)
+
     it('still blocks the lane for a delay of the whole session, which every send shares', async () => {
       const service = await boot()
       holdFirstColdSend(CHAT, 400, 'session_per_minute')
@@ -578,16 +597,88 @@ describe('send queue (integration)', () => {
   })
 
   describe('a job the queue itself fails', () => {
-    it('is still announced as failed when putting it aside breaks during the shutdown', async () => {
+    it('puts a job that never started aside again when Redis fails once during the shutdown, and sends it after', async () => {
+      const first = await boot()
+      ready = false
+      await first.submit(text('atrapado'))
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const blip = jest
+        .spyOn(Job.prototype, 'moveToDelayed')
+        .mockRejectedValueOnce(new Error('redis blip'))
+      try {
+        await shutdown(first)
+      } finally {
+        blip.mockRestore()
+      }
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+
+      ready = true
+      await boot()
+      await until(() => sentBodies().includes('atrapado'))
+      expect(sentBodies()).toEqual(['atrapado'])
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+    })
+
+    it('stays put aside once, and is sent once, when the move to the delayed set took effect but its answer was lost', async () => {
+      const first = await boot()
+      ready = false
+      await first.submit(text('atrapado'))
+      await new Promise(resolve => setTimeout(resolve, 200))
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the job as `this` below
+      const realMove = Job.prototype.moveToDelayed
+      const lost = jest
+        .spyOn(Job.prototype, 'moveToDelayed')
+        .mockImplementationOnce(async function (
+          this: Job,
+          ...args: Parameters<Job['moveToDelayed']>
+        ) {
+          await realMove.apply(this, args)
+          throw new Error('answer lost')
+        })
+      try {
+        await shutdown(first)
+      } finally {
+        lost.mockRestore()
+      }
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+
+      ready = true
+      await boot()
+      await until(() => sentBodies().includes('atrapado'))
+      expect(sentBodies()).toEqual(['atrapado'])
+    })
+
+    it('keeps a cold send held by the policy when Redis fails once while it leaves the lane', async () => {
+      const service = await boot()
+      let held = false
+      policy.admit.mockImplementation(() => {
+        if (held) return Promise.resolve(ALLOW)
+        held = true
+        return Promise.resolve({ decision: 'delay', delayMs: 300, rule: 'quiet_hours' })
+      })
+      const blip = jest
+        .spyOn(Job.prototype, 'moveToDelayed')
+        .mockRejectedValueOnce(new Error('redis blip'))
+
+      await service.submit(text('frio'))
+      await until(() => sentBodies().includes('frio'))
+
+      blip.mockRestore()
+      expect(published.some(item => item.event === 'message_failed')).toBe(false)
+    })
+
+    it('is still announced as failed when putting it aside keeps failing during the shutdown', async () => {
       const first = await boot()
       ready = false
       const { jobId } = await first.submit(text('atrapado', { idempotencyKey: 'k7' }))
       await new Promise(resolve => setTimeout(resolve, 200))
       const broken = jest
         .spyOn(Job.prototype, 'moveToDelayed')
-        .mockRejectedValueOnce(new Error('redis blip'))
+        .mockRejectedValue(new Error('redis blip'))
       try {
         await shutdown(first)
+        // Tried a few times before it gave up
+        expect(broken.mock.calls.length).toBeGreaterThan(1)
       } finally {
         broken.mockRestore()
       }
@@ -991,6 +1082,28 @@ describe('send queue (integration)', () => {
 
       expect(refused).toMatchObject({ details: { queued: 'unknown' } })
       await until(async () => (await depthOf(sessionId)) === 0, 3000)
+    })
+
+    it('answers a send that is already queued even when the depth count after the add never returns', async () => {
+      const service = await boot()
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the queue as `this` below
+      const realCounts = Queue.prototype.getJobCounts
+      // The first call is the room check before the add; the one after the add hangs
+      jest
+        .spyOn(Queue.prototype, 'getJobCounts')
+        .mockImplementationOnce(function (this: Queue, ...args: Parameters<Queue['getJobCounts']>) {
+          return realCounts.apply(this, args)
+        })
+        .mockImplementation(() => new Promise(() => undefined))
+
+      const answered = await Promise.race([
+        service.submit(text('x'), { waitMs: 3000 }),
+        new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 1500))
+      ])
+
+      expect(answered).not.toBe('hung')
+      expect(answered).toMatchObject({ outcome: { ok: true } })
+      expect(sentBodies()).toEqual(['x'])
     })
 
     it('answers 503 not queued, and gives the place back, when Redis fails while the room is counted', async () => {

@@ -127,8 +127,10 @@ export class SendJobProcessor {
       if (!(await abortableSleep(ms, signal))) throw new SendJobYield(waited())
     }
 
+    // When the client of the session first failed before the dispatch, so the retries have a budget of their own
+    let troubleSince: number | undefined
     for (;;) {
-      const client = await this.awaitReady(data, pause)
+      const client = await this.awaitReady(pause)
       if ('outcome' in client) return client
       const rejected = await this.awaitPolicy(data, waited, pause)
       if (rejected) return rejected
@@ -146,7 +148,8 @@ export class SendJobProcessor {
         if (!marked && !(error instanceof AppError)) throw error
         if (marked ? isBeforeDispatch(error) : isSessionTrouble(error)) {
           await hooks.clearDispatched()
-          if (this.outOfTime(data)) return failure(toErrorBody(error))
+          troubleSince ??= Date.now()
+          if (this.outOfTime(troubleSince)) return failure(toErrorBody(error))
           // No hammering of a client that keeps failing
           await pause(this.deps.config.SEND_NOT_READY_RETRY_MS)
           continue
@@ -160,23 +163,27 @@ export class SendJobProcessor {
 
   // Resolves with the client, or with the failure when the session did not come back in time
   private async awaitReady(
-    data: SendJobData,
     pause: (ms: number) => Promise<void>
   ): Promise<WhatsAppClientPort | SendJobResult> {
+    let notReadySince: number | undefined
     for (;;) {
       try {
         return this.deps.requireReady(this.sessionId)
       } catch (error: unknown) {
         if (!isNotReady(error)) return failure(toErrorBody(error))
-        if (this.outOfTime(data)) return failure(toErrorBody(error))
+        // The wait counts from the moment the session was found not ready, not from the moment the job was
+        // queued: a job that was held for hours by a cold-send rule, or that waited out a restart, would
+        // otherwise be failed the instant the session blinks
+        notReadySince ??= Date.now()
+        if (this.outOfTime(notReadySince)) return failure(toErrorBody(error))
         await pause(this.deps.config.SEND_NOT_READY_RETRY_MS)
       }
     }
   }
 
-  // The time a job waits for a session that is not ready counts from the moment it was queued
-  private outOfTime(data: SendJobData): boolean {
-    return Date.now() - data.enqueuedAt >= this.deps.config.SEND_MAX_WAIT_MS
+  // SEND_MAX_WAIT_MS is the time a job waits for a session that is not ready, counted from `since`
+  private outOfTime(since: number): boolean {
+    return Date.now() - since >= this.deps.config.SEND_MAX_WAIT_MS
   }
 
   // A delay is waited out here and not by moving the job to the delayed set: a delayed job loses its

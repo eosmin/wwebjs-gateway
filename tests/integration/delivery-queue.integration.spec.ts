@@ -62,7 +62,11 @@ describe('DeliveryQueueService.jobStates (integration)', () => {
     monitor = new Redis(REDIS_URL)
     queue = new Queue(DELIVERY_QUEUE_NAME, { connection: redis })
     service = new DeliveryQueueService(
-      { WEBHOOK_MAX_ATTEMPTS: 1, WEBHOOK_BACKOFF_MS: 10 } as AppConfig,
+      {
+        WEBHOOK_MAX_ATTEMPTS: 1,
+        WEBHOOK_BACKOFF_MS: 10,
+        SEND_ENQUEUE_TIMEOUT_MS: 5000
+      } as AppConfig,
       { client: redis } as unknown as RedisService
     )
     // Nothing runs the jobs but this suite

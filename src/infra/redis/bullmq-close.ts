@@ -22,16 +22,17 @@ function isDown(client: { status?: string }): boolean {
 
 // Waits for the job in hand to finish; one that is stuck falls back to the forced close. With Redis
 // down there is nothing to finish gracefully, so it goes straight to the forced close. Both bounded.
+// The graceful wait is `pause()`, not `close()`: BullMQ answers every later `close()` with the promise of
+// the first one, so a `close(true)` after a `close()` that hangs would not force anything.
 export async function closeWorker(
-  worker: Pick<Worker, 'close'>,
+  worker: Pick<Worker, 'pause' | 'close'>,
   client: { status?: string },
   gracefulMs: number,
   label: string
 ): Promise<void> {
   if (!isDown(client)) {
     try {
-      await withTimeout(worker.close(), gracefulMs, label)
-      return
+      await withTimeout(worker.pause(), gracefulMs, label)
     } catch {
       // stuck: forced below
     }
