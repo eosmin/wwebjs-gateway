@@ -2,6 +2,7 @@ import { Prisma } from '../generated/prisma/client.js'
 
 import {
   isForeignKeyViolation,
+  isRetrySafeDbError,
   isRecordNotFound,
   isSerializationFailure,
   isTransientDbError,
@@ -114,6 +115,109 @@ describe('db-errors', () => {
     it('does not take any other error for transient', () => {
       expect(isTransientDbError(new Error('P1001'))).toBe(false)
       expect(isTransientDbError(undefined)).toBe(false)
+    })
+  })
+
+  // A write that is not idempotent (a counter) may be run again only when the first run certainly did
+  // not take effect: a connection that dropped while the statement or its COMMIT was in flight is an
+  // unknown outcome and is not on this list
+  describe('isRetrySafeDbError', () => {
+    const rawError = (meta: Record<string, unknown>): Prisma.PrismaClientKnownRequestError =>
+      new Prisma.PrismaClientKnownRequestError('boom', {
+        code: 'P2010',
+        clientVersion: 'test',
+        meta
+      })
+
+    it.each(['P2024', 'P2034', 'P2037'])(
+      'takes %s, where the statement did not run or was rolled back',
+      code => {
+        expect(isRetrySafeDbError(knownError(code))).toBe(true)
+      }
+    )
+
+    it('takes a connection that could not be opened', () => {
+      expect(
+        isRetrySafeDbError(new Prisma.PrismaClientInitializationError('down', 'test', 'P1001'))
+      ).toBe(true)
+    })
+
+    it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2028'])(
+      'does not take %s: the statement may have been committed',
+      code => {
+        expect(isRetrySafeDbError(knownError(code))).toBe(false)
+      }
+    )
+
+    it.each(['08001', '40001', '40P01', '53300', '55P03', '57P03'])(
+      'takes the Postgres code %s',
+      code => {
+        expect(isRetrySafeDbError(rawError({ code }))).toBe(true)
+        expect(
+          isRetrySafeDbError(rawError({ driverAdapterError: { cause: { originalCode: code } } }))
+        ).toBe(true)
+      }
+    )
+
+    it.each(['08000', '08003', '08006', '08007', '57P01', '57P02'])(
+      'does not take the Postgres code %s: the connection was lost and the outcome is unknown',
+      code => {
+        expect(isRetrySafeDbError(rawError({ code }))).toBe(false)
+        expect(
+          isRetrySafeDbError(rawError({ driverAdapterError: { cause: { originalCode: code } } }))
+        ).toBe(false)
+      }
+    )
+
+    it.each(['ECONNREFUSED', 'EAI_AGAIN'])('takes the socket error %s (never connected)', code => {
+      expect(isRetrySafeDbError(Object.assign(new Error('boom'), { code }))).toBe(true)
+    })
+
+    it.each(['ECONNRESET', 'ETIMEDOUT', 'EPIPE'])(
+      'does not take the socket error %s (it can drop after the COMMIT)',
+      code => {
+        expect(isRetrySafeDbError(Object.assign(new Error('boom'), { code }))).toBe(false)
+      }
+    )
+
+    it('does not take what would fail again, or anything that is not an error of the database', () => {
+      expect(isRetrySafeDbError(knownError('P2002'))).toBe(false)
+      expect(isRetrySafeDbError(new Error('P1001'))).toBe(false)
+      expect(isRetrySafeDbError(undefined)).toBe(false)
+    })
+
+    it('looks through the cause of a wrapped error', () => {
+      const wrapped = new Error('wrapper', {
+        cause: Object.assign(new Error('x'), { code: 'ECONNREFUSED' })
+      })
+      expect(isRetrySafeDbError(wrapped)).toBe(true)
+    })
+
+    it('is never wider than isTransientDbError', () => {
+      const errors = [
+        ...['P1001', 'P1002', 'P2024', 'P2034', 'P2037', 'P2002', 'P1008'].map(knownError),
+        ...['08001', '08006', '40001', '57P01'].map(code => rawError({ code })),
+        ...['ECONNREFUSED', 'ECONNRESET', 'ENOENT'].map(code =>
+          Object.assign(new Error('boom'), { code })
+        )
+      ]
+      for (const error of errors) {
+        expect(!isRetrySafeDbError(error) || isTransientDbError(error)).toBe(true)
+      }
+    })
+
+    it('is unsafe when any code of the chain leaves the outcome open, whatever the order', () => {
+      const refusedOverReset = Object.assign(new Error('outer'), {
+        code: 'ECONNREFUSED',
+        cause: Object.assign(new Error('inner'), { code: '08006' })
+      })
+      const resetOverRefused = Object.assign(new Error('outer'), {
+        code: '08006',
+        cause: Object.assign(new Error('inner'), { code: 'ECONNREFUSED' })
+      })
+
+      expect(isRetrySafeDbError(refusedOverReset)).toBe(false)
+      expect(isRetrySafeDbError(resetOverRefused)).toBe(false)
     })
   })
 

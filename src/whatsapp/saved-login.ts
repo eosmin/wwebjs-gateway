@@ -9,8 +9,12 @@ import { join, resolve, sep } from 'node:path'
 const SESSION_ID = /^[-_\w]{1,64}$/
 export const QUARANTINE_DIR = '.quarantine'
 export const DAY_MS = 86_400_000
-// `session-<id>-<ms since epoch>`; the id may contain hyphens and digits, the stamp is the last part
-const QUARANTINED = /^session-([-_\w]{1,64})-(\d{10,})$/
+// `session-<id>-<ms since epoch>`; the id may contain hyphens and digits, the stamp is the last part.
+// The login of a session that was deleted is `removed-session-<id>-<ms>`: it is kept and purged the same
+// way, but it is not an automatic quarantine of a session that may exist again under that id.
+const QUARANTINED = /^(removed-)?session-([-_\w]{1,64})-(\d{10,})$/
+
+export const isSessionId = (id: string): boolean => SESSION_ID.test(id)
 
 // The folder of this session, or an error: an id that is not valid could leave the data folder
 export function profileDirOf(dataPath: string, id: string): string {
@@ -49,23 +53,32 @@ export const hasSavedLogin = (dataPath: string, id: string): Promise<boolean> =>
 export async function quarantineSavedLogin(
   dataPath: string,
   id: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { removed?: boolean } = {}
 ): Promise<string | undefined> {
   const source = profileDirOf(dataPath, id)
   if (!(await isDirectory(source))) return undefined
   const root = quarantineRoot(dataPath)
   await mkdir(root, { recursive: true, mode: 0o700 })
+  // Looked at before the mode is set: `chmod` follows a link and would change what it points at
+  if (!(await isRealDirectory(root))) throw new Error('quarantine folder is not a folder')
   // An existing folder keeps its mode in `mkdir`, and the umask can narrow a new one: say it
   await chmod(root, 0o700)
-  if (!(await isRealDirectory(root))) throw new Error('quarantine folder is not a folder')
-  const target = join(root, `session-${id}-${now.getTime()}`)
+  const target = join(root, `${options.removed ? 'removed-' : ''}session-${id}-${now.getTime()}`)
   // Never over an earlier quarantine of the same millisecond
   if (await isDirectory(target)) throw new Error('quarantine target exists')
   await rename(source, target)
   return target
 }
 
-async function quarantined(dataPath: string): Promise<{ id: string; at: number; path: string }[]> {
+interface Quarantined {
+  id: string
+  at: number
+  path: string
+  removed: boolean
+}
+
+async function quarantined(dataPath: string): Promise<Quarantined[]> {
   const root = quarantineRoot(dataPath)
   if (!(await isRealDirectory(root))) return []
   let names: string[]
@@ -74,16 +87,22 @@ async function quarantined(dataPath: string): Promise<{ id: string; at: number; 
   } catch {
     return []
   }
-  const found: { id: string; at: number; path: string }[] = []
+  const found: Quarantined[] = []
   for (const name of names) {
     const match = QUARANTINED.exec(name)
-    if (match?.[1] && match[2] && (await isRealDirectory(join(root, name))))
-      found.push({ id: match[1], at: Number(match[2]), path: join(root, name) })
+    if (match?.[2] && match[3] && (await isRealDirectory(join(root, name)))) {
+      found.push({
+        id: match[2],
+        at: Number(match[3]),
+        path: join(root, name),
+        removed: match[1] !== undefined
+      })
+    }
   }
   return found
 }
 
-// Was the login of this session quarantined within the last `windowMs`? Read from the folder names, so
+// Was the login of this session quarantined (by the gateway, not by a deletion) within the last `windowMs`? Read from the folder names, so
 // the answer survives a restart of the gateway.
 export async function wasQuarantinedWithin(
   dataPath: string,
@@ -93,7 +112,7 @@ export async function wasQuarantinedWithin(
 ): Promise<boolean> {
   profileDirOf(dataPath, id)
   return (await quarantined(dataPath)).some(
-    entry => entry.id === id && now.getTime() - entry.at < windowMs
+    entry => !entry.removed && entry.id === id && now.getTime() - entry.at < windowMs
   )
 }
 
@@ -111,4 +130,20 @@ export async function purgeExpiredQuarantine(
     removed++
   }
   return removed
+}
+
+// Puts a login that `quarantineSavedLogin` moved back where LocalAuth keeps it, for a step that failed
+// after the move. Only a folder inside this data folder's quarantine, and never over a login that is
+// there: false then (the login stays in quarantine).
+export async function restoreSavedLogin(
+  dataPath: string,
+  id: string,
+  quarantinedAt: string
+): Promise<boolean> {
+  const source = profileDirOf(dataPath, id)
+  const root = quarantineRoot(dataPath)
+  if (resolve(quarantinedAt, '..') !== root || !(await isRealDirectory(quarantinedAt))) return false
+  if (await isDirectory(source)) return false
+  await rename(quarantinedAt, source)
+  return true
 }

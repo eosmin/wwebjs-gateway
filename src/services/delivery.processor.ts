@@ -11,7 +11,7 @@ import { retry } from '../common/lib/retry.js'
 import type { SsrfPolicy } from '../common/lib/ssrf.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
-import { isTransientDbError } from '../database/db-errors.js'
+import { isRetrySafeDbError } from '../database/db-errors.js'
 import type { Webhook, WebhookDelivery } from '../database/models.js'
 import {
   type DeliveryAttempt,
@@ -267,16 +267,19 @@ export class DeliveryProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Writes the result of an attempt, again after a failure of the database that waiting can cure.
-  // It never throws: the receiver has the event (or the attempt is already counted by the queue), so
-  // a row that cannot be written must not make the job run again.
+  // Writes the result of an attempt, again after a failure of the database that waiting can cure and
+  // that left the write undone (the write adds 1 to `attempts`, so a connection lost with the outcome
+  // unknown is not written again: it could count the attempt twice; a delivery left pending for
+  // that reason is closed by the retention sweep). It never throws: the receiver has the event (or the
+  // attempt is already counted by the queue), so a row that cannot be written must not make the job
+  // run again.
   private async record(deliveryId: string, attempt: DeliveryAttempt): Promise<void> {
     try {
       await retry(() => this.deliveries.recordAttempt(deliveryId, attempt, new Date()), {
         attempts: RECORD_ATTEMPTS,
         baseDelayMs: RECORD_BACKOFF_MS,
         maxDelayMs: RECORD_BACKOFF_MAX_MS,
-        shouldRetry: isTransientDbError
+        shouldRetry: isRetrySafeDbError
       })
     } catch (error: unknown) {
       this.logger.error(
