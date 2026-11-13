@@ -2063,7 +2063,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
 }
 
 // The page answers `{ result: 'rejected', confirmed, diag? }`; `diag` is what the stack and the call
-// collection look like when the call could not be found or confirmed (ids cut short), for the log
+// collection looked like (ids cut short, booleans, keys and types), for the debug log
 function rejectResultOf(answer: unknown): { result: RejectCallResult; diag: unknown } {
   if (typeof answer !== 'object' || answer === null)
     return { result: 'unconfirmed', diag: undefined }

@@ -431,15 +431,26 @@ describe('the patched whatsapp-web.js', () => {
     const SELF = 7
     type Stack = Record<string, unknown>
     type Outcome = { result: string; confirmed?: boolean }
-    type Page = { modules: Record<string, unknown>; listed: Set<string> }
+    type Page = {
+      modules: Record<string, unknown>
+      listed: Set<string>
+      ended: { id: string | null }
+    }
     // `listed` is what the call collection of the page answers to `get`
     const page = (
       stack: Stack | null,
-      calls: { listed?: string[]; active?: string | null; getWorks?: boolean } = {}
+      calls: {
+        listed?: string[]
+        active?: string | null
+        getWorks?: boolean
+        ended?: string | null
+      } = {}
     ): Page => {
       const listed = new Set(calls.listed ?? ['c1'])
+      const ended = { id: calls.ended ?? null }
       return {
         listed,
+        ended,
         modules: {
           WAWebVoipStackInterface: { getVoipStackInterface: () => Promise.resolve(stack) },
           WAWebCallCollection: {
@@ -449,6 +460,9 @@ describe('the patched whatsapp-web.js', () => {
             getModelsArray: (): unknown[] => [...listed].map(id => ({ id, state: 'ringing' })),
             get activeCall(): unknown {
               return calls.active == null ? null : { id: calls.active }
+            },
+            get lastEndedCall(): unknown {
+              return ended.id === null ? null : { id: ended.id }
             }
           },
           WAWebVoipWaCallEnums: { RejectEndReason: { Self: SELF } },
@@ -485,7 +499,7 @@ describe('the patched whatsapp-web.js', () => {
           Promise.resolve(rejectingStack(p, 'rejectCallWithEndReason', withReason))
       }
 
-      await expect(reject(p)).resolves.toEqual({ result: 'rejected', confirmed: true })
+      await expect(reject(p)).resolves.toMatchObject({ result: 'rejected', confirmed: true })
       expect(withReason).toHaveBeenCalledTimes(1)
       expect(withReason).toHaveBeenCalledWith(SELF)
     })
@@ -497,7 +511,7 @@ describe('the patched whatsapp-web.js', () => {
         getVoipStackInterface: () => Promise.resolve(rejectingStack(p, 'rejectCall', plain))
       }
 
-      await expect(reject(p)).resolves.toEqual({ result: 'rejected', confirmed: true })
+      await expect(reject(p)).resolves.toMatchObject({ result: 'rejected', confirmed: true })
       expect(plain).toHaveBeenCalledTimes(1)
     })
 
@@ -517,6 +531,121 @@ describe('the patched whatsapp-web.js', () => {
       }
     })
 
+    // The live check of F30 (2026-11-14): the collection never listed the call, but after the reject
+    // `lastEndedCall` was that call and the phone of the caller stopped at once
+    describe('when the page does not list the call', () => {
+      const unlisted = (ended: string | null): { p: Page; withReason: jest.Mock } => {
+        const withReason = jest.fn()
+        const p = page(null, { listed: [], ended })
+        withReason.mockImplementation(() => {
+          if (ended !== 'c1') p.ended.id = 'c1'
+          return Promise.resolve()
+        })
+        p.modules['WAWebVoipStackInterface'] = {
+          getVoipStackInterface: () =>
+            Promise.resolve({ type: 'web', rejectCallWithEndReason: withReason })
+        }
+        return { p, withReason }
+      }
+
+      it('confirms when the call became the last ended one because of the reject', async () => {
+        const { p, withReason } = unlisted(null)
+
+        await expect(reject(p)).resolves.toMatchObject({ result: 'rejected', confirmed: true })
+        expect(withReason).toHaveBeenCalledTimes(1)
+      })
+
+      it('does not confirm a call that had ended before the reject (the caller hung up first)', async () => {
+        jest.useFakeTimers()
+        try {
+          const { p } = unlisted('c1')
+          const pending = reject(p)
+          await jest.advanceTimersByTimeAsync(5000)
+
+          await expect(pending).resolves.toMatchObject({ result: 'rejected', confirmed: false })
+        } finally {
+          jest.useRealTimers()
+        }
+      })
+
+      it('does not confirm when the last ended call is another one', async () => {
+        jest.useFakeTimers()
+        try {
+          const p = page(null, { listed: [], ended: 'other' })
+          p.modules['WAWebVoipStackInterface'] = {
+            getVoipStackInterface: () =>
+              Promise.resolve({ type: 'web', rejectCallWithEndReason: () => Promise.resolve() })
+          }
+          const pending = reject(p)
+          await jest.advanceTimersByTimeAsync(5000)
+
+          await expect(pending).resolves.toMatchObject({ result: 'rejected', confirmed: false })
+        } finally {
+          jest.useRealTimers()
+        }
+      })
+    })
+
+    // What the next live check reads in the debug log: booleans and the keys of what the stack says
+    // about the call, never a value
+    describe('the report of the page', () => {
+      type Report = {
+        lastEnded: { before: boolean; after: boolean }
+        callInfo: Record<string, unknown>
+      }
+      const confirmedWith = async (
+        stackExtra: Record<string, unknown>
+      ): Promise<Outcome & { diag: Report }> => {
+        const p = page(null, { listed: [] })
+        p.modules['WAWebVoipStackInterface'] = {
+          getVoipStackInterface: () =>
+            Promise.resolve({
+              type: 'web',
+              rejectCallWithEndReason: () => {
+                p.ended.id = 'c1'
+                return Promise.resolve()
+              },
+              ...stackExtra
+            })
+        }
+        return (await reject(p)) as Outcome & { diag: Report }
+      }
+
+      it('says whether the call was the last ended one before and after the reject', async () => {
+        const outcome = await confirmedWith({})
+
+        expect(outcome.diag.lastEnded).toEqual({ before: false, after: true })
+      })
+
+      it('lists the keys and types of getCallInfo before and after, and none of its values', async () => {
+        const getCallInfo = jest
+          .fn()
+          .mockResolvedValueOnce({ callState: 'secret-state', peer: 'secret-peer', count: 3 })
+          .mockResolvedValueOnce(null)
+        const outcome = await confirmedWith({ getCallInfo })
+        const text = JSON.stringify(outcome.diag.callInfo)
+
+        expect(text).toContain('callState:string')
+        expect(text).toContain('count:number')
+        expect(text).not.toContain('secret')
+        expect(outcome.diag.callInfo).toMatchObject({ after: 'null' })
+      })
+
+      it('never lets a failing getCallInfo change the answer', async () => {
+        const getCallInfo = jest.fn().mockRejectedValue(new Error('boom with a secret'))
+        const outcome = await confirmedWith({ getCallInfo })
+
+        expect(outcome).toMatchObject({ result: 'rejected', confirmed: true })
+        expect(JSON.stringify(outcome.diag.callInfo)).not.toContain('secret')
+      })
+
+      it('works with a stack that has no getCallInfo', async () => {
+        const outcome = await confirmedWith({})
+
+        expect(outcome.diag.callInfo).toEqual({ before: 'absent', after: 'absent' })
+      })
+    })
+
     it('finds the call in the models of the collection when `get` does not know its id', async () => {
       const p = page(null, { getWorks: false })
       const withReason = jest.fn()
@@ -525,7 +654,7 @@ describe('the patched whatsapp-web.js', () => {
           Promise.resolve(rejectingStack(p, 'rejectCallWithEndReason', withReason))
       }
 
-      await expect(reject(p)).resolves.toEqual({ result: 'rejected', confirmed: true })
+      await expect(reject(p)).resolves.toMatchObject({ result: 'rejected', confirmed: true })
       expect(withReason).toHaveBeenCalledTimes(1)
     })
 
@@ -610,7 +739,7 @@ describe('the patched whatsapp-web.js', () => {
         await jest.advanceTimersByTimeAsync(250)
 
         expect(done).toBe(true)
-        await expect(pending).resolves.toEqual({ result: 'rejected', confirmed: true })
+        await expect(pending).resolves.toMatchObject({ result: 'rejected', confirmed: true })
       } finally {
         jest.useRealTimers()
       }

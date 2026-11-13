@@ -459,7 +459,7 @@ index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034efbc2f252 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..6fa99557a3d580eec45b954e8163b90b5277667c 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
 @@ -110,6 +110,113 @@ exports.LoadUtils = () => {
@@ -737,7 +737,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034e
          const response = await window
              .require('WAWebNewsletterMetadataQueryJob')
              .queryNewsletterMetadataByInviteCode(inviteCode, role);
-@@ -1334,28 +1460,121 @@ exports.LoadUtils = () => {
+@@ -1334,28 +1460,151 @@ exports.LoadUtils = () => {
          return undefined;
      };
  
@@ -745,11 +745,13 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034e
 +    // for an answer, so the caller kept ringing while the gateway said it was done. WhatsApp Web
 +    // rejects through its VoIP stack, which owns the state of the call and acts on the call it
 +    // holds (no ids). `peerJid` is kept only because `Call.reject` passes it.
-+    // Answers { result: 'rejected', confirmed }: `confirmed` is true only when the page listed the
-+    // call before the reject and no longer lists it within 3 s. A call the page does not list under
-+    // the id of the `call` event is rejected all the same (the stack knows its own call) but can
-+    // never be confirmed, and then `diag` says what the stack and the collection look like (ids cut
-+    // short, never a number or a name) so that the log tells where the call is.
++    // Answers { result: 'rejected', confirmed, diag }. `confirmed` is true when
++    // - the page listed the call before the reject and no longer lists it within 3 s, or
++    // - `lastEndedCall` is that call now and it was not before the reject (the live check of
++    //   2026-11-14: the collection never listed the call, and after the reject `lastEndedCall` was it).
++    // A caller that hangs up inside the 3 s cannot be told from the effect of the reject. A call
++    // that had already ended before the reject is never confirmed. `diag` says what the stack and
++    // the collection look like (ids cut short, booleans, keys and types, never a value or a name).
      window.WWebJS.rejectCall = async (peerJid, id) => {
 -        const _meUser = window
 -            .require('WAWebUserPrefsMeUser')
@@ -780,10 +782,13 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034e
 +                return true;
 +            return models().some((model) => text(model && model.id) === id);
 +        };
++        const endedIsIt = () =>
++            text(calls.lastEndedCall && calls.lastEndedCall.id) === id;
 +        const active = calls.activeCall;
 +        if (active && text(active.id) !== id)
 +            throw fail('another call is the one the VoIP stack holds');
 +        const wasListed = listed();
++        const endedBefore = endedIsIt();
 +
 +        const stackModule = window.require('WAWebVoipStackInterface');
 +        const stack =
@@ -793,6 +798,23 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034e
 +        if (!stack) throw fail('the VoIP stack is not available');
 +        if (stack.type !== 'web')
 +            throw fail(`the VoIP stack is of the type ${String(stack.type)}`);
++
++        // The keys and types of what the stack says about the call, for the log only: a failure
++        // here never changes the answer
++        const callInfo = async () => {
++            if (typeof stack.getCallInfo !== 'function') return 'absent';
++            try {
++                const info = await stack.getCallInfo();
++                if (info == null) return 'null';
++                if (typeof info !== 'object') return typeof info;
++                return Object.keys(info)
++                    .slice(0, 40)
++                    .map((key) => `${key}:${typeof info[key]}`);
++            } catch (e) {
++                return 'failed';
++            }
++        };
++        const infoBefore = await callInfo();
 +
 +        if (typeof stack.rejectCallWithEndReason === 'function') {
 +            const enums = window.require('WAWebVoipWaCallEnums');
@@ -818,11 +840,17 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034e
 -                id: window.require('WAWap').generateId(),
 -                from: userId,
 -                to: peerJid,
++        const gone = () =>
++            (wasListed && !listed()) || (!endedBefore && endedIsIt());
++        let confirmed = false;
 +        for (let waited = 0; waited < 3000; waited += 100) {
-+            if (wasListed && !listed()) return { result: 'rejected', confirmed: true };
++            if (gone()) {
++                confirmed = true;
++                break;
++            }
 +            await new Promise((resolve) => setTimeout(resolve, 100));
 +        }
-+        if (wasListed && !listed()) return { result: 'rejected', confirmed: true };
++        if (!confirmed) confirmed = gone();
 +
 +        const cut = (value) => {
 +            const t = text(value);
@@ -846,13 +874,15 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034e
 +        const all = models();
 +        return {
 +            result: 'rejected',
-+            confirmed: false,
++            confirmed,
 +            diag: {
 +                build,
 +                wasListed,
 +                idType: typeof id,
 +                idLength: String(id).length,
 +                id: cut(id),
++                lastEnded: { before: endedBefore, after: endedIsIt() },
++                callInfo: { before: infoBefore, after: await callInfo() },
 +                stack: { type: stack.type, members: members(stack) },
 +                collection: {
 +                    size: all.length,
@@ -878,7 +908,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..b3d58ba11322a707f615ecb4fb80034e
      };
  
      window.WWebJS.cropAndResizeImage = async (media, options = {}) => {
-@@ -1742,20 +1961,30 @@ exports.LoadUtils = () => {
+@@ -1742,20 +1991,30 @@ exports.LoadUtils = () => {
  
          if (typeof duration !== 'number') return false;
  
