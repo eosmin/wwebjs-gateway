@@ -269,6 +269,50 @@ describe('events', () => {
     expect([...libraryEvents].sort()).toEqual([...gatewayNames].sort())
   })
 
+  it('says what wwebjs saw on a LOGOUT, without the address, and ends the run as before', async () => {
+    const h = harness()
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    ready(h)
+    Object.assign(h.client, { lastLoggedOut: true })
+
+    h.client.emit('disconnected', 'LOGOUT')
+
+    const text = warn.mock.calls.map(call => String(call[0])).join('\n')
+    expect(text).toContain('LOGOUT')
+    expect(text).toContain('flagStale=true')
+    expect(text).toContain('postLogoutUrl=false')
+    expect(lastEvent(h.events)).toEqual({ event: 'disconnected', data: { reason: 'LOGOUT' } })
+    await expect(h.adapter.getChats()).rejects.toBeInstanceOf(WaDisconnectedError)
+  })
+
+  it('reports the logout address as a boolean and survives a page that cannot be read', () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const logged = (): string => warn.mock.calls.map(call => String(call[0])).join('\n')
+
+    const h = harness()
+    Object.assign(h.client, {
+      pupPage: { url: () => 'https://web.whatsapp.com/?post_logout=1&secret=abc' }
+    })
+    h.client.emit('disconnected', 'LOGOUT')
+    expect(logged()).toContain('postLogoutUrl=true')
+    expect(logged()).toContain('flagStale=false')
+    expect(logged()).not.toContain('secret')
+    expect(logged()).not.toContain('web.whatsapp.com')
+
+    warn.mockClear()
+    const broken = harness()
+    Object.assign(broken.client, {
+      pupPage: {
+        url: () => {
+          throw new Error('detached')
+        }
+      }
+    })
+    broken.client.emit('disconnected', 'LOGOUT')
+    expect(logged()).toContain('reading the page failed')
+    expect(lastEvent(broken.events)).toEqual({ event: 'disconnected', data: { reason: 'LOGOUT' } })
+  })
+
   it('maps what wwebjs emits to payloads that satisfy the event schemas', () => {
     const h = harness()
     const { client, events } = h

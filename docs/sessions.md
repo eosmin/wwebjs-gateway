@@ -70,6 +70,7 @@ A failed `initialize` is retried like any drop, but only `SESSION_INITIALIZE_MAX
 These causes have their own treatment:
 
 - **Unlinked from the phone.** On `disconnected` with `LOGOUT` the gateway deletes the folder of the session in `WWEBJS_DATA_PATH` (`session-<id>`) once its browser is gone. Without that, WhatsApp Web refused to load on the dead login (`initialize failed`, never reaching the QR code). The same deletion runs on `POST /logout` of a `ready` session (see below for the others).
+  Every `disconnected` is written to the log (level `warn`) before the gateway acts on it, as `[<id>] disconnected (reason=…, status=…, sinceReadyMs=…)`: the reason, the status the session had and the time since it last became `ready`, and nothing about the account. A `LOGOUT` adds a line from the adapter, `WhatsApp Web reported a LOGOUT (flagStale=…, postLogoutUrl=…)`: whether the flag of whatsapp-web.js that turns a navigation into a logout was already set, and whether the page went to the logout address (two booleans, never the address). A `LOGOUT` a second after `ready` with `flagStale=true` and `postLogoutUrl=false` points at that flag and not at an unlink.
 - **A browser left by a gateway that died** (`kill -9`, a crash, the OOM killer). Chromium holds the profile with `SingletonLock -> <host>-<pid>` and never removes it. Before each browser start the adapter reads that lock: if the process is dead, was started for another profile (the pid was reused), or the lock comes from another host (a container that was replaced), it removes the lock files; if the process is alive, **was started with this session's own `--user-data-dir`, and was orphaned (its parent is init)**, it is closed (SIGTERM, then SIGKILL after 5 s) and the lock removed. A live browser of this profile that is not an orphan is never touched (one that is a child of this gateway is still closing: the start fails and is retried): the start fails with `lastError` `the browser profile is locked by process <pid> (<reason>); end that process and start the session again`, and counts toward the limit above. A gateway that runs as PID 1 never closes anything, since an orphan cannot predate it.
 
 - **Unlinked from the phone while the gateway was stopped.** No `LOGOUT` event is seen, so the saved login on disk is still there but WhatsApp refuses it: the page loads and the connection never opens (`initialize failed`, `TimeoutError`, never a QR code). The adapter tells that case apart (`WaAuthStalledError`: the page of WhatsApp Web had loaded, its build number is defined) from a browser, network or lock failure. When **every** one of the `SESSION_INITIALIZE_MAX_ATTEMPTS` failed starts of the run was of that kind, the session had been linked, and the login folder exists, the gateway starts **one browser on a throwaway profile** (`session-probe-<random>`, deleted afterwards; nothing is published) and waits up to 60 s for its QR code:
@@ -102,6 +103,17 @@ CI cannot reach WhatsApp, so a new `whatsapp-web.js` (or a new WhatsApp Web buil
 6. **Unlink and link again (H-FB-11):** in the phone, "Linked devices" then unlink the gateway. The session must go to `logged_out` and `POST /sessions/smoke/start` must reach `qr` (not loop on `initialize failed`); link again and expect `ready`.
 7. **Call (#42, F12):** call the test account from the second phone (voice, then video), let it ring about 20 s and hang up. Expect exactly one `call` event each, with `isVideo` right. Also try a group call, a call answered on the phone, a call placed from the linked account and a call that rings while the session is offline (F12b, not probed yet). After every new WhatsApp Web build this check is mandatory: the hook has already had to move once.
 8. Record the WhatsApp Web build used (`GET /v1/system/info`, field `wwebVersion` of the session) in the PR. If everything passes and production should stop following WhatsApp Web, pin that build: `WWEB_VERSION=<build>`, `WWEB_VERSION_CACHE_TYPE=local` with the HTML saved on the volume, `WWEB_VERSION_STRICT=true`. Roll back by restoring the previous image tag.
+
+### Risk and protocol for live tests
+
+A live pass can cost the account. A test account was restricted by WhatsApp for terms-of-service activity ("This account can't use WhatsApp, some activity on your account may not have followed our terms of service", no end date) right after a `LOGOUT` of the session, following several links and unlinks in two days, a "can't link new devices right now" notice before, and about 25 varied actions in 20 minutes (sends, media, a poll, a location, a group creation). So:
+
+1. Use **only a disposable test account**, never the number of production.
+2. Keep the links and unlinks to a minimum: one link per pass, and do not restart the gateway without a reason. Never open a second client on the profile of a linked session.
+3. Space the actions out: a few dozen an hour at most, with pauses between them.
+4. On "can't link new devices right now" or any restriction notice: **stop**, do not retry, and appeal at most once.
+5. What depends on the account is checked in batches hours or days apart, not in one session.
+
 
 ## Watchdog
 
