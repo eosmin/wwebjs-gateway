@@ -763,6 +763,27 @@ describe('messages API (integration)', () => {
       expect(response.headers['x-content-type-options']).toBe('nosniff')
     })
 
+    it.each([
+      ['a"; x=y.pdf', 'a__ x_y.pdf'],
+      ['a\r\nSet-Cookie: z=1.pdf', 'a__Set-Cookie_ z_1.pdf'],
+      ['caf\u00e9\\.pdf', 'caf__.pdf']
+    ])(
+      'cleans the file name %j of the sender before it reaches the header',
+      async (filename, cleaned) => {
+        client().script('downloadMedia', () => ({
+          mimetype: 'application/pdf',
+          data: Buffer.from('%PDF-1.7').toString('base64'),
+          filename
+        }))
+
+        const response = await call('GET', `/v1/sessions/${id}/${messagePath}/media`)
+
+        expect(response.statusCode).toBe(200)
+        expect(response.headers['content-disposition']).toBe(`inline; filename="${cleaned}"`)
+        expect(response.headers['set-cookie']).toBeUndefined()
+      }
+    )
+
     it('404s when the media is gone', async () => {
       client().script('downloadMedia', () => null)
 

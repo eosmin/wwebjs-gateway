@@ -13,7 +13,10 @@ describe('inlineMediaType', () => {
     ['audio/mpeg', 'audio/mpeg'],
     ['application/pdf', 'application/pdf'],
     ['image/gif', 'image/gif'],
-    ['image/webp', 'image/webp']
+    ['image/webp', 'image/webp'],
+    ['image/jpeg;x="a;text/html"', 'image/jpeg'],
+    ['image/jpeg; q="a b"', 'image/jpeg'],
+    ['image/jpeg; x=""', 'image/jpeg']
   ])('serves %j inline as %j, without the parameters of the sender', (mimetype, served) => {
     expect(inlineMediaType(mimetype)).toBe(served)
   })
@@ -42,7 +45,13 @@ describe('inlineMediaType', () => {
     '',
     '   ',
     ';',
-    'audio/ogg; codecs="opus'
+    'audio/ogg; codecs="opus',
+    'text/html;x="image/jpeg"',
+    'image/jpeg\t',
+    'image/jpeg;\tq=1',
+    'image/jpeg; x="a\\\\b"',
+    '\u0130mage/jpeg',
+    'image/jpeg; x="a"b'
   ])('hands %j over as a download', mimetype => {
     expect(inlineMediaType(mimetype)).toBeUndefined()
   })
@@ -58,6 +67,14 @@ describe('inlineMediaType', () => {
     ]) {
       expect(inlineMediaType(mimetype)).toBeUndefined()
     }
+  })
+
+  it('accepts a type of exactly 200 characters and refuses one of 201', () => {
+    const pad = (length: number): string =>
+      `image/jpeg; x=${'a'.repeat(length - 'image/jpeg; x='.length)}`
+
+    expect(inlineMediaType(pad(200))).toBe('image/jpeg')
+    expect(inlineMediaType(pad(201))).toBeUndefined()
   })
 
   it('refuses a type that is not a string or is absurdly long', () => {
