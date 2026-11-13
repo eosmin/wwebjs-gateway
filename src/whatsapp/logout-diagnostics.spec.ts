@@ -2,6 +2,7 @@ import {
   ConsoleTail,
   cleanConsoleLine,
   isLogoutRelevant,
+  logoutReasonLabel,
   logoutReasonOf
 } from './logout-diagnostics.js'
 
@@ -11,6 +12,14 @@ describe('logoutReasonOf', () => {
   it('reads the short token WhatsApp Web puts in the logout address', () => {
     expect(logoutReasonOf(url('post_logout=1&logout_reason=client_fatal'))).toBe('client_fatal')
     expect(logoutReasonOf(url('logout_reason=SYNC_fail2'))).toBe('SYNC_fail2')
+  })
+
+  // WhatsApp Web writes the reason of a logout as a code: 0 client fatal, 1 sync failure, 2 initial
+  // history sync timeout, 3 account locked (found in the page code, F29)
+  it('reads the numeric codes WhatsApp Web really writes', () => {
+    for (const code of ['0', '1', '2', '3', '10']) {
+      expect(logoutReasonOf(url(`post_logout=1&logout_reason=${code}`))).toBe(code)
+    }
   })
 
   it('leaves it out when there is none, or it is not a short token', () => {
@@ -27,6 +36,8 @@ describe('logoutReasonOf', () => {
     expect(logoutReasonOf(url('logout_reason=15551234567'))).toBeUndefined()
     expect(logoutReasonOf(url('logout_reason=1abc'))).toBeUndefined()
     expect(logoutReasonOf(url('logout_reason=_client'))).toBeUndefined()
+    expect(logoutReasonOf(url('logout_reason=123'))).toBeUndefined()
+    expect(logoutReasonOf(url('logout_reason=07'))).toBeUndefined()
     expect(logoutReasonOf(url('logout_reason=client_fatal_15551234567'))).toBeUndefined()
   })
 
@@ -133,5 +144,21 @@ describe('ConsoleTail', () => {
     tail.recent()
 
     expect(tail.recent()).toEqual([])
+  })
+})
+
+describe('logoutReasonLabel', () => {
+  it('names the four codes WhatsApp Web has, and says when it gave none', () => {
+    expect(logoutReasonLabel('0')).toBe('client_fatal')
+    expect(logoutReasonLabel('1')).toBe('sync_fail')
+    expect(logoutReasonLabel('2')).toBe('history_sync_timeout')
+    expect(logoutReasonLabel('3')).toBe('account_locked')
+    expect(logoutReasonLabel(undefined)).toBe('unspecified')
+  })
+
+  it('puts anything else under one label, so a metric cannot grow without a bound', () => {
+    for (const value of ['4', '99', 'client_fatal', 'x'.repeat(48), '15551234567', '']) {
+      expect(logoutReasonLabel(value)).toBe('other')
+    }
   })
 })

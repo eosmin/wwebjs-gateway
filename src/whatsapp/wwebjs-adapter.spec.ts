@@ -328,14 +328,12 @@ describe('events', () => {
       const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
       const h = harness()
       Object.assign(h.client, {
-        pupPage: pageAt(
-          'https://web.whatsapp.com/?post_logout=1&logout_reason=client_fatal&x=secret'
-        )
+        pupPage: pageAt('https://web.whatsapp.com/?post_logout=1&logout_reason=0&x=secret')
       })
 
       h.client.emit('disconnected', 'LOGOUT')
 
-      expect(logged(warn)).toContain('logoutReason=client_fatal')
+      expect(logged(warn)).toContain('logoutReason=0')
       expect(logged(warn)).not.toContain('secret')
       expect(logged(warn)).not.toContain('web.whatsapp.com')
     })
