@@ -100,18 +100,23 @@ export interface Cause {
 }
 
 const MAX_CAUSE_MESSAGE_LENGTH = 200
+const MAX_SCANNED_LENGTH = 2000
 
 // A message of the library can name a chat, a number or a QR string, and the line goes to the log:
 // ids and long digit runs are masked, so are long opaque tokens, and the length is capped
-function sanitize(message: string): string {
+export function sanitize(message: string): string {
   return (
+    // The patterns run on a bounded input: a long run without spaces cannot make them slow
     message
+      .slice(0, MAX_SCANNED_LENGTH)
       .replace(/[^\s@]+@(?:c\.us|g\.us|s\.whatsapp\.net|lid|newsletter|broadcast)\b/g, '[id]')
       // A token mixes letters and digits; a name of a module or a class (letters only) is what is being diagnosed
       .replace(/[A-Za-z0-9+/=_-]{24,}/g, token =>
         /\d/.test(token) && /[A-Za-z]/.test(token) ? '[redacted]' : token
       )
       // The build of WhatsApp Web ("2.3000.1054303363", always "2.<4 digits>.") is not the number of a person: it is kept
+      // A number written with spaces or dashes ("+52 55 1234 5678", "55-1234-5678") is masked as a whole
+      .replace(/(?<!\d)(?<!\b2\.)(?<!\b2\.\d{4}\.)(?!2\.\d{4}\.\d)\+?\(?\d[\d\s().-]{6,}\d/g, '#')
       .replace(/(?<!\d)(?<!\b2\.\d{4}\.)\d{7,}/g, '#')
       .replace(/\s+/g, ' ')
       .trim()
