@@ -1188,10 +1188,10 @@ describe('calls', () => {
       reject
     })
 
-    await expect(h.adapter.rejectCall('nope')).resolves.toBe(false)
-    await expect(h.adapter.rejectCall('c1')).resolves.toBe(true)
+    await expect(h.adapter.rejectCall('nope')).resolves.toBe('not_held')
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe('unconfirmed')
     expect(reject).toHaveBeenCalledTimes(1)
-    await expect(h.adapter.rejectCall('c1')).resolves.toBe(false)
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe('not_held')
   })
 
   it('keeps the six fields of a customer note and answers null when there is none', async () => {
@@ -2007,6 +2007,41 @@ describe('boundaries', () => {
     expect(dto.id).toBe('b@c.us')
   })
 
+  // What the patched page answers (F30): { result: 'gone' } for a call it no longer lists, and
+  // { result: 'rejected', confirmed } once the VoIP stack took the reject
+  it.each([
+    [
+      'the page confirms the call is gone from its list',
+      { result: 'rejected', confirmed: true },
+      'confirmed'
+    ],
+    [
+      'the page took the reject but still lists the call',
+      { result: 'rejected', confirmed: false },
+      'unconfirmed'
+    ],
+    ['the page no longer lists the call', { result: 'gone' }, 'gone'],
+    ['the page answers nothing (a library without the patch)', undefined, 'unconfirmed'],
+    ['the page answers something unknown', { result: 'maybe' }, 'unconfirmed']
+  ])('tells what came of a reject when %s', async (_name, answer, expected) => {
+    const h = harness()
+    ready(h)
+    h.client.emit('call', {
+      id: 'c1',
+      timestamp: 1,
+      isVideo: false,
+      isGroup: false,
+      fromMe: false,
+      canHandleLocally: false,
+      webClientShouldHandle: false,
+      reject: jest.fn().mockResolvedValue(answer)
+    })
+
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe(expected)
+    // a call that was rejected, or that is gone, is not held any more
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe('not_held')
+  })
+
   it('keeps no more calls to reject than CALL_CACHE_SIZE, dropping the oldest', async () => {
     const h = harness({ CALL_CACHE_SIZE: '3' })
     ready(h)
@@ -2024,9 +2059,9 @@ describe('boundaries', () => {
       })
     }
 
-    await expect(h.adapter.rejectCall('c0')).resolves.toBe(false)
-    await expect(h.adapter.rejectCall('c1')).resolves.toBe(true)
-    await expect(h.adapter.rejectCall('c3')).resolves.toBe(true)
+    await expect(h.adapter.rejectCall('c0')).resolves.toBe('not_held')
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe('unconfirmed')
+    await expect(h.adapter.rejectCall('c3')).resolves.toBe('unconfirmed')
   })
 
   it('rejects a call once when two requests race, and lets a failed reject be retried', async () => {
@@ -2052,13 +2087,13 @@ describe('boundaries', () => {
     h.client.emit('call', call('c2'))
 
     const first = h.adapter.rejectCall('c1')
-    await expect(h.adapter.rejectCall('c1')).resolves.toBe(false)
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe('not_held')
     finish()
-    await expect(first).resolves.toBe(true)
+    await expect(first).resolves.toBe('unconfirmed')
     expect(reject).toHaveBeenCalledTimes(1)
 
     await expect(h.adapter.rejectCall('c2')).rejects.toBeInstanceOf(WaOperationError)
-    await expect(h.adapter.rejectCall('c2')).resolves.toBe(true)
+    await expect(h.adapter.rejectCall('c2')).resolves.toBe('unconfirmed')
   })
 
   it('moves a call that fires again to the newest slot of the buffer', async () => {
@@ -2078,8 +2113,8 @@ describe('boundaries', () => {
       })
     }
 
-    await expect(h.adapter.rejectCall('b')).resolves.toBe(false)
-    await expect(h.adapter.rejectCall('a')).resolves.toBe(true)
+    await expect(h.adapter.rejectCall('b')).resolves.toBe('not_held')
+    await expect(h.adapter.rejectCall('a')).resolves.toBe('unconfirmed')
   })
 
   it('fails a call link the page answered with nothing', async () => {

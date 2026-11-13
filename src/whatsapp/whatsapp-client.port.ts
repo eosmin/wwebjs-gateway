@@ -255,6 +255,14 @@ export interface DownloadedMedia {
 
 // ---- The port ----------------------------------------------------------------------------------
 
+// What came of rejecting a call (H-LIVE-11, F30). WhatsApp Web gives no answer to a reject, so the
+// adapter reports what the page shows afterwards:
+// - `not_held`: not one of the recent incoming calls the adapter keeps (too old, rejected, unseen)
+// - `gone`: the page no longer lists the call (it ended, or was answered elsewhere)
+// - `confirmed`: the VoIP stack took the reject and the call left the list of the page
+// - `unconfirmed`: the reject was handed over but nothing shows that the call ended
+export type RejectCallResult = 'not_held' | 'gone' | 'confirmed' | 'unconfirmed'
+
 export interface WhatsAppClientPort {
   // Lifecycle. `initialize` resolves when the browser is up; readiness arrives as the `ready` event.
   initialize(): Promise<void>
@@ -466,8 +474,7 @@ export interface WhatsAppClientPort {
   getBroadcasts(): Promise<BroadcastDto[]>
   getBroadcastById(contactId: string): Promise<BroadcastDto | null>
   createCallLink(startTime: Date, callType: string): Promise<string>
-  // false when the call is not one of the recent incoming ones the adapter holds
-  rejectCall(callId: string): Promise<boolean>
+  rejectCall(callId: string): Promise<RejectCallResult>
 }
 
 // ---- Factory -----------------------------------------------------------------------------------

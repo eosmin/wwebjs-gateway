@@ -459,7 +459,7 @@ index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..996fcf1f4c2108000982380b2ec4dc6694c7a195 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..e39f16290a484f5f84de6484fb0e459721087dc1 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
 @@ -110,6 +110,113 @@ exports.LoadUtils = () => {
@@ -737,7 +737,85 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..996fcf1f4c2108000982380b2ec4dc66
          const response = await window
              .require('WAWebNewsletterMetadataQueryJob')
              .queryNewsletterMetadataByInviteCode(inviteCode, role);
-@@ -1742,20 +1868,30 @@ exports.LoadUtils = () => {
+@@ -1334,28 +1460,57 @@ exports.LoadUtils = () => {
+         return undefined;
+     };
+ 
++    // F30 (H-LIVE-11): the library wrote a `call/reject` stanza by hand and sent it without waiting
++    // for an answer, so the caller kept ringing while the gateway said it was done. WhatsApp Web
++    // rejects through its VoIP stack, which owns the state of the call and acts on the call it
++    // holds (no ids). `peerJid` is kept only because `Call.reject` passes it.
++    // Answers { result: 'gone' } for a call the page no longer lists, and
++    // { result: 'rejected', confirmed } otherwise: `confirmed` is true when the call left the
++    // collection of the page within 3 s.
+     window.WWebJS.rejectCall = async (peerJid, id) => {
+-        const _meUser = window
+-            .require('WAWebUserPrefsMeUser')
+-            .getMaybeMePnUser();
+-        let userId = _meUser._serialized || _meUser.$1;
++        const build = (window.Debug && window.Debug.VERSION) || 'unknown';
++        const fail = (why) =>
++            new Error(`[call-reject] ${why} (WhatsApp Web ${build})`);
++        const calls = window.require('WAWebCallCollection');
++        if (!calls || typeof calls.get !== 'function')
++            throw fail('the call collection is not available');
++        if (calls.get(id) == null) return { result: 'gone' };
++        const active = calls.activeCall;
++        if (active && active.id !== id)
++            throw fail('another call is the one the VoIP stack holds');
++
++        const stackModule = window.require('WAWebVoipStackInterface');
++        const stack =
++            stackModule && typeof stackModule.getVoipStackInterface === 'function'
++                ? await stackModule.getVoipStackInterface()
++                : null;
++        if (!stack) throw fail('the VoIP stack is not available');
++        if (stack.type !== 'web')
++            throw fail(`the VoIP stack is of the type ${String(stack.type)}`);
++
++        if (typeof stack.rejectCallWithEndReason === 'function') {
++            const enums = window.require('WAWebVoipWaCallEnums');
++            const reason = enums && enums.RejectEndReason && enums.RejectEndReason.Self;
++            if (reason === undefined) throw fail('RejectEndReason.Self is not available');
++            await stack.rejectCallWithEndReason(reason);
++        } else if (typeof stack.rejectCall === 'function') {
++            await stack.rejectCall();
++        } else {
++            const names = new Set();
++            for (let o = stack; o && o !== Object.prototype; o = Object.getPrototypeOf(o))
++                for (const name of Object.getOwnPropertyNames(o))
++                    if (/reject|decline|end|hang|call/i.test(name) && typeof stack[name] === 'function')
++                        names.add(name);
++            throw fail(
++                `the VoIP stack has no function to reject a call; it has: ${[...names].slice(0, 20).join(', ') || 'none'}`,
++            );
++        }
+ 
+-        const stanza = window.require('WAWap').wap(
+-            'call',
+-            {
+-                id: window.require('WAWap').generateId(),
+-                from: userId,
+-                to: peerJid,
+-            },
+-            [
+-                window.require('WAWap').wap('reject', {
+-                    'call-id': id,
+-                    'call-creator': peerJid,
+-                    count: '0',
+-                }),
+-            ],
+-        );
+-        await window.require('WADeprecatedSendIq').deprecatedCastStanza(stanza);
++        for (let waited = 0; waited < 3000; waited += 100) {
++            if (calls.get(id) == null) return { result: 'rejected', confirmed: true };
++            await new Promise((resolve) => setTimeout(resolve, 100));
++        }
++        return { result: 'rejected', confirmed: calls.get(id) == null };
+     };
+ 
+     window.WWebJS.cropAndResizeImage = async (media, options = {}) => {
+@@ -1742,20 +1897,30 @@ exports.LoadUtils = () => {
  
          if (typeof duration !== 'number') return false;
  

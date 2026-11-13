@@ -26,17 +26,29 @@ describe('CallsService', () => {
     expect(createCallLink).toHaveBeenCalledWith(new Date('2026-12-01T10:00:00Z'), 'video')
   })
 
-  it('rejects a call the adapter holds', async () => {
-    const rejectCall = ok(true)
+  it('says a reject is confirmed when the call left the list of the page', async () => {
+    const rejectCall = ok('confirmed')
     const { service } = build({ rejectCall })
 
-    await expect(service.reject('s', 'c1')).resolves.toBeUndefined()
+    await expect(service.reject('s', 'c1')).resolves.toEqual({ confirmed: true })
     expect(rejectCall).toHaveBeenCalledWith('c1')
   })
 
-  it('answers NOT_FOUND for a call the adapter does not hold', async () => {
-    const { service } = build({ rejectCall: ok(false) })
+  it('says so, with a note, when the reject was handed over but nothing shows the call ended', async () => {
+    const { service } = build({ rejectCall: ok('unconfirmed') })
 
-    await expect(service.reject('s', 'c1')).rejects.toBeInstanceOf(NotFoundError)
+    const answer = await service.reject('s', 'c1')
+
+    expect(answer.confirmed).toBe(false)
+    expect(answer.note).toMatch(/not.*(ended|confirm)/i)
   })
+
+  it.each(['not_held', 'gone'] as const)(
+    'answers NOT_FOUND for a call that is %s',
+    async result => {
+      const { service } = build({ rejectCall: ok(result) })
+
+      await expect(service.reject('s', 'c1')).rejects.toBeInstanceOf(NotFoundError)
+    }
+  )
 })

@@ -422,6 +422,165 @@ describe('the patched whatsapp-web.js', () => {
     })
   })
 
+  // F30 (H-LIVE-11): the library rejected a call by writing a `call/reject` stanza by hand and
+  // sending it without waiting for an answer, so the gateway said "done" while the phone kept
+  // ringing. WhatsApp Web rejects through its VoIP stack, which owns the state of the call. The
+  // stack acts on the call it holds, not on an id, so the patch checks the call first and then
+  // looks at whether it went away
+  describe('rejecting an incoming call', () => {
+    const SELF = 7
+    type Stack = Record<string, unknown>
+    type Outcome = { result: string; confirmed?: boolean }
+    type Page = { modules: Record<string, unknown>; listed: Set<string> }
+    // `listed` is what the call collection of the page answers to `get`
+    const page = (
+      stack: Stack | null,
+      calls: { listed?: string[]; active?: string | null } = {}
+    ): Page => {
+      const listed = new Set(calls.listed ?? ['c1'])
+      return {
+        listed,
+        modules: {
+          WAWebVoipStackInterface: { getVoipStackInterface: () => Promise.resolve(stack) },
+          WAWebCallCollection: {
+            get: (id: string): unknown => (listed.has(id) ? { id } : undefined),
+            get activeCall(): unknown {
+              return calls.active == null ? null : { id: calls.active }
+            }
+          },
+          WAWebVoipWaCallEnums: { RejectEndReason: { Self: SELF } },
+          // the old way: the test fails when the patch still reaches for it
+          WADeprecatedSendIq: {
+            deprecatedCastStanza: () => {
+              throw new Error('a stanza was written by hand')
+            }
+          }
+        }
+      }
+    }
+    // a stack whose reject makes the call leave the collection, as a real one should
+    const rejectingStack = (p: Page, name: string, fn = jest.fn()): Stack => {
+      fn.mockImplementation(() => {
+        p.listed.delete('c1')
+        return Promise.resolve()
+      })
+      return { type: 'web', [name]: fn }
+    }
+    const reject = (p: Page, id = 'c1'): Promise<Outcome> =>
+      withPage(p.modules, () =>
+        (pageOf().WWebJS.rejectCall as (peer: string, id: string) => Promise<Outcome>)(
+          'peer@lid',
+          id
+        )
+      )
+
+    it('rejects through the stack with the reason the page uses itself, and confirms when the call is gone', async () => {
+      const p = page(null)
+      const withReason = jest.fn()
+      p.modules['WAWebVoipStackInterface'] = {
+        getVoipStackInterface: () =>
+          Promise.resolve(rejectingStack(p, 'rejectCallWithEndReason', withReason))
+      }
+
+      await expect(reject(p)).resolves.toEqual({ result: 'rejected', confirmed: true })
+      expect(withReason).toHaveBeenCalledTimes(1)
+      expect(withReason).toHaveBeenCalledWith(SELF)
+    })
+
+    it('uses rejectCall() when the stack has no rejectCallWithEndReason', async () => {
+      const p = page(null)
+      const plain = jest.fn()
+      p.modules['WAWebVoipStackInterface'] = {
+        getVoipStackInterface: () => Promise.resolve(rejectingStack(p, 'rejectCall', plain))
+      }
+
+      await expect(reject(p)).resolves.toEqual({ result: 'rejected', confirmed: true })
+      expect(plain).toHaveBeenCalledTimes(1)
+    })
+
+    it('says the call is gone, without touching the stack, when the page lists no such call', async () => {
+      const withReason = jest.fn(() => Promise.resolve())
+      const p = page({ type: 'web', rejectCallWithEndReason: withReason }, { listed: [] })
+
+      await expect(reject(p)).resolves.toEqual({ result: 'gone' })
+      expect(withReason).not.toHaveBeenCalled()
+    })
+
+    it('refuses to reject when another call is the one the stack holds', async () => {
+      const withReason = jest.fn(() => Promise.resolve())
+      const p = page(
+        { type: 'web', rejectCallWithEndReason: withReason },
+        { listed: ['c1', 'c2'], active: 'c2' }
+      )
+
+      await expect(reject(p)).rejects.toThrow(/\[call-reject\].*another call/)
+      expect(withReason).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['there is no stack', null],
+      ['the stack is not the web one', { type: 'native', rejectCall: () => Promise.resolve() }],
+      ['it has no function to reject with', { type: 'web', endCall: () => Promise.resolve() }]
+    ])('fails with [call-reject] when %s', async (_name, stack) => {
+      await expect(reject(page(stack as Stack | null))).rejects.toThrow(
+        /\[call-reject\].*WhatsApp Web 2\.3000/
+      )
+    })
+
+    it('names the stack functions it did find, so that a changed build can be read from the log', async () => {
+      const p = page({ type: 'web', endCall: () => Promise.resolve(), screenCall: () => 0 })
+
+      await expect(reject(p)).rejects.toThrow(/endCall/)
+    })
+
+    it('does not claim it when the call is still listed after the wait', async () => {
+      jest.useFakeTimers()
+      try {
+        const withReason = jest.fn(() => Promise.resolve())
+        const pending = reject(page({ type: 'web', rejectCallWithEndReason: withReason }))
+        await jest.advanceTimersByTimeAsync(5000)
+
+        await expect(pending).resolves.toEqual({ result: 'rejected', confirmed: false })
+        expect(withReason).toHaveBeenCalledTimes(1)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('confirms as soon as the call leaves, without waiting the whole time', async () => {
+      jest.useFakeTimers()
+      try {
+        const p = page({ type: 'web', rejectCallWithEndReason: () => Promise.resolve() })
+        let done = false
+        const pending = reject(p).then(outcome => {
+          done = true
+          return outcome
+        })
+        await jest.advanceTimersByTimeAsync(250)
+        p.listed.delete('c1')
+        await jest.advanceTimersByTimeAsync(250)
+
+        expect(done).toBe(true)
+        await expect(pending).resolves.toEqual({ result: 'rejected', confirmed: true })
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('does not write the stanza by hand any more', () => {
+      const utils = source('util/Injected/Utils.js')
+      const start = utils.indexOf('window.WWebJS.rejectCall')
+      const end = utils.indexOf('window.WWebJS.', start + 10)
+
+      expect(start).toBeGreaterThan(-1)
+      expect(utils.slice(start, end)).not.toMatch(/deprecatedCastStanza|WAWap/)
+    })
+
+    it('hands the answer of the page back from Call.reject', () => {
+      expect(source('structures/Call.js')).toMatch(/return this\.client\.pupPage\.evaluate/)
+    })
+  })
+
   // F14b: WhatsApp Web 2.3000.1054320313 removed `canCheckStatusRankingPosterGating` from
   // WAWebStatusGatingUtils (posting a status failed with "is not a function") and moved
   // `getRoleByIdentifier` from WAWebNewsletterModelUtils to WAWebNewsletterRoleIdentifier. The

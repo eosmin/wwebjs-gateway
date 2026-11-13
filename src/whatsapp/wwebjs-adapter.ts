@@ -130,6 +130,7 @@ import type {
   UnsubscribeOptions,
   WhatsAppClientFactory,
   WhatsAppClientOptions,
+  RejectCallResult,
   WhatsAppClientPort
 } from './whatsapp-client.port.js'
 
@@ -2032,24 +2033,35 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     })
   }
 
-  // wwebjs only rejects through the `Call` it handed out with the `call` event: false when this
-  // adapter does not hold it (too old for the ring buffer, already rejected, or never seen)
-  rejectCall(callId: string): Promise<boolean> {
+  // wwebjs only rejects through the `Call` it handed out with the `call` event: `not_held` when this
+  // adapter does not have it (too old for the ring buffer, already rejected, or never seen). The
+  // patched page answers what it saw after the reject (see `RejectCallResult`); an answer that is
+  // not that, such as `undefined` from a library without the patch, is `unconfirmed`.
+  rejectCall(callId: string): Promise<RejectCallResult> {
     return this.run('rejectCall', async () => {
       const call = this.calls.get(callId)
-      if (!call) return false
+      if (!call) return 'not_held'
       // Taken out first so that a second request for the same call finds nothing while this one is in
       // flight; put back when the page failed, so that the call can be rejected again
       this.calls.delete(callId)
+      let answer: unknown
       try {
-        await call.reject()
+        answer = await call.reject()
       } catch (error: unknown) {
         if (!this.calls.has(callId)) this.calls.set(callId, call)
         throw error
       }
-      return true
+      return rejectResultOf(answer)
     })
   }
+}
+
+// The page answers `{ result: 'gone' }` or `{ result: 'rejected', confirmed }`
+function rejectResultOf(answer: unknown): RejectCallResult {
+  if (typeof answer !== 'object' || answer === null) return 'unconfirmed'
+  const { result, confirmed } = answer as { result?: unknown; confirmed?: unknown }
+  if (result === 'gone') return 'gone'
+  return result === 'rejected' && confirmed === true ? 'confirmed' : 'unconfirmed'
 }
 
 // ---- Factory -----------------------------------------------------------------------------------

@@ -27,3 +27,19 @@ export const CallLinkResponse = z.object({
   link: z.url().describe('The WhatsApp call link, such as https://call.whatsapp.com/video/XxXx')
 })
 export class CallLinkResponseDto extends createZodDto(CallLinkResponse) {}
+
+// What `calls.reject` knows (F30): WhatsApp gives no answer to a reject, so `confirmed` says whether
+// the page showed the call leaving its list, and a reject that was only handed over carries a note
+export const CallRejectResponse = z.object({
+  confirmed: z
+    .boolean()
+    .describe(
+      'True when WhatsApp Web no longer lists the call after the reject; false when the reject was only handed over'
+    ),
+  note: z
+    .string()
+    .optional()
+    .describe('Present when `confirmed` is false: what the caller must not assume')
+})
+export class CallRejectResponseDto extends createZodDto(CallRejectResponse) {}
+export type CallRejectResponse = z.infer<typeof CallRejectResponse>
