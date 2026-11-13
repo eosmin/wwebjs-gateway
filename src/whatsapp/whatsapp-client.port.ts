@@ -273,6 +273,8 @@ export interface WhatsAppClientPort {
   resetState(): Promise<void>
   getState(): Promise<string | null>
   getWWebVersion(): Promise<string>
+  // The short reason code WhatsApp Web wrote in the address of its last logout, when it wrote one (F29)
+  lastLogoutReason(): string | undefined
   getClientInfo(): Promise<ClientInfoDto>
   getBatteryStatus(): Promise<BatteryInfoDto>
   // Resident memory of the browser and every process it started; undefined when it cannot be read

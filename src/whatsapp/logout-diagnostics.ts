@@ -2,8 +2,9 @@
 // address or any user data: the short reason token of the logout address, and the few fixed lines
 // the page writes to its console about a reload or a logout (H-LIVE-05, F25).
 
-// Starts with a letter and holds no run of six digits: a token cannot be an account id
-const REASON_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,47}$/
+// A word that starts with a letter and holds no run of six digits, or a code of one or two digits
+// (WhatsApp Web writes 0 to 3): a token cannot be an account id
+const REASON_PATTERN = /^(?:[A-Za-z][A-Za-z0-9_]{0,47}|[0-9]|[1-9][0-9])$/
 const MAX_LINE_LENGTH = 160
 // eslint-disable-next-line no-control-regex -- control characters are exactly what is dropped
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g
@@ -14,8 +15,8 @@ const ACCOUNT_ID = /\S*@\S*/g
 // The most of a console line that is looked at: a huge line costs nothing
 const MAX_RAW_LENGTH = 1000
 
-// The value of `logout_reason` of the address, only when it is a short token of letters, digits and
-// underscores: anything else (an account id, a message, markup) is left out, never logged.
+// The value of `logout_reason` of the address, only when it is a short word or a one or two digit
+// code: anything else (an account id, a message, markup) is left out, never logged.
 export function logoutReasonOf(address: string): string | undefined {
   try {
     const value = new URL(address).searchParams.get('logout_reason')
@@ -70,4 +71,19 @@ export class ConsoleTail {
     this.lines = []
     return result
   }
+}
+
+// The reason of a logout as a label of a metric: the four codes WhatsApp Web writes, `unspecified`
+// when the address carries none (the account was unlinked on the phone, or WhatsApp revoked the
+// device, which gives no code), and `other` for anything else
+const LOGOUT_LABELS: Readonly<Record<string, string>> = {
+  '0': 'client_fatal',
+  '1': 'sync_fail',
+  '2': 'history_sync_timeout',
+  '3': 'account_locked'
+}
+
+export function logoutReasonLabel(reason: string | undefined): string {
+  if (reason === undefined) return 'unspecified'
+  return Object.hasOwn(LOGOUT_LABELS, reason) ? (LOGOUT_LABELS[reason] ?? 'other') : 'other'
 }

@@ -124,8 +124,8 @@ export const envSchema = z
     RATE_LIMIT_MAX: count(300, { min: 1 }).describe(
       'Requests per minute allowed per API key and, separately, per client address'
     ),
-    ENABLE_ADD_PARTICIPANTS: flag(false).describe(
-      'Allow adding participants to a group (groups.participants with action add; remove, promote and demote are always on). Off by default as a precaution: on two test accounts WhatsApp logged the account out and then restricted it right after an add with WhatsApp Web 2.3000.1054445547 and whatsapp-web.js 1.34.8; the cause is not proven (a page error, a reload for a new WhatsApp Web build, or a defence of the server). Turn it on only with a disposable test account'
+    ENABLE_GROUP_WRITES: flag(false).describe(
+      "Allow the writes to groups that can get an account blocked: create a group, add, remove, promote and demote participants, revoke an invite link, and join or accept an invite. Off by default: automating group creation or changes goes against WhatsApp's terms, two test accounts were blocked after them, and an add was followed by a logout. Reads, the events of groups, changing the subject, the description and the settings of a group, and leaving one stay on"
     ),
     ENABLE_DOCS: optionalFlag().describe(
       'Serve Swagger UI and the OpenAPI JSON; when unset, true except in production, where true is refused'
@@ -156,6 +156,12 @@ export const envSchema = z
       .optional()
       .describe(
         'https URL template of the remote snapshots with a {version} placeholder; required when WWEB_VERSION_CACHE_TYPE is remote. The page it serves runs inside the logged-in browser: trust the host'
+      ),
+    WWEB_VERIFIED_BUILD: text()
+      .regex(/^2\.3000\.\d{1,20}$/, 'Not a WhatsApp Web build such as 2.3000.1054292354')
+      .optional()
+      .describe(
+        'The WhatsApp Web build last checked with a real account (for example 2.3000.1054292354). A session that runs another build logs a warning when it becomes ready; nothing else changes. Unset means no comparison'
       ),
     WWEB_VERSION_STRICT: flag(true).describe(
       'Fail the session start when the pinned WhatsApp Web version cannot be loaded, instead of running the live latest build'

@@ -16,13 +16,24 @@ Redis and BullMQ, in strict TypeScript.
 - **It is unofficial.** `whatsapp-web.js` automates WhatsApp Web. Automating an account can
   violate WhatsApp's Terms of Service and can get a number banned. The intended use is
   legitimate, consent-based conversations and chatbots: no spam, no mass messaging. You use it at
-  your own risk.
+  your own risk. For anything critical (notifications, billing, authentication codes), use the
+  official route, the WhatsApp Business Platform (Cloud API), and keep this gateway for the
+  conversational part; see [`docs/operations.md`](docs/operations.md).
 - **The production instance is private.** There is no live demo, no public API documentation and
   no screenshots, on purpose. This repository only holds the code.
 - **Run exactly one replica.** A session's Chromium process belongs to a single Node process, so
   the gateway is a single-instance service by design. Never scale it horizontally.
 - **`.wwebjs_auth/` is an account credential.** Whoever has it can use the WhatsApp account. It is
   git-ignored and must never be committed, shared or backed up unprotected.
+
+## Production readiness and risks
+
+What can be said today, without claiming more than was checked:
+
+- **Group writes are off by default.** Creating a group, adding, removing, promoting or demoting participants, revoking an invite link and joining a group (`ENABLE_GROUP_WRITES=false`) answer `403 OPERATION_DISABLED` before WhatsApp is touched. Automating group creation or changes goes against the terms of WhatsApp and can get the account blocked; two disposable test accounts were. Reads, the events of groups, and changing the subject, description and settings of a group or leaving one stay on, and are writes that still carry a risk. See `docs/groups.md`.
+- **The official route.** For anything critical the official route is the WhatsApp Business API. This gateway uses an unofficial client: any use with a real number carries a risk of restriction. Never test with the production number.
+- **A patch on top of a WhatsApp Web build.** The gateway depends on a patch of `whatsapp-web.js` checked against WhatsApp Web `2.3000.1054445547`; a new build can break it. Pinning a build is not solved (`docs/sessions.md`).
+- **What was checked live and what was not**: see "Integration readiness and known limits" in `docs/IMPLEMENTATION_PLAN.md` (10.4).
 
 ## Run it
 

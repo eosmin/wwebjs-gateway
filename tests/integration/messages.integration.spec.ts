@@ -97,7 +97,9 @@ describe('messages API (integration)', () => {
       PER_CHAT_MAX_PER_MINUTE: '60',
       SESSION_MAX_PER_MINUTE: '600',
       SESSION_MAX_PER_HOUR: '10000',
-      ALLOW_PRIVATE_WEBHOOK_TARGETS: 'false'
+      ALLOW_PRIVATE_WEBHOOK_TARGETS: 'false',
+      // Joining a group is off by default; the cases below that accept an invite need it on
+      ENABLE_GROUP_WRITES: 'true'
     })
     const { AppModule } = await import('../../src/app.module.js')
     const { createFastifyAdapter } = await import('../../src/infra/logger/fastify-adapter.js')
@@ -1166,6 +1168,26 @@ describe('messages API (integration)', () => {
         expect(missing.statusCode).toBe(404)
         expect(expired.statusCode).toBe(400)
         expect(calls('acceptGroupV4Invite')).toBe(before)
+      })
+
+      it('403s with OPERATION_DISABLED, without asking the client, when group writes are off', async () => {
+        const { APP_CONFIG } = await import('../../src/config/config.module.js')
+        if (!app) throw new Error('the app is not booted')
+        const config = app.get<{ ENABLE_GROUP_WRITES: boolean }>(APP_CONFIG, { strict: false })
+        const getMessage = jest.fn(() => buildMessageDto({ id: messageId, inviteV4: invite }))
+        client().script('getMessageById', getMessage)
+        const before = calls('acceptGroupV4Invite')
+        config.ENABLE_GROUP_WRITES = false
+        try {
+          const refused = await post(`messages/${encoded}/accept-group-invite`)
+
+          expect(refused.statusCode).toBe(403)
+          expect(refused.json()).toMatchObject({ error: { code: 'OPERATION_DISABLED' } })
+          expect(getMessage).not.toHaveBeenCalled()
+          expect(calls('acceptGroupV4Invite')).toBe(before)
+        } finally {
+          config.ENABLE_GROUP_WRITES = true
+        }
       })
     })
 

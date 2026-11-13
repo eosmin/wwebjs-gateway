@@ -15,7 +15,7 @@ import type {
   WhatsAppClientPort
 } from '../../src/whatsapp/whatsapp-client.port.js'
 
-type PortMethod = Exclude<keyof WhatsAppClientPort, 'onEvent' | 'onSkipped'>
+type PortMethod = Exclude<keyof WhatsAppClientPort, 'onEvent' | 'onSkipped' | 'lastLogoutReason'>
 type Args<K extends PortMethod> = Parameters<WhatsAppClientPort[K]>
 type Result<K extends PortMethod> = Awaited<ReturnType<WhatsAppClientPort[K]>>
 
@@ -190,6 +190,11 @@ export class FakeWhatsAppClient implements WhatsAppClientPort {
   readonly resetState = this.stub('resetState', () => undefined)
   readonly getState = this.stub('getState', () => (this.connected ? 'CONNECTED' : null))
   readonly getWWebVersion = this.stub('getWWebVersion', () => '2.3000.0')
+  // What a test says the page wrote as the reason of its logout
+  logoutReason: string | undefined
+  lastLogoutReason(): string | undefined {
+    return this.logoutReason
+  }
   readonly getClientInfo = this.stub('getClientInfo', () => ({
     wid: FAKE_SELF_ID,
     me: FAKE_SELF_ID,

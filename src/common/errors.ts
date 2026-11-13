@@ -32,7 +32,7 @@ export const ErrorCode = {
   ACK_ERROR: 'ACK_ERROR',
   WHATSAPP_ERROR: 'WHATSAPP_ERROR',
   WHATSAPP_TIMEOUT: 'WHATSAPP_TIMEOUT',
-  UNSUPPORTED_OPERATION: 'UNSUPPORTED_OPERATION',
+  OPERATION_DISABLED: 'OPERATION_DISABLED',
   INTERNAL: 'INTERNAL'
 } as const
 
@@ -175,10 +175,10 @@ export const ERROR_DEFINITIONS = {
     status: HttpStatus.GATEWAY_TIMEOUT,
     meaning: 'WhatsApp Web did not answer within WA_CALL_TIMEOUT_MS.'
   },
-  UNSUPPORTED_OPERATION: {
-    status: HttpStatus.NOT_IMPLEMENTED,
+  OPERATION_DISABLED: {
+    status: HttpStatus.FORBIDDEN,
     meaning:
-      'The operation is switched off in this gateway; the message says which setting turns it on and why it is off. Nothing was sent to WhatsApp.'
+      'The operation is switched off by the configuration of this gateway (ENABLE_GROUP_WRITES, off by default: the group writes can get the account blocked); the message names the setting. Nothing was sent to WhatsApp.'
   },
   INTERNAL: {
     status: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -226,9 +226,6 @@ export class UnprocessableError extends StatusError<
 > {}
 export class WhatsAppError extends StatusError<
   CodesWithStatus<HttpStatus.BAD_GATEWAY | HttpStatus.GATEWAY_TIMEOUT>
-> {}
-export class UnsupportedOperationError extends StatusError<
-  CodesWithStatus<HttpStatus.NOT_IMPLEMENTED>
 > {}
 export class InternalError extends StatusError<CodesWithStatus<HttpStatus.INTERNAL_SERVER_ERROR>> {}
 

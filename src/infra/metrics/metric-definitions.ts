@@ -5,6 +5,10 @@ export interface MetricDefinition {
   labels: readonly string[]
   // Upper bounds in seconds; histograms only
   buckets?: readonly number[]
+  // Label sets written at 0 when the registry is built. A counter series that first appears at 1 gives
+  // no `increase()` in Prometheus, so an alert on the first logout would stay silent: every value of a
+  // label that has a fixed set is seeded
+  seed?: readonly Record<string, string>[]
 }
 
 const LATENCY_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60] as const
@@ -66,13 +70,29 @@ export const METRIC_DEFINITIONS = {
     name: 'gw_pipeline_errors_total',
     type: 'counter',
     help: 'Failures of the event pipeline, by stage (dedupe, store, publish, replay, event, policy).',
-    labels: ['stage']
+    labels: ['stage'],
+    seed: [
+      { stage: 'dedupe' },
+      { stage: 'store' },
+      { stage: 'publish' },
+      { stage: 'replay' },
+      { stage: 'event' },
+      { stage: 'policy' }
+    ]
   },
   sends: {
     name: 'gw_send_total',
     type: 'counter',
     help: 'Outbound sends, by result.',
-    labels: ['result']
+    labels: ['result'],
+    seed: [
+      { result: 'sent' },
+      { result: 'WHATSAPP_ERROR' },
+      { result: 'WHATSAPP_TIMEOUT' },
+      { result: 'SESSION_NOT_READY' },
+      { result: 'INTERNAL' },
+      { result: 'UNKNOWN_OUTCOME' }
+    ]
   },
   sendDurationSeconds: {
     name: 'gw_send_duration_seconds',
@@ -123,13 +143,39 @@ export const METRIC_DEFINITIONS = {
     name: 'gw_browser_recoveries_total',
     type: 'counter',
     help: 'Sessions the adapter found with their browser or page gone (killed, crashed, closed) and sent to reconnect, by code (BROWSER_DISCONNECTED, PAGE_CLOSED, PAGE_CRASHED, other).',
-    labels: ['code']
+    labels: ['code'],
+    seed: [
+      { code: 'BROWSER_DISCONNECTED' },
+      { code: 'PAGE_CLOSED' },
+      { code: 'PAGE_CRASHED' },
+      { code: 'other' }
+    ]
   },
   authQuarantined: {
     name: 'gw_auth_quarantined_total',
     type: 'counter',
     help: 'Saved logins the gateway moved to quarantine on its own because WhatsApp refused them (the account was unlinked while the gateway was stopped).',
     labels: []
+  },
+  logouts: {
+    name: 'gw_logout_total',
+    type: 'counter',
+    help: 'Sessions WhatsApp Web logged out on its own, by the reason it gave (client_fatal, sync_fail, history_sync_timeout, account_locked, unspecified when it gave none, other).',
+    labels: ['reason'],
+    seed: [
+      { reason: 'client_fatal' },
+      { reason: 'sync_fail' },
+      { reason: 'history_sync_timeout' },
+      { reason: 'account_locked' },
+      { reason: 'unspecified' },
+      { reason: 'other' }
+    ]
+  },
+  waWebBuild: {
+    name: 'gw_wa_web_build_info',
+    type: 'gauge',
+    help: 'Sessions running each WhatsApp Web build, by version (2.3000.<number>, or unknown).',
+    labels: ['version']
   },
   policyDecisions: {
     name: 'gw_policy_decisions_total',

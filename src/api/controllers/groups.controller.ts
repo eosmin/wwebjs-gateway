@@ -89,8 +89,8 @@ export class GroupsController {
     scope: 'manage',
     summary: 'Create a group',
     description:
-      'Creates the group with the listed participants (user ids; the account is the creator). WhatsApp answers per participant: one it cannot add directly gets an invite when `autoSendInviteV4` is true (the wwebjs default), and its entry says so. Fails with `WHATSAPP_ERROR` when WhatsApp does not create the group.',
-    errors: ON_SESSION,
+      'Creates the group with the listed participants (user ids; the account is the creator). WhatsApp answers per participant: one it cannot add directly gets an invite when `autoSendInviteV4` is true (the wwebjs default), and its entry says so. Fails with `WHATSAPP_ERROR` when WhatsApp does not create the group. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    errors: [...ON_SESSION, 'OPERATION_DISABLED'],
     examples: {
       request: { subject: 'Clientes', participants: [USER_ID], messageTimer: 0 },
       response: {
@@ -157,8 +157,8 @@ export class GroupsController {
     scope: 'manage',
     summary: 'Join a group by its invite code',
     description:
-      'Joins the group of an invite link (`https://chat.whatsapp.com/<inviteCode>`) and answers its id. Fails with `WHATSAPP_ERROR` when the code is wrong, expired or revoked, or when the group asks an admin to approve.',
-    errors: ON_SESSION,
+      'Joins the group of an invite link (`https://chat.whatsapp.com/<inviteCode>`) and answers its id. Fails with `WHATSAPP_ERROR` when the code is wrong, expired or revoked, or when the group asks an admin to approve. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    errors: [...ON_SESSION, 'OPERATION_DISABLED'],
     examples: {
       request: { inviteCode: 'AbCdEfGhIjKlMnOpQrStUv' },
       response: { groupId: GROUP_ID }
@@ -264,8 +264,8 @@ export class GroupsController {
     scope: 'manage',
     summary: 'Add, remove, promote or demote participants',
     description:
-      'One action on a list of user ids. `add` answers per participant (a participant WhatsApp cannot add gets an invite when `options.autoSendInviteV4` is true); the other three answer the `status` WhatsApp gave. Needs an admin account. At most 256 ids per call. **`add` is off by default** (`ENABLE_ADD_PARTICIPANTS=false`): it answers `501 UNSUPPORTED_OPERATION` without calling WhatsApp, as a precaution, because on two test accounts WhatsApp logged the account out right after an add (the cause is not proven). `remove`, `promote` and `demote` are always on.',
-    errors: [...ON_GROUP, 'UNSUPPORTED_OPERATION'],
+      'One action on a list of user ids. `add` answers per participant (a participant WhatsApp cannot add gets an invite when `options.autoSendInviteV4` is true); the other three answer the `status` WhatsApp gave. Needs an admin account. At most 256 ids per call. **Switched off by default** (`ENABLE_GROUP_WRITES=false`, every action): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group changes goes against the terms of WhatsApp and can get the account blocked (an `add` was followed by a logout on two test accounts; the cause is not proven).',
+    errors: [...ON_GROUP, 'OPERATION_DISABLED'],
     examples: {
       request: { action: 'add', participants: [USER_ID], options: { autoSendInviteV4: false } },
       response: {
@@ -321,8 +321,8 @@ export class GroupsController {
     scope: 'manage',
     summary: 'Revoke the invite link of a group',
     description:
-      'The old link stops working; read the new one with `groups.invite`. Needs an admin account.',
-    errors: ON_GROUP,
+      'The old link stops working; read the new one with `groups.invite`. Needs an admin account. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    errors: [...ON_GROUP, 'OPERATION_DISABLED'],
     examples: { request: null, response: null },
     wwebjs: ['GroupChat.revokeInvite']
   })
