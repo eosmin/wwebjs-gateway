@@ -16,7 +16,7 @@ This is operational guidance, not legal advice: read the current WhatsApp terms 
 The first weeks in production are a bounded pilot, not a launch. The aim is to find out how the real accounts behave before the volume is the real volume.
 
 **Start small.**
-1. One session, one number you can afford to lose, on the pinned build (see below). Keep `ENABLE_ADD_PARTICIPANTS=false` and `ALLOW_COLD_SENDS=false`.
+1. One session, one number you can afford to lose, on the pinned build (see below). Keep `ENABLE_GROUP_WRITES=false` (group changes, including adding members, answer `403 OPERATION_DISABLED`) and `ALLOW_COLD_SENDS=false`.
 2. A handful of chats that wrote to you first (people who expect the messages). No broadcasts, no first messages to strangers.
 3. Leave the warm-up on (`WARMUP_DAYS=14`, `WARMUP_START_FRACTION=0.1`): a new session starts at a tenth of its limits and ramps up.
 4. Load [`ops/prometheus-alerts.yml`](../ops/prometheus-alerts.yml) before the first message, and send its alerts to someone who will read them the same day.
@@ -56,7 +56,7 @@ WhatsApp Web is not a fixed program. It ships a new build every few hours (three
 3. **Look at the release watch.** The job `wwebjs release watch` (`.github/workflows/wwebjs-watch.yml`) opens one issue when npm has a newer `whatsapp-web.js`. It does **not** look at the WhatsApp Web build: a break can come without any release. If a newer library exists, read its notes; fixes for new builds often arrive there first.
 4. **Find what changed, without an account.** Follow the procedure of `sessions.md` ("Checking an upgrade of whatsapp-web.js with a real account", step 5 and the probe for modules): open WhatsApp Web in a browser of your own with a throwaway profile (never a profile of a session), without linking anything, and read the signature of the functions in the `[signature]` message. Compare with what `node_modules/whatsapp-web.js/src` passes. The findings of earlier rounds are in the plan (`IMPLEMENTATION_PLAN.md`, 10.4) and in the patch (`patches/whatsapp-web.js@1.34.8.patch`): a function that changed from positional arguments to one object is fixed there, with a test that uses a fake `window`.
 5. **Put the fix in the patch, test it, verify it live.** Change the patch with `pnpm patch whatsapp-web.js@<version>` and `pnpm patch-commit`, add the test, and run the live checks of `sessions.md` with a test account before it reaches production.
-6. **Meanwhile, stop the damage.** Stop sending on the sessions that fail, and keep the rest. For a feature that is known to be risky, use its flag (`ENABLE_ADD_PARTICIPANTS`).
+6. **Meanwhile, stop the damage.** Stop sending on the sessions that fail, and keep the rest. For a feature that is known to be risky, use its flag (`ENABLE_GROUP_WRITES` for the group changes).
 7. **Pin a build that was checked, to stop moving.** See the next part.
 
 ### Pinning a WhatsApp Web build
