@@ -39,6 +39,7 @@ optional: it carries extra data of some codes (the issues of a `VALIDATION_ERROR
 | `RATE_LIMITED` | 429 Too Many Requests | The API key or the client address sent more than RATE_LIMIT_MAX requests in a minute; wait the seconds in the Retry-After header. |
 | `SEND_QUEUE_FULL` | 429 Too Many Requests | The send queue of the session (SEND_QUEUE_MAX_PER_SESSION) or of the whole gateway (SEND_QUEUE_MAX_TOTAL) is full; nothing was queued. `details.scope` is `session` or `global`. Wait the seconds in the Retry-After header; a repeat with the same Idempotency-Key is safe. |
 | `INTERNAL` | 500 Internal Server Error | Unexpected failure of the gateway; the message is hidden in production. |
+| `UNSUPPORTED_OPERATION` | 501 Not Implemented | The operation is switched off in this gateway; the message says which setting turns it on and why it is off. Nothing was sent to WhatsApp. |
 | `UNKNOWN_OUTCOME` | 502 Bad Gateway | The send timed out after it was dispatched, so whether it reached WhatsApp is unknown; it is never retried automatically. |
 | `ACK_ERROR` | 502 Bad Gateway | WhatsApp reported a delivery error (ack -1) for the message. |
 | `WHATSAPP_ERROR` | 502 Bad Gateway | WhatsApp Web failed to carry out the operation. `details.kind: "mapping"` marks the case where the operation ran but the gateway could not read its answer (a send made through the send queue ends as `UNKNOWN_OUTCOME` in that case). |

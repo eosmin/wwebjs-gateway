@@ -1,4 +1,11 @@
-import { NotFoundError, ValidationError, WhatsAppError } from '../common/errors.js'
+import { TEST_ENV } from '../../tests/helpers/env.js'
+import {
+  NotFoundError,
+  UnsupportedOperationError,
+  ValidationError,
+  WhatsAppError
+} from '../common/errors.js'
+import { parseEnv } from '../config/env.schema.js'
 import type { SessionManager } from '../whatsapp/session-manager.service.js'
 import type { WhatsAppClientPort } from '../whatsapp/whatsapp-client.port.js'
 
@@ -7,13 +14,19 @@ import type { MediaResolverService } from './media-resolver.service.js'
 
 const ok = (value: unknown = undefined) => jest.fn(() => Promise.resolve(value))
 
+// The participant changes are off by default; the specs that use them turn them on
+const config = (env: Record<string, string> = {}) =>
+  parseEnv({ ...TEST_ENV, ENABLE_ADD_PARTICIPANTS: 'true', ...env })
+
 const build = (
   client: Partial<Record<keyof WhatsAppClientPort, jest.Mock>>,
-  resolve: jest.Mock = jest.fn()
+  resolve: jest.Mock = jest.fn(),
+  env: Record<string, string> = {}
 ) => {
   const requireReady = jest.fn(() => client)
   return {
     service: new GroupsService(
+      config(env),
       { requireReady } as unknown as SessionManager,
       { resolve } as unknown as MediaResolverService
     ),
@@ -48,7 +61,11 @@ describe('GroupsService reads', () => {
     const requireReady = jest.fn(() => {
       throw new Error('not ready')
     })
-    const service = new GroupsService({ requireReady } as unknown as SessionManager, {} as never)
+    const service = new GroupsService(
+      config(),
+      { requireReady } as unknown as SessionManager,
+      {} as never
+    )
 
     expect(() => service.inviteCode('s', 'g@g.us')).toThrow('not ready')
     expect(getChats).not.toHaveBeenCalled()
@@ -113,6 +130,65 @@ describe('GroupsService create and participants', () => {
       service.participants('s', 'g@g.us', { action, participants: ['a@c.us'] })
     ).resolves.toEqual({ status: 200 })
     expect(stub).toHaveBeenCalledWith('g@g.us', ['a@c.us'])
+  })
+})
+
+describe('GroupsService adding participants while it is off', () => {
+  const calls = [
+    'addParticipants',
+    'removeParticipants',
+    'promoteParticipants',
+    'demoteParticipants'
+  ] as const
+
+  it('refuses an add with UNSUPPORTED_OPERATION and never touches the client', async () => {
+    const stubs = Object.fromEntries(calls.map(name => [name, ok({ status: 200 })]))
+    const { service, requireReady } = build(stubs, jest.fn(), {
+      ENABLE_ADD_PARTICIPANTS: 'false'
+    })
+
+    const refusal = service.participants('s', 'g@g.us', {
+      action: 'add',
+      participants: ['a@c.us']
+    })
+
+    await expect(refusal).rejects.toBeInstanceOf(UnsupportedOperationError)
+    await expect(refusal).rejects.toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+      status: 501,
+      message: expect.stringContaining('ENABLE_ADD_PARTICIPANTS=true') as unknown
+    })
+    expect(requireReady).not.toHaveBeenCalled()
+    for (const name of calls) expect(stubs[name]).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['remove', 'removeParticipants'],
+    ['promote', 'promoteParticipants'],
+    ['demote', 'demoteParticipants']
+  ] as const)('%s still goes through with the flag off', async (action, call) => {
+    const stub = ok({ status: 200 })
+    const { service } = build({ [call]: stub }, jest.fn(), { ENABLE_ADD_PARTICIPANTS: 'false' })
+
+    await expect(
+      service.participants('s', 'g@g.us', { action, participants: ['a@c.us'] })
+    ).resolves.toEqual({ status: 200 })
+    expect(stub).toHaveBeenCalledWith('g@g.us', ['a@c.us'])
+  })
+
+  it('is off when the variable is not set at all', () => {
+    const env = { ...TEST_ENV }
+    delete (env as Record<string, string | undefined>)['ENABLE_ADD_PARTICIPANTS']
+    expect(parseEnv(env).ENABLE_ADD_PARTICIPANTS).toBe(false)
+  })
+
+  it('still creates a group with its first participants', async () => {
+    const createGroup = ok({ title: 'G', gid: 'g@g.us', participants: {} })
+    const { service } = build({ createGroup }, jest.fn(), { ENABLE_ADD_PARTICIPANTS: 'false' })
+
+    await service.create('s', { subject: 'G', participants: ['a@c.us'] })
+
+    expect(createGroup).toHaveBeenCalledTimes(1)
   })
 })
 
