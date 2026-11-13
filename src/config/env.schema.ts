@@ -248,7 +248,7 @@ export const envSchema = z
       'Milliseconds a synchronous send request waits for the outcome'
     ),
     SEND_MAX_WAIT_MS: count(300000, { min: 1 }).describe(
-      'Milliseconds an accepted send may wait in the queue before it fails'
+      'Milliseconds an accepted send waits for a session that is not ready, counted from when it first finds the session not ready (not from when it was queued), before it fails'
     ),
     SEND_NOT_READY_RETRY_MS: count(5000, { min: 1 }).describe(
       'Milliseconds before a send is retried while its session is not ready'
@@ -273,7 +273,7 @@ export const envSchema = z
       'Sends all the sessions together may have waiting or running; the next one is refused with 429 SEND_QUEUE_FULL'
     ),
     SEND_ENQUEUE_TIMEOUT_MS: count(5000, { min: 1 }).describe(
-      'Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE'
+      'Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE, or a webhook delivery before it is marked failed'
     ),
 
     // Send policy (every value can be overridden per session)

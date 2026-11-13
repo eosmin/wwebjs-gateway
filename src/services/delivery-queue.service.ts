@@ -4,6 +4,8 @@ import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common
 import { type JobType, Queue } from 'bullmq'
 import { z } from 'zod'
 
+import { WhatsAppError } from '../common/errors.js'
+import { withTimeout } from '../common/lib/timeout.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { closeQueue } from '../infra/redis/bullmq-close.js'
@@ -128,13 +130,24 @@ export class DeliveryQueueService implements OnModuleDestroy {
       : options.inlineMedia === true
         ? INLINE_FAILED_KEPT_SECONDS
         : FAILED_KEPT_SECONDS
-    await this.open().add(DELIVER_JOB_NAME, data, {
+    const adding = this.open().add(DELIVER_JOB_NAME, data, {
       jobId: `${data.deliveryId}${JOB_ID_SEPARATOR}${randomUUID()}`,
       attempts: this.config.WEBHOOK_MAX_ATTEMPTS,
       backoff: { type: 'exponential', delay: this.config.WEBHOOK_BACKOFF_MS },
       removeOnComplete: { age: credential ? CREDENTIAL_KEPT_SECONDS : COMPLETED_KEPT_SECONDS },
       removeOnFail: { age: failedKept }
     })
+    try {
+      await withTimeout(adding, this.config.SEND_ENQUEUE_TIMEOUT_MS, 'delivery queue add')
+    } catch (error: unknown) {
+      if (!(error instanceof WhatsAppError)) throw error
+      // The add cannot be cancelled and may still land: the caller is told it failed (the delivery is
+      // marked failed), so a job that lands late is withdrawn, best effort, and never delivers behind it
+      void adding.then(job => job.remove()).catch(() => undefined)
+      throw new Error('The delivery queue (Redis) did not confirm the job in time', {
+        cause: error
+      })
+    }
   }
 
   // The state of the job of every delivery the queue holds, by delivery id. It reads the ids of the

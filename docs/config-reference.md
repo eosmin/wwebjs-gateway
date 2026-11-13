@@ -64,7 +64,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `SEND_MIN_INTERVAL_MS` | integer, 0 or more | no | `1000` | Minimum milliseconds between two sends of the same session |
 | `SEND_JITTER_MS` | integer, 0 or more | no | `400` | Random milliseconds added to the send interval |
 | `SEND_SYNC_TIMEOUT_MS` | integer, 1 or more | no | `60000` | Milliseconds a synchronous send request waits for the outcome |
-| `SEND_MAX_WAIT_MS` | integer, 1 or more | no | `300000` | Milliseconds an accepted send may wait in the queue before it fails |
+| `SEND_MAX_WAIT_MS` | integer, 1 or more | no | `300000` | Milliseconds an accepted send waits for a session that is not ready, counted from when it first finds the session not ready (not from when it was queued), before it fails |
 | `SEND_NOT_READY_RETRY_MS` | integer, 1 or more | no | `5000` | Milliseconds before a send is retried while its session is not ready |
 | `SEND_BREAKER_THRESHOLD` | integer, 1 or more | no | `5` | Consecutive send failures that open the circuit breaker of a session |
 | `SEND_BREAKER_COOLDOWN_MS` | integer, 1 or more | no | `60000` | Milliseconds an open circuit breaker stays open |
@@ -73,7 +73,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `MEDIA_FETCH_TIMEOUT_MS` | integer, 1 or more | no | `30000` | Milliseconds the download of a media URL of a send may take |
 | `SEND_QUEUE_MAX_PER_SESSION` | integer, 1 or more | no | `500` | Sends a session may have waiting or running in its queue; the next one is refused with 429 SEND_QUEUE_FULL. Redis keeps every job, media included, so the memory this allows is this number times the size of the sends |
 | `SEND_QUEUE_MAX_TOTAL` | integer, 1 or more | no | `2000` | Sends all the sessions together may have waiting or running; the next one is refused with 429 SEND_QUEUE_FULL |
-| `SEND_ENQUEUE_TIMEOUT_MS` | integer, 1 or more | no | `5000` | Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE |
+| `SEND_ENQUEUE_TIMEOUT_MS` | integer, 1 or more | no | `5000` | Milliseconds the gateway waits for Redis to accept a send before it answers 503 QUEUE_UNAVAILABLE, or a webhook delivery before it is marked failed |
 | `CONVERSATION_WINDOW_HOURS` | integer, 1 or more | no | `24` | Hours after the last inbound message during which a chat counts as a conversation |
 | `ALLOW_COLD_SENDS` | `true`, `false` | no | `false` | Allow sending to chats without a conversation |
 | `COLD_SENDS_PER_DAY` | integer, 0 to 1000 | no | `20` | Cold sends allowed per session per day |

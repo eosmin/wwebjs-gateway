@@ -264,15 +264,33 @@ describe('SendJobProcessor', () => {
       expect(result.outcome.ok).toBe(true)
     })
 
-    it('gives up with SESSION_NOT_READY after SEND_MAX_WAIT_MS from the moment it was queued', async () => {
+    it('gives up with SESSION_NOT_READY once the session has been missing for SEND_MAX_WAIT_MS', async () => {
+      jest.useFakeTimers()
+      try {
+        ready = false
+        const pending = run(build({ SEND_MAX_WAIT_MS: 100 }))
+        await jest.advanceTimersByTimeAsync(99)
+        expect(hooks.markDispatched).not.toHaveBeenCalled()
+        await jest.advanceTimersByTimeAsync(51)
+        const result = await pending
+
+        expect(result.outcome).toMatchObject({ ok: false, error: { code: 'SESSION_NOT_READY' } })
+        expect(result.hardFailure).toBe(false)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('does not fail a job queued long ago, or held for hours, when the session blinks', async () => {
       ready = false
+      setTimeout(() => (ready = true), 80)
+      // Queued far longer ago than SEND_MAX_WAIT_MS, as a cold send held by quiet hours is
       const result = await run(
-        build({ SEND_MAX_WAIT_MS: 100 }),
-        job({ enqueuedAt: Date.now() - 200 })
+        build({ SEND_MAX_WAIT_MS: 1000 }),
+        job({ enqueuedAt: Date.now() - 6 * 3_600_000, waitedMs: 6 * 3_600_000 })
       )
 
-      expect(result.outcome).toMatchObject({ ok: false, error: { code: 'SESSION_NOT_READY' } })
-      expect(result.hardFailure).toBe(false)
+      expect(result.outcome.ok).toBe(true)
     })
 
     it('fails with NOT_FOUND when the session no longer exists', async () => {
@@ -300,14 +318,22 @@ describe('SendJobProcessor', () => {
       expect(client.callsOf('sendMessage')).toHaveLength(2)
     })
 
-    it('stops retrying a pre-dispatch failure once the job is out of time', async () => {
-      client.failNext('sendMessage', new WaTimeoutError('sendMessage', false), 5)
-      const result = await run(
-        build({ SEND_MAX_WAIT_MS: 100 }),
-        job({ enqueuedAt: Date.now() - 200 })
-      )
+    it('stops retrying a pre-dispatch failure once SEND_MAX_WAIT_MS has passed since the first one', async () => {
+      jest.useFakeTimers()
+      try {
+        client.failNext('sendMessage', new WaTimeoutError('sendMessage', false), 50)
+        const pending = run(build({ SEND_MAX_WAIT_MS: 100 }))
+        await jest.advanceTimersByTimeAsync(40)
+        expect(client.callsOf('sendMessage').length).toBeGreaterThan(0)
+        await jest.advanceTimersByTimeAsync(200)
+        const result = await pending
 
-      expect(result.outcome).toMatchObject({ ok: false, error: { code: 'WHATSAPP_TIMEOUT' } })
+        expect(result.outcome).toMatchObject({ ok: false, error: { code: 'WHATSAPP_TIMEOUT' } })
+        // Several tries, not one: a job queued long ago still gets its budget of retries
+        expect(client.callsOf('sendMessage').length).toBeGreaterThan(1)
+      } finally {
+        jest.useRealTimers()
+      }
     })
 
     // Every error the adapter can raise needs a decision here: did the message possibly leave? A new

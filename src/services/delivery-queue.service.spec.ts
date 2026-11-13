@@ -67,7 +67,11 @@ function setup() {
   returnvalues.clear()
   const client = { status: 'ready' }
   const service = new DeliveryQueueService(
-    { WEBHOOK_MAX_ATTEMPTS: 7, WEBHOOK_BACKOFF_MS: 1500 } as AppConfig,
+    {
+      WEBHOOK_MAX_ATTEMPTS: 7,
+      WEBHOOK_BACKOFF_MS: 1500,
+      SEND_ENQUEUE_TIMEOUT_MS: 5000
+    } as AppConfig,
     { client } as unknown as RedisService
   )
   return { service, client }
@@ -97,6 +101,45 @@ describe('DeliveryQueueService', () => {
 
     // A job added now would wait in the offline queue and go out after the caller was told it failed
     expect(queues).toHaveLength(0)
+  })
+
+  describe('when Redis does not confirm the add', () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it('fails after SEND_ENQUEUE_TIMEOUT_MS instead of holding the dispatcher for ever', async () => {
+      const { service } = setup()
+      await service.enqueue(JOB)
+      opened().add.mockImplementationOnce(() => new Promise(() => undefined))
+
+      const outcome = service.enqueue({ ...JOB, deliveryId: 'd2' }).catch((error: unknown) => error)
+      await jest.advanceTimersByTimeAsync(4999)
+      expect(await Promise.race([outcome, Promise.resolve('waiting')])).toBe('waiting')
+      await jest.advanceTimersByTimeAsync(1)
+
+      expect(await outcome).toMatchObject({
+        message: expect.stringContaining('did not confirm') as string
+      })
+    })
+
+    it('withdraws the job if the add lands after the caller was told it failed', async () => {
+      const { service } = setup()
+      await service.enqueue(JOB)
+      const remove = jest.fn(() => Promise.resolve())
+      let land: (job: { remove: () => Promise<void> }) => void = () => undefined
+      const late = new Promise<{ remove: () => Promise<void> }>(resolve => {
+        land = resolve
+      })
+      opened().add.mockImplementationOnce(() => late as unknown as Promise<void>)
+
+      const outcome = service.enqueue({ ...JOB, deliveryId: 'd2' }).catch((error: unknown) => error)
+      await jest.advanceTimersByTimeAsync(5000)
+      await outcome
+      land({ remove })
+      await jest.advanceTimersByTimeAsync(0)
+
+      expect(remove).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('opens the queue of the deliveries on the shared Redis connection, once', async () => {
