@@ -459,7 +459,7 @@ index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..697a08bdbc39ddf4554052e5ce51ee627b180901 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..aef4ebe55f3e882ad5cf129f6ad08f7682c0cfcc 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
 @@ -110,6 +110,113 @@ exports.LoadUtils = () => {
@@ -737,7 +737,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..697a08bdbc39ddf4554052e5ce51ee62
          const response = await window
              .require('WAWebNewsletterMetadataQueryJob')
              .queryNewsletterMetadataByInviteCode(inviteCode, role);
-@@ -1334,28 +1460,150 @@ exports.LoadUtils = () => {
+@@ -1334,28 +1460,164 @@ exports.LoadUtils = () => {
          return undefined;
      };
  
@@ -799,13 +799,22 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..697a08bdbc39ddf4554052e5ce51ee62
 +        if (stack.type !== 'web')
 +            throw fail(`the VoIP stack is of the type ${String(stack.type)}`);
 +
-+        // The keys and types of what the stack says about the call, for the log only: a failure
-+        // here never changes the answer
++        // What the stack says about the call, for the log only and never on the critical path: it
++        // gets 1 s, and a failure or a silence changes nothing. Keys and types of an object; for a
++        // string only whether it names this call, never what it says.
 +        const callInfo = async () => {
 +            if (typeof stack.getCallInfo !== 'function') return 'absent';
 +            try {
-+                const info = await stack.getCallInfo();
++                const info = await Promise.race([
++                    stack.getCallInfo(),
++                    new Promise((resolve) =>
++                        setTimeout(() => resolve('__timeout__'), 1000),
++                    ),
++                ]);
++                if (info === '__timeout__') return 'timeout';
 +                if (info == null) return 'null';
++                if (typeof info === 'string')
++                    return info.includes(id) ? 'string:names-the-call' : 'string:other';
 +                if (typeof info !== 'object') return typeof info;
 +                return Object.keys(info)
 +                    .slice(0, 40)
@@ -840,6 +849,16 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..697a08bdbc39ddf4554052e5ce51ee62
 -                id: window.require('WAWap').generateId(),
 -                from: userId,
 -                to: peerJid,
+-            },
+-            [
+-                window.require('WAWap').wap('reject', {
+-                    'call-id': id,
+-                    'call-creator': peerJid,
+-                    count: '0',
+-                }),
+-            ],
+-        );
+-        await window.require('WADeprecatedSendIq').deprecatedCastStanza(stanza);
 +        const gone = () => wasListed && !listed();
 +        let confirmed = false;
 +        for (let waited = 0; waited < 3000; waited += 100) {
@@ -870,44 +889,40 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..697a08bdbc39ddf4554052e5ce51ee62
 +                }
 +            return found.slice(0, 60);
 +        };
-+        const all = models();
-+        return {
-+            result: 'rejected',
-+            confirmed,
-+            diag: {
-+                build,
-+                wasListed,
-+                idType: typeof id,
-+                idLength: String(id).length,
-+                id: cut(id),
-+                lastEnded: { before: endedBefore, after: endedIsIt() },
-+                callInfo: { before: infoBefore, after: await callInfo() },
-+                stack: { type: stack.type, members: members(stack) },
-+                collection: {
-+                    size: all.length,
-+                    ids: all.slice(0, 6).map((model) => cut(model && model.id)),
-+                    idTypes: all.slice(0, 6).map((model) => typeof (model && model.id)),
-+                    modelKeys: all[0] ? Object.keys(all[0]).slice(0, 25) : [],
-+                    members: members(calls).filter((m) => !m.endsWith(':function')),
++        // The report is for the log: the reject is done, so nothing in it may turn into an error
++        try {
++            const all = models();
++            return {
++                result: 'rejected',
++                confirmed,
++                diag: {
++                    build,
++                    wasListed,
++                    idType: typeof id,
++                    idLength: String(id).length,
++                    id: cut(id),
++                    lastEnded: { before: endedBefore, after: endedIsIt() },
++                    callInfo: { before: infoBefore, after: await callInfo() },
++                    stack: { type: stack.type, members: members(stack) },
++                    collection: {
++                        size: all.length,
++                        ids: all.slice(0, 6).map((model) => cut(model && model.id)),
++                        idTypes: all.slice(0, 6).map((model) => typeof (model && model.id)),
++                        modelKeys: all[0] ? Object.keys(all[0]).slice(0, 25) : [],
++                        members: members(calls).filter((m) => !m.endsWith(':function')),
++                    },
++                    activeCall: cut(calls.activeCall && calls.activeCall.id),
++                    lastActiveCall: cut(calls.lastActiveCall && calls.lastActiveCall.id),
++                    lastEndedCall: cut(calls.lastEndedCall && calls.lastEndedCall.id),
 +                },
-+                activeCall: cut(calls.activeCall && calls.activeCall.id),
-+                lastActiveCall: cut(calls.lastActiveCall && calls.lastActiveCall.id),
-+                lastEndedCall: cut(calls.lastEndedCall && calls.lastEndedCall.id),
-             },
--            [
--                window.require('WAWap').wap('reject', {
--                    'call-id': id,
--                    'call-creator': peerJid,
--                    count: '0',
--                }),
--            ],
--        );
--        await window.require('WADeprecatedSendIq').deprecatedCastStanza(stanza);
-+        };
++            };
++        } catch (e) {
++            return { result: 'rejected', confirmed, diag: { build, note: 'report failed' } };
++        }
      };
  
      window.WWebJS.cropAndResizeImage = async (media, options = {}) => {
-@@ -1742,20 +1990,30 @@ exports.LoadUtils = () => {
+@@ -1742,20 +2004,30 @@ exports.LoadUtils = () => {
  
          if (typeof duration !== 'number') return false;
  

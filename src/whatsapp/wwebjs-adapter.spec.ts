@@ -2076,7 +2076,29 @@ describe('boundaries', () => {
 
     await expect(h.adapter.rejectCall('c1')).resolves.toBe('unconfirmed')
 
-    expect(debug).toHaveBeenCalledWith(expect.stringContaining('"wasListed":false'))
+    expect(debug).toHaveBeenCalledWith(
+      expect.stringMatching(/^rejectCall report from the page: .*"wasListed":false/)
+    )
+  })
+
+  it('warns when the page answers nothing, which is what a library without the patch does', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const h = harness()
+    ready(h)
+    h.client.emit('call', {
+      id: 'c1',
+      timestamp: 1,
+      isVideo: false,
+      isGroup: false,
+      fromMe: false,
+      canHandleLocally: false,
+      webClientShouldHandle: false,
+      reject: jest.fn().mockResolvedValue(undefined)
+    })
+
+    await expect(h.adapter.rejectCall('c1')).resolves.toBe('unconfirmed')
+
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/rejectCall.*patch/))
   })
 
   it('keeps no more calls to reject than CALL_CACHE_SIZE, dropping the oldest', async () => {

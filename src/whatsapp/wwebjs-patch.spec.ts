@@ -656,6 +656,83 @@ describe('the patched whatsapp-web.js', () => {
         expect(JSON.stringify(outcome.diag.callInfo)).not.toContain('secret')
       })
 
+      it('says only whether a string answer of getCallInfo names the call, never what it says', async () => {
+        const mentions = await reportOf({
+          getCallInfo: jest.fn().mockResolvedValue('{"callId":"c1","secret":"x"}')
+        })
+        const other = await reportOf({
+          getCallInfo: jest.fn().mockResolvedValue('{"callId":"zzz","secret":"x"}')
+        })
+
+        expect(mentions.diag.callInfo).toEqual({
+          before: 'string:names-the-call',
+          after: 'string:names-the-call'
+        })
+        expect(other.diag.callInfo).toEqual({
+          before: 'string:other',
+          after: 'string:other'
+        })
+        expect(JSON.stringify([mentions, other])).not.toContain('secret')
+      })
+
+      it('does not wait for a getCallInfo that never settles before it rejects', async () => {
+        jest.useFakeTimers()
+        try {
+          const withReason = jest.fn(() => Promise.resolve())
+          const p = page(null, { listed: [] })
+          p.modules['WAWebVoipStackInterface'] = {
+            getVoipStackInterface: () =>
+              Promise.resolve({
+                type: 'web',
+                rejectCallWithEndReason: withReason,
+                getCallInfo: () => new Promise(() => undefined)
+              })
+          }
+          const pending = reject(p)
+          await jest.advanceTimersByTimeAsync(1500)
+
+          expect(withReason).toHaveBeenCalledTimes(1)
+          await jest.advanceTimersByTimeAsync(8000)
+          await expect(pending).resolves.toMatchObject({ result: 'rejected', confirmed: false })
+        } finally {
+          jest.useRealTimers()
+        }
+      })
+
+      it('answers that it rejected even when reading the report throws after the reject', async () => {
+        jest.useFakeTimers()
+        try {
+          const p = page(null, { listed: [] })
+          const collection = p.modules['WAWebCallCollection'] as Record<string, unknown>
+          let rejected = false
+          Object.defineProperty(collection, 'lastActiveCall', {
+            get: () => {
+              if (rejected) throw new Error('a getter of the page failed')
+              return null
+            }
+          })
+          p.modules['WAWebVoipStackInterface'] = {
+            getVoipStackInterface: () =>
+              Promise.resolve({
+                type: 'web',
+                rejectCallWithEndReason: () => {
+                  rejected = true
+                  return Promise.resolve()
+                }
+              })
+          }
+          const pending = reject(p)
+          await jest.advanceTimersByTimeAsync(5000)
+
+          const outcome = (await pending) as Outcome & { diag?: Record<string, unknown> }
+          expect(outcome).toMatchObject({ result: 'rejected', confirmed: false })
+          expect(JSON.stringify(outcome.diag)).toContain('report failed')
+          expect(JSON.stringify(outcome.diag)).not.toContain('getter of the page')
+        } finally {
+          jest.useRealTimers()
+        }
+      })
+
       it('works with a stack that has no getCallInfo', async () => {
         const outcome = await reportOf({})
 

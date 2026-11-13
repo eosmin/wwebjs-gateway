@@ -2059,10 +2059,14 @@ export class WwebjsAdapter implements WhatsAppClientPort {
         throw error
       }
       const { result, diag } = rejectResultOf(answer)
-      if (diag !== undefined) {
-        this.logger.debug(
-          `rejectCall not confirmed by the page: ${JSON.stringify(diag).slice(0, 4000)}`
+      if (diag === undefined) {
+        // The patched page always sends a report: none means the patch is not there, and then the
+        // reject was not made through the stack
+        this.logger.warn(
+          'rejectCall: the page gave no report; is the whatsapp-web.js patch applied? The reject may not have been sent through the VoIP stack'
         )
+      } else {
+        this.logger.debug(`rejectCall report from the page: ${JSON.stringify(diag).slice(0, 4000)}`)
       }
       return result
     })
