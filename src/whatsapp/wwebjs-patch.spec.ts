@@ -1291,4 +1291,205 @@ describe('the patched whatsapp-web.js', () => {
       expect(source('structures/GroupChat.js')).not.toMatch(/setGroupDescription\(\s*chatWid/)
     })
   })
+
+  // F25: WhatsApp Web 2.3000.1054456698 no longer exports four functions the library calls. Calling
+  // `undefined(...)` inside the page after a first step had touched the network left a half done
+  // operation; each of them now says which function is gone before anything is sent
+  describe('the functions WhatsApp Web no longer exports (F25)', () => {
+    const client = { client: { pupPage: { evaluate: evaluateHere } } }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const Client = require(join(libraryRoot, 'Client.js')) as {
+      prototype: {
+        setStatus: (s: string) => Promise<void>
+        createGroup: (t: string, p: string[], o: object) => Promise<unknown>
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const Contact = require(join(libraryRoot, 'structures/Contact.js')) as {
+      prototype: { getAbout: () => Promise<string | null> }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a CommonJS file of the library, read for its class
+    const GroupChat = require(join(libraryRoot, 'structures/GroupChat.js')) as {
+      prototype: {
+        revokeInvite: () => Promise<string>
+        addParticipants: (ids: string[], o?: object) => Promise<Record<string, unknown>>
+      }
+    }
+    const wid = (id: string): { _serialized: string; server: string } => ({
+      _serialized: id,
+      server: id.split('@')[1] ?? ''
+    })
+    const widFactory = { createWid: (id: string) => wid(id) }
+
+    it('setStatus names setMyStatus when the bridge no longer has it, and calls it when it does', async () => {
+      const bridge: Record<string, unknown> = { queryStatusAll: jest.fn() }
+      await expect(
+        withPage({ WAWebContactStatusBridge: bridge }, () =>
+          Client.prototype.setStatus.call({ pupPage: { evaluate: evaluateHere } }, 'hi')
+        )
+      ).rejects.toThrow(
+        '[signature] WAWebContactStatusBridge.setMyStatus is not available in WhatsApp Web'
+      )
+
+      const setMyStatus = jest.fn(() => Promise.resolve())
+      bridge.setMyStatus = setMyStatus
+      await withPage({ WAWebContactStatusBridge: bridge }, () =>
+        Client.prototype.setStatus.call({ pupPage: { evaluate: evaluateHere } }, 'hi')
+      )
+      expect(setMyStatus).toHaveBeenCalledWith('hi')
+    })
+
+    it('getAbout names getStatus when the bridge no longer has it', async () => {
+      await expect(
+        withPage({ WAWebWidFactory: widFactory, WAWebContactStatusBridge: {} }, () =>
+          Contact.prototype.getAbout.call({ ...client, id: { _serialized: 'c@c.us' } })
+        )
+      ).rejects.toThrow(
+        '[signature] WAWebContactStatusBridge.getStatus is not available in WhatsApp Web'
+      )
+    })
+
+    it('revokeInvite names resetGroupInviteCode when the job no longer has it', async () => {
+      await expect(
+        withPage({ WAWebWidFactory: widFactory, WAWebGroupQueryJob: {} }, () =>
+          GroupChat.prototype.revokeInvite.call({ ...client, id: { _serialized: 'g@g.us' } })
+        )
+      ).rejects.toThrow(
+        '[signature] WAWebGroupQueryJob.resetGroupInviteCode is not available in WhatsApp Web'
+      )
+    })
+
+    // A participant WhatsApp answers 403 to: the invite message is what is missing
+    const created = (): Record<string, unknown> => ({
+      title: 'g',
+      subject: 'g',
+      wid: wid('g@g.us'),
+      participants: [
+        { wid: wid('p@c.us'), error: 403, invite_code: 'code', invite_code_exp: '1', type: 'x' }
+      ]
+    })
+    const gadd = jest.fn()
+    const groupModules = (invite?: jest.Mock): Record<string, unknown> => ({
+      WAWebWidFactory: widFactory,
+      WAWebQueryExistsJob: { queryWidExists: () => Promise.resolve({ wid: true }) },
+      WAWebGroupCreateJob: { createGroup: () => Promise.resolve(created()) },
+      WAWebCollections: {
+        Contact: { gadd },
+        ProfilePicThumb: { find: () => Promise.resolve(undefined) },
+        Chat: { get: () => ({ id: 'chat' }), find: () => Promise.resolve({ id: 'chat' }) }
+      },
+      WAWebApiContact: { getPhoneNumber: (w: unknown) => w },
+      WAWebChatSendMessages: invite ? { sendGroupInviteMessage: invite } : {}
+    })
+    const createWith = (modules: Record<string, unknown>): Promise<unknown> =>
+      withPage(modules, () =>
+        Client.prototype.createGroup.call({ pupPage: { evaluate: evaluateHere } }, 'g', ['p'], {})
+      )
+
+    it('createGroup keeps the group and says the invite was not sent when its function is gone', async () => {
+      const answer = (await createWith(groupModules())) as {
+        participants: Record<string, { isInviteV4Sent: boolean; message: string }>
+      }
+
+      expect(gadd).not.toHaveBeenCalled()
+      expect(answer.participants['p@c.us']).toMatchObject({ isInviteV4Sent: false })
+      expect(answer.participants['p@c.us']?.message).toContain(
+        '[signature] WAWebChatSendMessages.sendGroupInviteMessage is not available in WhatsApp Web'
+      )
+    })
+
+    it('createGroup still sends the invite when the function is there', async () => {
+      const invite = jest.fn(() => Promise.resolve({ messageSendResult: 'OK' }))
+
+      const answer = (await createWith(groupModules(invite))) as {
+        participants: Record<string, { isInviteV4Sent: boolean }>
+      }
+
+      expect(invite).toHaveBeenCalledTimes(1)
+      expect(answer.participants['p@c.us']?.isInviteV4Sent).toBe(true)
+    })
+
+    // addParticipants: the page answers a 403 for the participant; the rest of the group is as it is
+    const rpc403 = {
+      name: 'AddParticipantsResponseSuccess',
+      value: {
+        addParticipant: [
+          {
+            addParticipantsParticipantAddedOrNonRegisteredWaUserParticipantErrorLidResponseMixinGroup:
+              {
+                value: {
+                  addParticipantsParticipantMixins: {
+                    name: 'ParticipantRequestCodeCanBeSent',
+                    value: { error: '403', addRequestCode: 'c', addRequestExpiration: 1 }
+                  }
+                }
+              }
+          }
+        ]
+      }
+    }
+    const addModules = (invite?: jest.Mock): Record<string, unknown> => ({
+      ...groupModules(invite),
+      WAWebCollections: {
+        Contact: { gadd },
+        ProfilePicThumb: { find: () => Promise.resolve(undefined) },
+        Chat: {
+          get: () => ({
+            id: 'chat',
+            groupMetadata: { participants: { serialize: () => [] } },
+            iAmAdmin: () => true,
+            formattedTitle: 'g'
+          }),
+          find: () => Promise.resolve({ id: 'chat' })
+        }
+      },
+      WAWebGroupQueryJob: { queryAndUpdateGroupMetadataById: () => Promise.resolve() },
+      WAWebWidToJid: { widToGroupJid: (w: unknown) => w, widToUserJid: (w: unknown) => w },
+      WASmaxGroupsAddParticipantsRPC: { sendAddParticipantsRPC: () => Promise.resolve(rpc403) },
+      WAWebFindChatAction: { findOrCreateLatestChat: () => Promise.resolve({ chat: { id: 'c' } }) }
+    })
+    const add = (modules: Record<string, unknown>): Promise<Record<string, unknown>> =>
+      withPage(modules, () =>
+        GroupChat.prototype.addParticipants.call(
+          { ...client, id: { _serialized: 'g@g.us' } },
+          ['p@c.us'],
+          { sleep: 0 }
+        )
+      )
+
+    it('addParticipants answers the 403 with the reason when the invite function is gone', async () => {
+      gadd.mockClear()
+      const answer = (await add(addModules())) as Record<
+        string,
+        { code: number; isInviteV4Sent: boolean; message: string }
+      >
+
+      expect(gadd).not.toHaveBeenCalled()
+      expect(answer['p@c.us']).toMatchObject({ code: 403, isInviteV4Sent: false })
+      expect(answer['p@c.us']?.message).toContain(
+        '[signature] WAWebChatSendMessages.sendGroupInviteMessage is not available in WhatsApp Web'
+      )
+    })
+
+    it('addParticipants still sends the invite when the function is there', async () => {
+      const invite = jest.fn(() => Promise.resolve({ messageSendResult: 'OK' }))
+
+      const answer = (await add(addModules(invite))) as Record<string, { isInviteV4Sent: boolean }>
+
+      expect(invite).toHaveBeenCalledTimes(1)
+      expect(answer['p@c.us']?.isInviteV4Sent).toBe(true)
+    })
+
+    it('addParticipants does not look for the invite function when the caller turned the invite off', async () => {
+      const answer = (await withPage(addModules(), () =>
+        GroupChat.prototype.addParticipants.call(
+          { ...client, id: { _serialized: 'g@g.us' } },
+          ['p@c.us'],
+          { sleep: 0, autoSendInviteV4: false }
+        )
+      )) as Record<string, { message: string }>
+
+      expect(answer['p@c.us']?.message).not.toContain('[signature]')
+    })
+  })
 })

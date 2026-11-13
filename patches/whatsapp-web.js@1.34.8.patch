@@ -1,5 +1,5 @@
 diff --git a/src/Client.js b/src/Client.js
-index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77b77f15cf 100644
+index 62de539540764a88242b243dd8e403166e45c137..f835b33a93cb6b6d0a55a88cfacb4b51d1b80aa4 100644
 --- a/src/Client.js
 +++ b/src/Client.js
 @@ -1127,30 +1127,69 @@ class Client extends EventEmitter {
@@ -191,7 +191,21 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
                      inviteCode,
                      String(inviteCodeExp),
                      groupId,
-@@ -2021,9 +2094,11 @@ class Client extends EventEmitter {
+@@ -2005,9 +2078,10 @@ class Client extends EventEmitter {
+      */
+     async setStatus(status) {
+         await this.pupPage.evaluate(async (status) => {
+-            return await window
+-                .require('WAWebContactStatusBridge')
+-                .setMyStatus(status);
++            return await window.WWebJS.requireFunction(
++                'WAWebContactStatusBridge',
++                'setMyStatus',
++            )(status);
+         }, status);
+     }
+ 
+@@ -2021,9 +2095,11 @@ class Client extends EventEmitter {
          const couldSet = await this.pupPage.evaluate(async (displayName) => {
              if (!window.require('WAWebConnModel').Conn.canSetMyPushname())
                  return false;
@@ -206,7 +220,7 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
              return true;
          }, displayName);
  
-@@ -2415,8 +2490,13 @@ class Client extends EventEmitter {
+@@ -2415,8 +2491,13 @@ class Client extends EventEmitter {
                          .createWid(parentGroupId));
  
                  try {
@@ -222,7 +236,7 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
                          .createGroup(
                              {
                                  addressingModeOverride: 'lid',
-@@ -2434,8 +2514,13 @@ class Client extends EventEmitter {
+@@ -2434,12 +2515,27 @@ class Client extends EventEmitter {
                              },
                              participantWids,
                          );
@@ -237,8 +251,44 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
 +                    );
                  }
  
++                // F25: the function is gone from WhatsApp Web 2.3000.1054456698. Say so for the
++                // participants it was for: failing after the group exists would hide the group
++                const inviteGone = autoSendInviteV4
++                    ? window.WWebJS.missingFunction(
++                          'WAWebChatSendMessages',
++                          'sendGroupInviteMessage',
++                      )
++                    : null;
++
                  for (const participant of createGroupResult.participants) {
-@@ -2658,10 +2743,16 @@ class Client extends EventEmitter {
+                     let isInviteV4Sent = false;
++                    let inviteNote = '';
+                     participant.wid.server == 'lid' &&
+                         (participant.wid = window
+                             .require('WAWebApiContact')
+@@ -2448,7 +2544,9 @@ class Client extends EventEmitter {
+                         participant.wid._serialized || participant.wid.$1;
+                     const statusCode = participant.error || 200;
+ 
+-                    if (autoSendInviteV4 && statusCode === 403) {
++                    if (autoSendInviteV4 && statusCode === 403 && inviteGone) {
++                        inviteNote = ' (the invite message was not sent: ' + inviteGone + ')';
++                    } else if (autoSendInviteV4 && statusCode === 403) {
+                         window
+                             .require('WAWebCollections')
+                             .Contact.gadd(participant.wid, { silent: true });
+@@ -2478,8 +2576,8 @@ class Client extends EventEmitter {
+                     participantData[participantId] = {
+                         statusCode: statusCode,
+                         message:
+-                            addParticipantResultCodes[statusCode] ||
+-                            addParticipantResultCodes.default,
++                            (addParticipantResultCodes[statusCode] ||
++                                addParticipantResultCodes.default) + inviteNote,
+                         isGroupCreator: participant.type === 'superadmin',
+                         isInviteV4Sent: isInviteV4Sent,
+                     };
+@@ -2658,10 +2756,16 @@ class Client extends EventEmitter {
                          .NewsletterMetadataCollection.update(channel.id);
                  }
  
@@ -258,7 +308,7 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
  
                      if (options.shouldDismissSelfAsAdmin) {
                          const meContact = window
-@@ -2875,9 +2966,11 @@ class Client extends EventEmitter {
+@@ -2875,9 +2979,11 @@ class Client extends EventEmitter {
              if (!msg.id.fromMe || !msg.id.remote.isStatus())
                  throw 'Invalid usage! Can only revoke the message its from own status broadcast';
  
@@ -273,7 +323,7 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
          }, messageId);
      }
  
-@@ -3275,9 +3368,14 @@ class Client extends EventEmitter {
+@@ -3275,9 +3381,14 @@ class Client extends EventEmitter {
  
          return await this.pupPage.evaluate(
              async (startTimeTs, callType) => {
@@ -291,11 +341,56 @@ index 62de539540764a88242b243dd8e403166e45c137..efb96a9b241e64d964953a9a534c4b77
                  return response ?? '';
              },
              startTime,
+diff --git a/src/structures/Contact.js b/src/structures/Contact.js
+index b56c967aa9467acb96c5ce6061933c8db68968be..f81c93798b0f859a5b40454d2c0129cec2564c49 100644
+--- a/src/structures/Contact.js
++++ b/src/structures/Contact.js
+@@ -214,9 +214,10 @@ class Contact extends Base {
+     async getAbout() {
+         const about = await this.client.pupPage.evaluate(async (contactId) => {
+             const wid = window.require('WAWebWidFactory').createWid(contactId);
+-            return window
+-                .require('WAWebContactStatusBridge')
+-                .getStatus({ token: '', wid: wid });
++            return window.WWebJS.requireFunction(
++                'WAWebContactStatusBridge',
++                'getStatus',
++            )({ token: '', wid: wid });
+         }, this.id._serialized);
+ 
+         if (typeof about.status !== 'string') return null;
 diff --git a/src/structures/GroupChat.js b/src/structures/GroupChat.js
-index 6bc64ff4cce181344785b63d6777328fde75a991..76b3beb3475b914d02c934d3e37632acdd8b8572 100644
+index 6bc64ff4cce181344785b63d6777328fde75a991..d26279f681fd26e23b0eedd215bc1aaa27ee36f7 100644
 --- a/src/structures/GroupChat.js
 +++ b/src/structures/GroupChat.js
-@@ -417,14 +417,16 @@ class GroupChat extends Chat {
+@@ -84,6 +84,14 @@ class GroupChat extends Chat {
+                     comment = '',
+                 } = options;
+                 const participantData = {};
++                // F25: the function is gone from WhatsApp Web 2.3000.1054456698. A 403 would reach
++                // it after other participants were added, so the answer says so instead
++                const inviteGone = autoSendInviteV4
++                    ? window.WWebJS.missingFunction(
++                          'WAWebChatSendMessages',
++                          'sendGroupInviteMessage',
++                      )
++                    : null;
+ 
+                 !Array.isArray(participantIds) &&
+                     (participantIds = [participantIds]);
+@@ -203,7 +211,10 @@ class GroupChat extends Chat {
+                     participantData[pId].message =
+                         errorCodes[rpcResultCode] || errorCodes.default;
+ 
+-                    if (autoSendInviteV4 && rpcResultCode === 403) {
++                    if (autoSendInviteV4 && rpcResultCode === 403 && inviteGone) {
++                        participantData[pId].message +=
++                            ' (the invite message was not sent: ' + inviteGone + ')';
++                    } else if (autoSendInviteV4 && rpcResultCode === 403) {
+                         let userChat,
+                             isInviteV4Sent = false;
+                         window
+@@ -417,14 +428,16 @@ class GroupChat extends Chat {
                  let descId = chat.groupMetadata.descId;
                  let newId = await window.require('WAWebMsgKey').newId();
                  try {
@@ -320,7 +415,7 @@ index 6bc64ff4cce181344785b63d6777328fde75a991..76b3beb3475b914d02c934d3e37632ac
                      return true;
                  } catch (err) {
                      if (err.name === 'ServerStatusCodeError') return false;
-@@ -577,10 +579,12 @@ class GroupChat extends Chat {
+@@ -577,10 +590,12 @@ class GroupChat extends Chat {
       */
      async getInviteCode() {
          const codeRes = await this.client.pupPage.evaluate(async (chatId) => {
@@ -336,6 +431,20 @@ index 6bc64ff4cce181344785b63d6777328fde75a991..76b3beb3475b914d02c934d3e37632ac
              } catch (err) {
                  if (err.name === 'ServerStatusCodeError') return undefined;
                  throw err;
+@@ -597,9 +612,10 @@ class GroupChat extends Chat {
+     async revokeInvite() {
+         const codeRes = await this.client.pupPage.evaluate((chatId) => {
+             const chatWid = window.require('WAWebWidFactory').createWid(chatId);
+-            return window
+-                .require('WAWebGroupQueryJob')
+-                .resetGroupInviteCode(chatWid);
++            return window.WWebJS.requireFunction(
++                'WAWebGroupQueryJob',
++                'resetGroupInviteCode',
++            )(chatWid);
+         }, this.id._serialized);
+ 
+         return codeRes.code;
 diff --git a/src/structures/Message.js b/src/structures/Message.js
 index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40526f6345 100644
 --- a/src/structures/Message.js
@@ -350,10 +459,10 @@ index ed7991352d7486dc8c624995955b52a1b666c316..aab22a5fb96911d0c0058137689b6b40
              },
              this.id._serialized,
 diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
-index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108fbbf6d4b 100644
+index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..996fcf1f4c2108000982380b2ec4dc6694c7a195 100644
 --- a/src/util/Injected/Utils.js
 +++ b/src/util/Injected/Utils.js
-@@ -110,6 +110,97 @@ exports.LoadUtils = () => {
+@@ -110,6 +110,113 @@ exports.LoadUtils = () => {
          },
      );
  
@@ -448,10 +557,26 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
 +        return module[name].bind(module);
 +    };
 +
++    /**
++     * Same check as requireFunction, answered as text instead of thrown: for a step that can be left
++     * out without losing what the caller asked for (F25: the invite message of a participant)
++     * @param {string} moduleName
++     * @param {string} name
++     * @returns {?string} Why the function is not there, or null when it is
++     */
++    window.WWebJS.missingFunction = (moduleName, name) => {
++        try {
++            window.WWebJS.requireFunction(moduleName, name);
++            return null;
++        } catch (error) {
++            return String((error && error.message) || error).slice(0, 200);
++        }
++    };
++
      window.WWebJS.forwardMessage = async (chatId, msgId) => {
          const msg =
              window.require('WAWebCollections').Msg.get(msgId) ||
-@@ -119,7 +210,11 @@ exports.LoadUtils = () => {
+@@ -119,7 +226,11 @@ exports.LoadUtils = () => {
                      .Msg.getMessagesById([msgId])
              )?.messages?.[0];
          const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
@@ -464,7 +589,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
              chat: chat,
              msgs: [msg],
              multicast: true,
-@@ -269,9 +364,11 @@ exports.LoadUtils = () => {
+@@ -269,9 +380,11 @@ exports.LoadUtils = () => {
                  eventJoinLink:
                      eventSendOptions.callType === 'none'
                          ? null
@@ -479,7 +604,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
                                    startTimeTs,
                                    eventSendOptions.callType,
                                ),
-@@ -508,35 +605,40 @@ exports.LoadUtils = () => {
+@@ -508,35 +621,40 @@ exports.LoadUtils = () => {
              chat.msgs.add(msg);
              chat.t = msg.t;
  
@@ -548,7 +673,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
              return msg;
          }
  
-@@ -552,9 +654,7 @@ exports.LoadUtils = () => {
+@@ -552,9 +670,7 @@ exports.LoadUtils = () => {
                      messageSecret: window.crypto.getRandomValues(
                          new Uint8Array(32),
                      ),
@@ -559,7 +684,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
                  },
              );
  
-@@ -568,13 +668,18 @@ exports.LoadUtils = () => {
+@@ -568,13 +684,18 @@ exports.LoadUtils = () => {
                  text: msg.body,
              };
  
@@ -585,7 +710,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
  
              return msg;
          }
-@@ -584,7 +689,14 @@ exports.LoadUtils = () => {
+@@ -584,7 +705,14 @@ exports.LoadUtils = () => {
              .addAndSendMsgToChat(chat, message);
          await msgPromise;
  
@@ -601,7 +726,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
  
          return window
              .require('WAWebCollections')
-@@ -890,9 +1002,7 @@ exports.LoadUtils = () => {
+@@ -890,9 +1018,7 @@ exports.LoadUtils = () => {
      };
  
      window.WWebJS.getChannelMetadata = async (inviteCode) => {
@@ -612,7 +737,7 @@ index cc8f47f0963bb9f4b95e7527c5007cc5d73148ee..250bab37810b84c1b6cafb51e4bc6108
          const response = await window
              .require('WAWebNewsletterMetadataQueryJob')
              .queryNewsletterMetadataByInviteCode(inviteCode, role);
-@@ -1742,20 +1852,30 @@ exports.LoadUtils = () => {
+@@ -1742,20 +1868,30 @@ exports.LoadUtils = () => {
  
          if (typeof duration !== 'number') return false;
  

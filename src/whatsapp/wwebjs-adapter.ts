@@ -45,6 +45,12 @@ import {
 } from '../types/dto.js'
 
 import {
+  ConsoleTail,
+  cleanConsoleLine,
+  isLogoutRelevant,
+  logoutReasonOf
+} from './logout-diagnostics.js'
+import {
   failedFields,
   mapBatteryInfo,
   mapCustomerNote,
@@ -212,6 +218,8 @@ const WORKS_WHEN_NOT_READY: ReadonlySet<string> = new Set([
 ])
 
 // The text of an auth failure is the library's, not ours
+// F25: bounds the lines of the page console a run that is not ready may log
+const PAGE_LINES_PER_RUN = 50
 const MAX_AUTH_FAILURE_LENGTH = 200
 
 // Builds the options of `new Client(...)` from the environment (TDD §6.3). `userDataDir` is never
@@ -322,6 +330,11 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   // Calls received, so that `rejectCall` finds the wwebjs object of the call it is asked about
   private readonly calls = new Map<string, wwebjs.Call>()
   private readonly guardedBrowsers = new WeakSet<object>()
+  // F25: what the page wrote about a reload or a logout. While the session is not ready the lines go
+  // to the debug log (at most PAGE_LINES_PER_RUN), while it is ready the last few are held for the
+  // 5 s before a LOGOUT
+  private readonly consoleTail = new ConsoleTail(5_000, 20)
+  private pageLines = 0
   private ready = false
   // Set when the session ended (a disconnect event, a destroy or a logout), so that the browser
   // closing right after is not reported a second time
@@ -726,6 +739,25 @@ export class WwebjsAdapter implements WhatsAppClientPort {
       page.on('error', () => {
         this.failSession('PAGE_CRASHED', 'The WhatsApp Web page crashed')
       })
+      page.on('console', message => {
+        this.keepPageLine(message)
+      })
+    }
+  }
+
+  private keepPageLine(message: { text(): string }): void {
+    try {
+      const text = message.text()
+      if (!isLogoutRelevant(text)) return
+      const line = cleanConsoleLine(text)
+      if (this.ready) {
+        this.consoleTail.add(line)
+      } else if (this.pageLines < PAGE_LINES_PER_RUN) {
+        this.pageLines += 1
+        this.logger.debug(`WhatsApp Web page: ${line}`)
+      }
+    } catch {
+      // A console message that cannot be read is not worth a failure of the session
     }
   }
 
@@ -735,10 +767,18 @@ export class WwebjsAdapter implements WhatsAppClientPort {
   private logLogout(): void {
     try {
       const flagStale = (this.client as { lastLoggedOut?: unknown }).lastLoggedOut === true
-      const postLogoutUrl = this.client.pupPage?.url().includes('post_logout=1') === true
+      const address = this.client.pupPage?.url() ?? ''
+      const postLogoutUrl = address.includes('post_logout=1')
+      // The token WhatsApp Web gives as the reason, when it is a short one: never the address
+      const reason = logoutReasonOf(address)
       this.logger.warn(
-        `WhatsApp Web reported a LOGOUT (flagStale=${flagStale}, postLogoutUrl=${postLogoutUrl})`
+        `WhatsApp Web reported a LOGOUT (flagStale=${flagStale}, postLogoutUrl=${postLogoutUrl}${
+          reason ? `, logoutReason=${reason}` : ''
+        })`
       )
+      for (const line of this.consoleTail.recent()) {
+        this.logger.debug(`WhatsApp Web page before the logout: ${line}`)
+      }
     } catch (error: unknown) {
       this.logger.warn(
         `WhatsApp Web reported a LOGOUT (reading the page failed: ${errorKind(error)})`
@@ -774,6 +814,7 @@ export class WwebjsAdapter implements WhatsAppClientPort {
     client.on('ready', () => {
       this.ready = true
       this.ended = false
+      this.pageLines = 0
       forward('ready', () => ({ event: 'ready', data: {} }))
     })
     client.on('loading_screen', (percent, message) => {
