@@ -34,11 +34,15 @@ RUN pnpm db:generate && pnpm build
 
 # Only what runs. Scripts are off (the install hooks are for development), so the Prisma schema
 # engine is fetched explicitly, and the build fails if it is not there: the runtime stage cannot
-# download anything.
+# download anything. The library is loaded only when a session starts, so nothing in the smoke of CI
+# would notice a missing patch: the build looks for a line only the patch has (the marker the send
+# reads to tell a failure after the dispatch) and fails without it.
 FROM pnpm AS prod-deps
 RUN pnpm install --prod --frozen-lockfile --ignore-scripts \
   && node_modules/.bin/prisma --version \
-  && find node_modules/.pnpm -name 'schema-engine-*' -type f | grep -q .
+  && find node_modules/.pnpm -name 'schema-engine-*' -type f | grep -q . \
+  && { grep -q 'afterDispatch: true' node_modules/whatsapp-web.js/src/Client.js \
+    || { echo 'the whatsapp-web.js patch is not in the image' >&2; exit 1; }; }
 
 FROM base AS runtime
 ENV NODE_ENV=production
