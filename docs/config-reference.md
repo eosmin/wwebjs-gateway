@@ -42,7 +42,7 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `PROXY_URL` | URL | no |  | Proxy the Chromium traffic goes through (http, https, socks4 or socks5); credentials in the URL work for http and https only; when unset, a direct connection |
 | `WA_CALL_TIMEOUT_MS` | integer, 1 or more | no | `60000` | Milliseconds a call to WhatsApp Web may take before it is abandoned |
 | `FFMPEG_PATH` | string, 1 character or more | no |  | ffmpeg binary used to convert media; when unset, the one on the PATH |
-| `MAX_SESSIONS` | integer, 1 or more | no | `10` | Sessions the gateway accepts to create |
+| `MAX_SESSIONS` | integer, 1 or more | no | `10` | Sessions that can run at once; create, start and restart are refused (409) beyond it |
 | `SESSION_START_STAGGER_MS` | integer, 0 or more | no | `5000` | Milliseconds between the starts of sessions at boot |
 | `SESSION_START_TIMEOUT_MS` | integer, 1 or more | no | `180000` | Milliseconds a session may take to become ready |
 | `SESSION_RECONNECT_MAX_ATTEMPTS` | integer, 0 or more | no | `0` | Reconnection attempts after a disconnect; 0 means unlimited |

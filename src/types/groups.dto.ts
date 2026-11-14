@@ -5,6 +5,7 @@ import { isWaId } from '../common/lib/wa-id.js'
 
 import { GroupChatDto, MembershipRequestDto, MessageDto } from './dto.js'
 import { MediaSource } from './messages.dto.js'
+import { namedZodDto } from './named-dto.js'
 import { SessionId } from './sessions.dto.js'
 
 // WhatsApp limits: a subject has 100 characters, a description 2048, and a group 1024 members
@@ -206,7 +207,7 @@ const Group = z.object({
   lastMessage: z.object(MessageDto.shape).optional()
 })
 
-export const GroupResponseDto = createZodDto(Group)
+export const GroupResponseDto = namedZodDto('GroupResponseDto', Group)
 export class GroupListDto extends createZodDto(z.object({ items: z.array(Group) })) {}
 
 export class CreateGroupResultDto extends createZodDto(

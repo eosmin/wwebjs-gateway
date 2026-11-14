@@ -10,6 +10,7 @@ import {
   ContactDto,
   MessageDto
 } from './dto.js'
+import { namedZodDto } from './named-dto.js'
 import { SessionId } from './sessions.dto.js'
 
 // A user (`@c.us` or `@lid`); a group or a channel is a chat, not a contact
@@ -66,7 +67,7 @@ export const AnyContact = z.union([
 ])
 
 // A union cannot be the base of a class, so this one is the DTO value without a class
-export const ContactResponseDto = createZodDto(AnyContact)
+export const ContactResponseDto = namedZodDto('ContactResponseDto', AnyContact)
 export class ContactListDto extends createZodDto(z.object({ items: z.array(AnyContact) })) {}
 
 export class ContactAboutDto extends createZodDto(
