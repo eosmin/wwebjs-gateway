@@ -830,7 +830,13 @@ describe('repositories (integration)', () => {
   describe('inbound hooks', () => {
     it('creates, finds by hash, lists by session and revokes once', async () => {
       const sessionId = await newSession('hook')
-      const hook = await inboundHooks.create({ sessionId, name: 'crisp', tokenHash: `t-${runId}` })
+      const created = await inboundHooks.create({
+        sessionId,
+        name: 'crisp',
+        tokenHash: `t-${runId}`
+      })
+      if (created === null) throw new Error('the hook was not created')
+      const hook = created
 
       expect((await inboundHooks.findByTokenHash(`t-${runId}`))?.id).toBe(hook.id)
       expect((await inboundHooks.listForSession(sessionId)).map(h => h.id)).toEqual([hook.id])
@@ -842,6 +848,16 @@ describe('repositories (integration)', () => {
       expect((await inboundHooks.findByTokenHash(`t-${runId}`))?.revokedAt).toEqual(first)
       expect(await inboundHooks.revoke(MISSING_UUID, first)).toBeNull()
       expect(await inboundHooks.findByTokenHash('unknown')).toBeNull()
+    })
+
+    it('answers null instead of failing when the session does not exist', async () => {
+      const created = await inboundHooks.create({
+        sessionId: `gone-${runId}`,
+        name: 'crisp',
+        tokenHash: `t-${runId}-gone`
+      })
+
+      expect(created).toBeNull()
     })
   })
 

@@ -117,7 +117,7 @@ Owner phrases (each valid for that step or group only): "commitea" = make the co
 
 ## Milestone 8 — Inbound hooks and realtime (`feat/inbound-and-realtime`) — TDD §6.10
 
-- [ ] **8.1** `inbound-hook.service.ts`.
+- [x] **8.1** `inbound-hook.service.ts` (`InboundHookService` in `WebhooksModule`, DTOs in `src/types/inbound-hooks.dto.ts`, TDD §6.10). `create(sessionId, name)` stores only the sha256 of a 32-byte base64url token and answers `{ id, sessionId, name, createdAt, revokedAt, url }` with the token inside `url` (built from `PUBLIC_BASE_URL` + `/v1/hooks/inbound/<token>`), once; `list` and `revoke` never carry the token; `resolve(token)` answers `{ hookId, sessionId }` or the same `401 UNAUTHORIZED` for a malformed, unknown or revoked token (a malformed one is refused without reading the database; nothing is cached, so a revocation takes effect at once); `revoke` of a hook of another session is `404`. The repository `create` now answers null when the session is gone (foreign key), like the webhooks one. *Carried to 8.2:* the controller checks `assertSessionAccess` before calling the service (the service trusts it), applies the per-token rate limit (stricter than the global one), calls `resolve` for `POST /v1/hooks/inbound/:token`, runs the body through the `messages.send` path with `Idempotency-Key`, and documents the routes in `docs/webhooks.md` (or its own guide) with the permission scopes (`send` for the inbound sends, TDD §6.2). *Open, owner 8.2:* the number of inbound hooks per session is not bounded (the TDD sets no limit; the routes need a key with the `webhooks` or `manage` scope, so the risk is a full table by an authorized key, not an outsider). Close in 8.2 with a limit like `WEBHOOKS_MAX_PER_SESSION` (a new error code and its entry in `docs/errors.md`), or decide in 8.2 that it is not needed.
 - [ ] **8.2** Inbound controller.
 - [ ] **8.3** `socket.gateway.ts`. *Done when:* auth, scope, snapshot, fan-out, command round-trip (typing), replay and slow-consumer tests pass.
 
@@ -333,7 +333,7 @@ Found in the security reviews of steps 1.4 and 1.5 and deliberately left for the
 | 7.4 | done | `feat/7-4-delivery-processor` | 2026-11-06 |
 | 7.5 | done | `feat/7-5-retention-service` | 2026-11-06 |
 | 7.6 | done | `feat/7-6-receiver-and-suite` | 2026-11-06 |
-| 8.1 | todo | - | - |
+| 8.1 | done | `feat/8-1-inbound-hook-service` | 2026-11-14 |
 | 8.2 | todo | - | - |
 | 8.3 | todo | - | - |
 | 9.1 | todo | - | - |
