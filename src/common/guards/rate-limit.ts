@@ -16,6 +16,11 @@ const IP_THROTTLER = 'ip'
 // against the address bucket before the body was read: the guard must not count it a second time
 export type CountedRequest = FastifyRequest & { ipRateCounted?: boolean }
 
+// The limits are HTTP ones. A socket message has no request with headers (the tracker would throw and
+// the client would get no acknowledgement): the socket has its own limits, the handshake limiter and
+// the command limiter of the dispatcher.
+const isSocketMessage = (context: ExecutionContext): boolean => context.getType() !== 'http'
+
 const requestOf = (context: ExecutionContext): FastifyRequest =>
   context.switchToHttp().getRequest<FastifyRequest>()
 
@@ -36,7 +41,8 @@ export function buildRateLimitOptions(
         name: IP_THROTTLER,
         ttl: RATE_LIMIT_WINDOW_MS,
         limit,
-        skipIf: context => (requestOf(context) as CountedRequest).ipRateCounted === true,
+        skipIf: context =>
+          isSocketMessage(context) || (requestOf(context) as CountedRequest).ipRateCounted === true,
         getTracker: req =>
           normalizeIp(requestClientIp(req as FastifyRequest, config.TRUST_PROXY_HOPS)) // reason: the guard hands over the Fastify request
       },
@@ -44,7 +50,8 @@ export function buildRateLimitOptions(
         name: KEY_THROTTLER,
         ttl: RATE_LIMIT_WINDOW_MS,
         limit,
-        skipIf: context => extractApiKey(requestOf(context)) === undefined,
+        skipIf: context =>
+          isSocketMessage(context) || extractApiKey(requestOf(context)) === undefined,
         getTracker: req => sha256Hex(extractApiKey(req as FastifyRequest) ?? '') // reason: skipIf already dropped a request with no key
       }
     ],
