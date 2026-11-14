@@ -55,6 +55,9 @@ export interface Metrics {
   policyDecisions: Counter<'rule' | 'decision'>
   policyDelaySeconds: Histogram
   suppressedChats: Gauge
+  socketConnections: Gauge
+  socketDisconnects: Counter<'reason'>
+  replayWriteFailures: Counter
 }
 
 export function createMetrics(registry: Registry): Metrics {
@@ -85,7 +88,10 @@ export function createMetrics(registry: Registry): Metrics {
     reconcileRecovered: counter(registry, d.reconcileRecovered),
     policyDecisions: counter(registry, d.policyDecisions),
     policyDelaySeconds: histogram(registry, d.policyDelaySeconds),
-    suppressedChats: gauge(registry, d.suppressedChats)
+    suppressedChats: gauge(registry, d.suppressedChats),
+    socketConnections: gauge(registry, d.socketConnections),
+    socketDisconnects: counter(registry, d.socketDisconnects),
+    replayWriteFailures: counter(registry, d.replayWriteFailures)
   }
 }
 

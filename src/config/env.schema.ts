@@ -354,6 +354,12 @@ export const envSchema = z
     EVENT_REPLAY_WINDOW_SECONDS: count(300).describe(
       'Seconds of past events a reconnecting socket may replay'
     ),
+    EVENT_REPLAY_MAX_EVENTS: count(5000, { min: 1 }).describe(
+      'Most events kept per session for the replay of a reconnecting socket; older ones go first even inside EVENT_REPLAY_WINDOW_SECONDS. Bounds the memory Redis spends on replay (each event is kept whole, up to 256 KiB)'
+    ),
+    SOCKET_MAX_QUEUED_EVENTS: count(1000, { min: 1 }).describe(
+      'Packets that may wait to be written to one Socket.IO client; a client that falls further behind is disconnected with the reason slow_consumer instead of making the gateway hold its backlog in memory'
+    ),
     WEBHOOKS_MAX_PER_SESSION: count(20, { min: 1 }).describe(
       'Webhooks a session can have, and as many for those of every session; creating one past it is refused. Also the most active inbound hooks a session can have'
     ),
