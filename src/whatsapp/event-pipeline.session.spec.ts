@@ -23,6 +23,7 @@ const NOW = new Date('2026-10-27T12:00:00.000Z')
 const OPTIONS: SessionPipelineOptions = {
   sessionId: SESSION,
   orderingEnabled: true,
+  batchEnabled: true,
   order: { lateThresholdS: 3, windowMs: 1500, maxHoldMs: 5000, maxMessages: 200 },
   storeBodies: true,
   replayDelayMs: 5000,
@@ -606,6 +607,45 @@ describe('SessionEventPipeline', () => {
         'message:after'
       ])
       expect(seqs(env)).toEqual([1, 2, 3, 4, 5, 6])
+    })
+
+    it('publishes the burst in order without a message_batch when the batch is off', async () => {
+      const env = environment()
+      open(env, { batchEnabled: false })
+
+      env.client.emit(message(incoming('b', 10)))
+      env.client.emit(message(incoming('a', 20)))
+      await advance(OPTIONS.order.windowMs + 50)
+
+      expect(names(env)).toEqual(['message:a', 'message:b'])
+      expect(seqs(env)).toEqual([1, 2])
+      expect([...env.messages.rows.values()].every(row => row.emittedAt !== null)).toBe(true)
+    })
+
+    it('still replays the rest of a failed burst, without a message_batch, when the batch is off', async () => {
+      const env = environment()
+      open(env, { batchEnabled: false })
+      env.nextSeq.mockImplementationOnce(() => Promise.resolve(1))
+      env.nextSeq.mockImplementationOnce(() => Promise.reject(new Error('redis down')))
+      env.nextSeq.mockImplementation(
+        (() => {
+          let seq = 1
+          return () => Promise.resolve(++seq)
+        })()
+      )
+
+      env.client.emit(message(incoming('c', 10)))
+      env.client.emit(message(incoming('a', 30)))
+      env.client.emit(message(incoming('b', 20)))
+      await advance(OPTIONS.order.windowMs)
+
+      expect(names(env)).toEqual(['message:a'])
+      expect(env.messages.rows.get('b')?.emittedAt).toBeNull()
+
+      await advance(OPTIONS.replayDelayMs + OPTIONS.order.windowMs)
+
+      expect(names(env)).toEqual(['message:a', 'message:b', 'message:c'])
+      expect([...env.messages.rows.values()].every(row => row.emittedAt !== null)).toBe(true)
     })
 
     it('publishes late messages as they come when ordering is off', async () => {

@@ -92,8 +92,6 @@ not an archive of the account: a consumer that needs to keep a conversation keep
   acks, not reactions, not messages the account sent ([ordering](ordering.md)).
 - The gateway does not guarantee that a message **arrives**: `ack` shows how far it got
   ([reactions-and-receipts](reactions-and-receipts.md)).
-- `MESSAGE_BATCH_ENABLED` is declared and read by nothing: the `message_batch` event is always
-  published ([ordering](ordering.md)).
 
 ## What has been checked with a real account
 

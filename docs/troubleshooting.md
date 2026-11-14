@@ -86,7 +86,7 @@ curl http://localhost:3000/v1/sessions/main -H "X-API-Key: $API_KEY"
 | --- | --- | --- |
 | Two messages of the same second arrive in a surprising order | WhatsApp timestamps have one-second resolution | Nothing can be done; see [ordering](ordering.md) |
 | A message arrives up to a few seconds late | The order buffer holds a burst to sort it: at most `INBOUND_ORDER_WINDOW_MS`, and never longer than `INBOUND_ORDER_MAX_HOLD_MS` | Expected. `INBOUND_ORDERING_ENABLED=false`, or `ordering.enabled: false` in the session settings, turns the holding off |
-| `message_batch` still arrives with `MESSAGE_BATCH_ENABLED=false` | The variable is declared and read by nothing | Ignore the event. This is known and written in [ordering](ordering.md) |
+| `message_batch` still arrives with `MESSAGE_BATCH_ENABLED=false` | The variable is read when a session starts, so a session that was already running keeps the old value | Restart the session (or the gateway) after changing it; see [ordering](ordering.md) |
 | `seq` jumps by up to 100 | A crash leaves a reserved block of numbers | Not a lost event ([sessions](sessions.md)) |
 | Messages that arrived during a downtime are missing | The reconciler recovers the incoming messages of the most recent chats only, within its limits | See "Catch-up reconciliation" in [ordering](ordering.md) for `RECONCILE_MAX_CHATS`, `RECONCILE_FETCH_LIMIT` and `RECONCILE_LOOKBACK_HOURS` |
 | `origin` is missing on a message from an ad | The message carries no `ctwaContext`, or WhatsApp Web moved it | See [origin](origin.md) |

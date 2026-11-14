@@ -29,9 +29,11 @@ reads the conversation in, and a normal chat must not pay a delay for a feature 
   contact, one `message_batch` follows them, with the whole burst in order, so a consumer can react once.
   Catch-up reconciliation after a downtime feeds recovered messages through the same path.
 
-`message_batch` is always emitted today. The variable `MESSAGE_BATCH_ENABLED` is declared in the
-environment schema and nothing reads it; this is a known defect, tracked in the plan (step 10.4), and
-`docs/ordering.md` says so.
+`MESSAGE_BATCH_ENABLED` (default `true`) switches the synthesized event off for the whole gateway. When
+it is `false` the pipeline skips publishing `message_batch` and nothing else changes: the
+individual messages keep their path (dedupe, store, order, `seq`, publish), their `emittedAt` marking and
+their replay after a failure. The flag is read when a session's pipeline is built, like the other
+ordering variables; there is no per-session override (YAGNI).
 
 ## Consequences
 

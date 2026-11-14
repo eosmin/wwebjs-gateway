@@ -547,6 +547,21 @@ describe('EventPipelineService reconcile', () => {
     expect(sessions.update).not.toHaveBeenCalled()
   })
 
+  it('publishes the reconciled burst without a message_batch when MESSAGE_BATCH_ENABLED is false', async () => {
+    const { service, published, messages } = build({ MESSAGE_BATCH_ENABLED: 'false' })
+    await service.open(SESSION, new FakeWhatsAppClient(SESSION), { orderingEnabled: true })
+
+    await service.reconcile(SESSION, [
+      missed('b', '2026-10-27T11:00:02.000Z'),
+      missed('a', '2026-10-27T11:00:01.000Z')
+    ])
+    await jest.advanceTimersByTimeAsync(1500)
+
+    expect(published.map(envelope => envelope.event)).toEqual(['message', 'message'])
+    expect(published.map(envelope => envelope.seq)).toEqual([1, 2])
+    expect(messages.markEmitted).toHaveBeenCalledWith(SESSION, ['a', 'b'], expect.any(Date))
+  })
+
   it('sorts a live message that arrives meanwhile into the same burst', async () => {
     const { service, published } = build()
     const client = new FakeWhatsAppClient(SESSION)
