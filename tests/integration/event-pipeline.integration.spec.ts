@@ -25,6 +25,7 @@ const CHAT = '5215500000001@c.us'
 
 const OPTIONS: Omit<SessionPipelineOptions, 'sessionId'> = {
   orderingEnabled: true,
+  batchEnabled: true,
   // A window wide enough for the Postgres and Redis round trips between the messages of a burst,
   // even on a slow runner: a burst that outlasts it is split in two buffers
   order: { lateThresholdS: 3, windowMs: 1000, maxHoldMs: 4000, maxMessages: 200 },
@@ -110,7 +111,10 @@ describe('event pipeline (integration)', () => {
   }
 
   // What the process has: a client, a sequencer on the real Redis, and the pipeline of the session
-  function startProcess(sessionId: string): {
+  function startProcess(
+    sessionId: string,
+    options: Partial<SessionPipelineOptions> = {}
+  ): {
     client: FakeWhatsAppClient
     published: EventEnvelope[]
     pipeline: SessionEventPipeline
@@ -122,7 +126,7 @@ describe('event pipeline (integration)', () => {
       publish: envelope => published.push(envelope)
     })
     const pipeline = new SessionEventPipeline(
-      { ...OPTIONS, sessionId },
+      { ...OPTIONS, ...options, sessionId },
       {
         client,
         messages,
@@ -160,6 +164,21 @@ describe('event pipeline (integration)', () => {
     expect(published[3]?.event).toBe('message_batch')
     // Rows are marked as emitted after the publish, not with it
     await until(async () => (await unemitted(sessionId)) === 0)
+  })
+
+  it('publishes the same burst without a message_batch when the batch is off', async () => {
+    const sessionId = await newSession('nobatch')
+    const { client, published } = startProcess(sessionId, { batchEnabled: false })
+
+    client.emit({ event: 'message', data: incoming('c', 10) })
+    client.emit({ event: 'message', data: incoming('a', 30) })
+    client.emit({ event: 'message', data: incoming('b', 20) })
+    await until(() => published.length === 3)
+    await until(async () => (await unemitted(sessionId)) === 0)
+
+    expect(messageIds(published)).toEqual(['a', 'b', 'c'])
+    expect(published.map(envelope => envelope.seq)).toEqual([1, 2, 3])
+    expect(published.map(envelope => envelope.event)).toEqual(['message', 'message', 'message'])
   })
 
   it('drops a message the client emits twice, using Redis', async () => {

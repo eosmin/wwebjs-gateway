@@ -103,6 +103,7 @@ export class EventPipelineService implements OnApplicationShutdown {
       {
         sessionId,
         orderingEnabled: this.config.INBOUND_ORDERING_ENABLED && options.orderingEnabled,
+        batchEnabled: this.config.MESSAGE_BATCH_ENABLED,
         order: {
           lateThresholdS: this.config.INBOUND_LATE_THRESHOLD_S,
           windowMs: this.config.INBOUND_ORDER_WINDOW_MS,

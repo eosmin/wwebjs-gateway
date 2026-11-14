@@ -37,6 +37,8 @@ export interface SessionPipelineOptions {
   sessionId: string
   // false when the session or the whole gateway turned ordering off
   orderingEnabled: boolean
+  // false when `MESSAGE_BATCH_ENABLED` is off: the messages go out as usual, no `message_batch` follows
+  batchEnabled: boolean
   order: OrderBufferOptions
   storeBodies: boolean
   // How long after a failed publish the chat is replayed from the database; every new failure of
@@ -377,6 +379,7 @@ export class SessionEventPipeline {
         this.fail('publish', error)
         return
       }
+      if (!this.options.batchEnabled) return
       const summary = this.summaryOf(batch)
       if (!summary) return
       try {
@@ -428,6 +431,8 @@ export class SessionEventPipeline {
     published: MessageDto[],
     failed: boolean
   ): void {
+    // The carried messages only feed the next summary, which is never published with the batch off
+    if (!this.options.batchEnabled) return
     const carried = this.carried.get(batch.chatId)
     if (!failed) {
       this.carried.delete(batch.chatId)
