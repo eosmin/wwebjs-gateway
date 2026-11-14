@@ -155,6 +155,26 @@ describe('a request logged with the configured options', () => {
     const failed = lines.find(line => line['msg'] === 'send failed')
     expect(failed).toMatchObject({ err: { type: 'Error' } })
   })
+
+  it.each([
+    ['/v1/hooks/inbound/ENCTOKEN%4aA1/send', 'ENCTOKEN'],
+    ['/v1/hooks/inbound/%4aENCTOKENB2/send', 'ENCTOKENB2'],
+    ['/v1/%68ooks/inbound/ENCTOKENC3?page=2', 'ENCTOKENC3']
+  ])('never writes a token sent percent-encoded: %s', async (path, leaked) => {
+    const { port } = server.address() as AddressInfo
+    const before = lines.length
+    const response = await fetch(`http://127.0.0.1:${port}${path}`)
+    await response.text()
+    // The completed-request line is written after the response ends
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (lines.slice(before).some(line => line['msg'] === 'request completed')) break
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+
+    const output = JSON.stringify(lines.slice(before))
+    expect(output).not.toContain(leaked)
+    expect(output).toContain(REDACTED)
+  })
 })
 
 describe('logging outside a request', () => {

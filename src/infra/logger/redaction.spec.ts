@@ -1,4 +1,10 @@
-import { isSensitiveKey, REDACTED, redactSensitive, scrubText } from './redaction.js'
+import {
+  isSensitiveKey,
+  REDACTED,
+  redactSensitive,
+  scrubInboundToken,
+  scrubText
+} from './redaction.js'
 
 describe('isSensitiveKey', () => {
   it.each([
@@ -62,6 +68,50 @@ describe('scrubText', () => {
     ['plain message about page=2', 'plain message about page=2']
   ])('%s', (input, expected) => {
     expect(scrubText(input)).toBe(expected)
+  })
+
+  // The router decodes the path before it matches, so a valid token authenticates with any of its
+  // characters percent-encoded, and so does the route itself
+  it.each([
+    ['/v1/hooks/inbound/%4aABC123/send?page=1', '/v1/hooks/inbound/[Redacted]/send?page=1'],
+    ['/v1/hooks/inbound/ABC%4a123/send', '/v1/hooks/inbound/[Redacted]/send'],
+    ['/v1/hooks/inbound/ABC123%4A/send', '/v1/hooks/inbound/[Redacted]/send'],
+    ['/v1/hooks/inbound/%4aAB%5fC%2d123', '/v1/hooks/inbound/[Redacted]'],
+    ['/v1/hooks/inbound/ABC%2f123 x', '/v1/hooks/inbound/[Redacted] x'],
+    ['/v1/hooks/inbound/ABC%2F123/send', '/v1/hooks/inbound/[Redacted]/send'],
+    ['/v1/hooks/inbound/%2FABC123', '/v1/hooks/inbound/[Redacted]'],
+    ['/v1/hooks/inbound/AB%C123/x', '/v1/hooks/inbound/[Redacted]/x'],
+    ['/v1/hooks/inbound/ABC%', '/v1/hooks/inbound/[Redacted]'],
+    ['/v1/hooks/inbound/ABC%4a#frag', '/v1/hooks/inbound/[Redacted]#frag'],
+    ['"/v1/hooks/inbound/ABC%4a123"', '"/v1/hooks/inbound/[Redacted]"'],
+    ['/v1/%68ooks/inbound/ABC123/x', '/v1/%68ooks/inbound/[Redacted]/x'],
+    ['/v1/hooks/%69nbound/%4aABC123/x', '/v1/hooks/%69nbound/[Redacted]/x'],
+    ['/v1/hooks/inb%6Fund/ABC123', '/v1/hooks/inb%6Fund/[Redacted]'],
+    ['/v1/hooks%2finbound%2f%4aABC123/x', '/v1/hooks%2finbound%2f[Redacted]/x'],
+    ['/v1/hooks%2Finbound/ABC%4a123', '/v1/hooks%2Finbound/[Redacted]']
+  ])('redacts the token of an encoded inbound path: %s', (input, expected) => {
+    expect(scrubText(input)).toBe(expected)
+  })
+
+  it('redacts a long run of percent signs to the end of the token', () => {
+    expect(scrubText(`/v1/hooks/inbound/${'%4'.repeat(1000)}/x`)).toBe(
+      '/v1/hooks/inbound/[Redacted]/x'
+    )
+  })
+})
+
+describe('scrubInboundToken', () => {
+  it('redacts the token and never shortens the text', () => {
+    const long = `${'x'.repeat(20000)} Cannot GET /v1/hooks/inbound/ABC%4a123/nope ${'y'.repeat(20000)}`
+    const scrubbed = scrubInboundToken(long)
+
+    expect(scrubbed).toBe(
+      `${'x'.repeat(20000)} Cannot GET /v1/hooks/inbound/[Redacted]/nope ${'y'.repeat(20000)}`
+    )
+  })
+
+  it('leaves other secrets alone', () => {
+    expect(scrubInboundToken('password=hunter2')).toBe('password=hunter2')
   })
 })
 

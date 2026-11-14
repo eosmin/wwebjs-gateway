@@ -33,9 +33,33 @@ export function isSensitiveKey(key: string): boolean {
   )
 }
 
+// The router decodes the path before it matches, so `hooks`, `inbound` and the token reach the route with any
+// of their characters percent-encoded. Each letter of a segment therefore matches itself or its `%XX`; the
+// flag `i` covers the case of the letters and of the hex digits.
+function encodedLiteral(word: string): string {
+  return [...word]
+    .map(letter => `(?:${letter}|%${letter.charCodeAt(0).toString(16).padStart(2, '0')})`)
+    .join('')
+}
+
+const PATH_SEPARATOR = '(?:\\/|%2F)'
+// The token runs to the next real separation: `/`, `?`, `#`, a space or a quote. A `%2F` inside it counts as
+// part of the token, because the router decodes it to a slash within the same parameter; redacting more than
+// a valid token (which never holds `%`) is the safe side.
+const INBOUND_TOKEN_PATH = new RegExp(
+  `(${encodedLiteral('hooks')}${PATH_SEPARATOR}${encodedLiteral('inbound')}${PATH_SEPARATOR})[^/?#\\s"']+`,
+  'gi'
+)
+
+// Only the inbound hook token, with no length bound: for text that goes back to a client, where truncating
+// would change the message
+export function scrubInboundToken(text: string): string {
+  return text.replace(INBOUND_TOKEN_PATH, `$1${REDACTED}`)
+}
+
 // Secrets that travel inside a string: a log line, an error message, a URL
 const TEXT_PATTERNS: readonly [RegExp, string][] = [
-  [/(hooks(?:\/|%2F)inbound(?:\/|%2F))[^/?#\s"'%]+/gi, `$1${REDACTED}`],
+  [INBOUND_TOKEN_PATH, `$1${REDACTED}`],
   [/\b(Bearer|Basic|Digest)\s+[^\s"',;]+/gi, `$1 ${REDACTED}`],
   [/\bwgk_[\w-]+/g, REDACTED],
   // WhatsApp Web QR payloads start with a ref and a key: `2@...`

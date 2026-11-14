@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { APP_CONFIG } from '../../config/config.module.js'
 import type { AppConfig } from '../../config/env.schema.js'
 import { REQUEST_ID_HEADER } from '../../infra/logger/logger.config.js'
+import { scrubInboundToken } from '../../infra/logger/redaction.js'
 import { AppError, ErrorCode, ServiceBusyError } from '../errors.js'
 
 // The body of every error response (TDD §6.11)
@@ -61,8 +62,10 @@ function clientErrorStatus(exception: unknown): number | undefined {
     : undefined
 }
 
+// The message of an error the framework raised can echo the request URL (`Cannot GET /v1/hooks/inbound/<token>/x`),
+// and the token of an inbound hook is a credential: it is scrubbed here as in the logs
 function errorMessage(exception: unknown): string {
-  return exception instanceof Error ? exception.message : INTERNAL_MESSAGE
+  return exception instanceof Error ? scrubInboundToken(exception.message) : INTERNAL_MESSAGE
 }
 
 // Whatever was thrown, as the status and the error of the contract. An error that is the gateway's own
