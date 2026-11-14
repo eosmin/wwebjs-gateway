@@ -10,7 +10,7 @@ import {
   OperationRegistryService,
   type RegisteredOperation
 } from '../../src/api/operation-registry.service.js'
-import { AppModule } from '../../src/app.module.js'
+import { envSchema } from '../../src/config/env.schema.js'
 import { createFastifyAdapter } from '../../src/infra/logger/fastify-adapter.js'
 import { collectControllers } from '../../src/parity/operation-links.js'
 
@@ -47,7 +47,22 @@ export function routesOf(document: OpenAPIObject): Map<string, { method: string;
 // without any of them.
 let model: Promise<DocsModel> | undefined
 
+// ConfigModule validates the environment while AppModule loads. The documents do not depend on any
+// value, so the smallest valid environment is set (and what a shell or a .env.local holds is left
+// out), which makes the generation the same on every machine and in CI.
+const DOCS_ENV = {
+  NODE_ENV: 'test',
+  PUBLIC_BASE_URL: 'http://localhost:3000',
+  DATABASE_URL: 'postgresql://gateway:gateway@localhost:5432/gateway',
+  REDIS_URL: 'redis://localhost:6379',
+  ADMIN_API_KEY: 'a'.repeat(32)
+}
+
 async function build(): Promise<DocsModel> {
+  for (const key of Object.keys(envSchema.shape)) delete process.env[key]
+  Object.assign(process.env, DOCS_ENV)
+  // After the environment is set: a static import would load the module first
+  const { AppModule } = await import('../../src/app.module.js')
   const moduleRef = await Test.createTestingModule({
     imports: [DiscoveryModule],
     controllers: await collectControllers(AppModule),
