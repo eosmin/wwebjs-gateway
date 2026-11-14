@@ -1695,6 +1695,8 @@ Operations (gateway-native: `@WaOperation` with `wwebjs: []` and `gateway: true`
 - Server → client: single event `wa:event` carrying the §5.5 envelope.
 - Backpressure: bounded per-socket emit queue; slow consumers are disconnected with reason `slow_consumer`.
 
+**Implementation notes (step 8.3):** the gateway is `src/realtime/socket.gateway.ts` (guide: `docs/websocket.md`). The handshake needs the `events` scope; `qr` and `code` need `manage` and must be named (`*` and the snapshot never carry them). `command` is run by `OperationDispatcherService`, which reads the route metadata Nest keeps for REST and calls the SAME controller method (flat `params` = path + body or query, `idempotencyKey` = `Idempotency-Key`). The replay stream `events:<sessionId>` uses `<seq>-0` as the entry id, so a range by `seq` is an XRANGE; it is trimmed by age and by `EVENT_REPLAY_MAX_EVENTS`. The slow-consumer bound is the number of packets engine.io holds for the socket (`SOCKET_MAX_QUEUED_EVENTS`), and the client sees `io server disconnect`. Keys are checked again every 30 s. `docs/IMPLEMENTATION_PLAN.md` (8.3) lists the decisions and the debts.
+
 ### 6.11 REST API surface (all under `/v1`; each is a `@WaOperation` controller method unless noted)
 Session routes live under `/v1/sessions/:sessionId`. Full parameter/response detail lives in the Zod schemas and the generated OpenAPI.
 
@@ -1837,7 +1839,7 @@ Ordering & reconciliation: `INBOUND_ORDERING_ENABLED`(true), `INBOUND_LATE_THRES
 Message data: `INCLUDE_RAW`(true), `RAW_MAX_FIELD_BYTES`(8192).
 Sending: `SEND_MIN_INTERVAL_MS`(1000), `SEND_JITTER_MS`(400), `SEND_SYNC_TIMEOUT_MS`(60000), `SEND_MAX_WAIT_MS`(300000), `SEND_NOT_READY_RETRY_MS`(5000), `SEND_BREAKER_THRESHOLD`(5), `SEND_BREAKER_COOLDOWN_MS`(60000), `MAX_MEDIA_BYTES`(33554432).
 Send policy (§6.8.1; all overridable per session): `CONVERSATION_WINDOW_HOURS`(24), `ALLOW_COLD_SENDS`(false), `COLD_SENDS_PER_DAY`(20), `COLD_SEND_MIN_GAP_MS`(60000), `LOOKUPS_PER_DAY`(100), `PER_CHAT_MIN_INTERVAL_MS`(1500), `PER_CHAT_MAX_PER_MINUTE`(10), `SESSION_MAX_PER_MINUTE`(20), `SESSION_MAX_PER_HOUR`(300), `SESSION_MAX_PER_DAY`(1500), `DUPLICATE_RECIPIENTS_THRESHOLD`(5), `DUPLICATE_WINDOW_MINUTES`(10), `WARMUP_DAYS`(14), `WARMUP_START_FRACTION`(0.1), `UNREACHABLE_STREAK`(5), `UNREACHABLE_MIN_AGE_HOURS`(72), `SEND_POLICY_MAX_WAIT_MS`(1800000), `HEALTH_WINDOW`(50), `HEALTH_MIN_SAMPLES`(10), `HEALTH_MAX_BAD_RATIO`(0.2), `HEALTH_COOLDOWN_MIN`(30), `HUMANIZE_MIN_REPLY_DELAY_MS`(1500).
-Events/webhooks: `EVENT_REPLAY_WINDOW_SECONDS`(300), `WEBHOOK_TIMEOUT_MS`(10000), `WEBHOOK_MAX_ATTEMPTS`(10), `WEBHOOK_BACKOFF_MS`(5000), `WEBHOOK_WORKER_CONCURRENCY`(10), `WEBHOOK_INLINE_MEDIA_MAX_BYTES`(5242880), `WEBHOOK_PRIVATE_HOST_ALLOWLIST`, `ALLOW_PRIVATE_WEBHOOK_TARGETS`(false), `CALL_CACHE_SIZE`(50).
+Events/webhooks: `EVENT_REPLAY_WINDOW_SECONDS`(300), `EVENT_REPLAY_MAX_EVENTS`(5000), `SOCKET_MAX_QUEUED_EVENTS`(1000), `WEBHOOK_TIMEOUT_MS`(10000), `WEBHOOK_MAX_ATTEMPTS`(10), `WEBHOOK_BACKOFF_MS`(5000), `WEBHOOK_WORKER_CONCURRENCY`(10), `WEBHOOK_INLINE_MEDIA_MAX_BYTES`(5242880), `WEBHOOK_PRIVATE_HOST_ALLOWLIST`, `ALLOW_PRIVATE_WEBHOOK_TARGETS`(false), `CALL_CACHE_SIZE`(50).
 Test/build-time only (NOT in `env.schema.ts`): `E2E_REAL`(false; enables the opt-in real-number suite), `PUPPETEER_SKIP_DOWNLOAD`(true in Docker and CI), `HUSKY`(0 in CI and Docker builds).
 Retention: `DELIVERY_RETENTION_DAYS`(14), `MESSAGE_RETENTION_DAYS`(30), `STORE_MESSAGE_BODIES`(true).
 
