@@ -7,7 +7,13 @@ const EXPECTED: Record<string, { scope: string; wwebjs: string[] }> = {
   'chats.list': { scope: 'read', wwebjs: ['Client.getChats'] },
   'chats.get': {
     scope: 'read',
-    wwebjs: ['Client.getChatById', 'Contact.getChat', 'Broadcast.getChat']
+    wwebjs: [
+      'Client.getChatById',
+      'Contact.getChat',
+      'Broadcast.getChat',
+      'Message.getChat',
+      'GroupNotification.getChat'
+    ]
   },
   'chats.messages': { scope: 'read', wwebjs: ['Chat.fetchMessages'] },
   'chats.pinnedMessages': {
@@ -50,14 +56,13 @@ describe('ChatsController operations', () => {
     ).toEqual(EXPECTED)
   })
 
-  it('exposes only chats.setState as a socket command, named chat.state', async () => {
+  it('gives every chats operation a socket command named chat.<action>, chat.state for the state', async () => {
     const chats = (await collectOperations(MessagesModule)).filter(operation =>
       operation.id.startsWith('chats.')
     )
 
-    expect(
-      chats.filter(op => op.socket !== undefined).map(op => [op.id, op.socket?.command])
-    ).toEqual([['chats.setState', 'chat.state']])
+    expect(chats.filter(op => !op.socket?.command.startsWith('chat.')).map(op => op.id)).toEqual([])
+    expect(chats.find(op => op.id === 'chats.setState')?.socket?.command).toBe('chat.state')
   })
 
   it('shows a mute example the route accepts: the end is in the future', async () => {

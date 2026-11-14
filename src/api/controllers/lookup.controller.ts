@@ -36,6 +36,7 @@ export class LookupController {
     summary: 'Check whether a phone number is on WhatsApp',
     description:
       'Answers 200 with `registered: false` for a number without an account (WhatsApp Web can wrongly answer "no" while it is busy, so ask again later before treating it as final). A registered number carries its WhatsApp id, its country calling code and its formatted form. The answer is cached (an hour when registered, five minutes when not), and a look-up that is not cached counts against `LOOKUPS_PER_DAY`: past it the answer is `422 POLICY_BLOCKED`.',
+    socket: { command: 'number.lookup' },
     errors: [...ON_SESSION, 'POLICY_BLOCKED'],
     examples: {
       request: null,
@@ -68,6 +69,7 @@ export class LookupController {
     summary: 'Match @lid ids with phone ids',
     description:
       'For each id given in `ids` (comma-separated, `@c.us` or `@lid`, up to 50) WhatsApp answers the pair `{ lid, pn }`; the side it does not know is `null` (the `pn` of a `@lid` that hides its phone), and an id it knows nothing about is left out of `items`.',
+    socket: { command: 'contact.lidPhone' },
     errors: ON_SESSION,
     examples: {
       request: null,

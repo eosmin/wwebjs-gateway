@@ -44,6 +44,7 @@ export class BroadcastsController {
     summary: 'List the broadcasts (statuses)',
     description:
       'The status updates WhatsApp Web holds, one broadcast per user (the account itself included).',
+    socket: { command: 'broadcast.list' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [BROADCAST] } },
     wwebjs: [
@@ -67,6 +68,7 @@ export class BroadcastsController {
     summary: 'Read the broadcast (statuses) of a user',
     description:
       'The status updates of one user. Answers 404 `NOT_FOUND` when WhatsApp Web holds none of that user.',
+    socket: { command: 'broadcast.get' },
     errors: ON_SESSION,
     examples: { request: null, response: BROADCAST },
     wwebjs: ['Client.getBroadcastById']

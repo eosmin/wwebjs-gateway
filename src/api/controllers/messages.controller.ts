@@ -108,12 +108,13 @@ export class MessagesController {
     summary: 'Send a message',
     description:
       'Sends text, media, a location, contacts, a poll, an event or a group invite. `to` is a phone number or a WhatsApp id. The message goes through the send queue of the session, the send policy and the pacing, so it may wait. By default the call waits up to SEND_SYNC_TIMEOUT_MS and answers 201 with the message; if the send is still queued by then, or with `wait=false`, it answers 202 with the job, whose result arrives as `message_sent` or `message_failed` and at `GET …/send-jobs/:jobId`. Send an `Idempotency-Key` (up to 128 characters) to make a retry safe: the same key with the same request returns the first result, with another request it is a 422. `media.url` is downloaded by the gateway (public hosts only, MAX_MEDIA_BYTES). A body can be up to 40 MiB.',
+    socket: { command: 'message.send' },
     errors: SEND_ERRORS,
     examples: {
       request: SEND_REQUEST,
       response: { jobId: 'idem-3f2a', status: 'sent', message: MESSAGE_EXAMPLE }
     },
-    wwebjs: ['Client.sendMessage', 'Chat.sendMessage']
+    wwebjs: ['Client.sendMessage', 'Chat.sendMessage', 'GroupNotification.reply']
   })
   async send(
     @Param() { sessionId }: SessionIdParamsDto,
@@ -139,6 +140,7 @@ export class MessagesController {
     summary: 'Reply to a message',
     description:
       'A send that quotes the message. It takes the same body as `messages.send`, except that `to` is optional: without it the reply goes to the chat of the message. Waiting, the 202 answer, idempotency and the 40 MiB body limit are the same.',
+    socket: { command: 'message.reply' },
     errors: SEND_ERRORS,
     examples: {
       request: { type: 'text', body: 'Gracias por tu mensaje' },
@@ -169,6 +171,7 @@ export class MessagesController {
     summary: 'Read a send job',
     description:
       'Where a send is: `queued`, `active`, `sent` (with the message) or `failed` (with the error). A job is kept for a few days after it ends.',
+    socket: { command: 'message.sendJob' },
     errors: [...ROUTE, 'NOT_FOUND'],
     examples: {
       request: null,
@@ -191,6 +194,7 @@ export class MessagesController {
     summary: 'Search messages',
     description:
       'Searches the messages WhatsApp Web has loaded for the text, in every chat or in one. The session must be ready.',
+    socket: { command: 'message.search' },
     errors: ON_MESSAGE,
     examples: { request: null, response: { items: [MESSAGE_EXAMPLE] } },
     wwebjs: ['Client.searchMessages']
@@ -216,6 +220,7 @@ export class MessagesController {
     summary: 'Read the messages the gateway stored',
     description:
       'The messages the gateway saw, from its own database (retention: MESSAGE_RETENTION_DAYS), newest first by the time the sender wrote them. Page with `cursor`: take `nextCursor` of one page as the `cursor` of the next, and stop when it is null. A page can come back with no items and a cursor.',
+    socket: { command: 'message.stored' },
     errors: [...ROUTE, 'NOT_FOUND'],
     examples: { request: null, response: { items: [MESSAGE_EXAMPLE], nextCursor: null } },
     wwebjs: [],
@@ -235,9 +240,10 @@ export class MessagesController {
     scope: 'read',
     summary: 'Read a message',
     description: 'The message as WhatsApp Web has it. The session must be ready.',
+    socket: { command: 'message.get' },
     errors: ON_MESSAGE,
     examples: { request: null, response: MESSAGE_EXAMPLE },
-    wwebjs: ['Client.getMessageById']
+    wwebjs: ['Client.getMessageById', 'Message.reload']
   })
   get(@Param() { sessionId, messageId }: SessionMessageParamsDto): Promise<MessageResponseDto> {
     return this.messages.get(sessionId, messageId)
@@ -285,6 +291,7 @@ export class MessagesController {
     scope: 'read',
     summary: 'Read the message a message replies to',
     description: 'Answers 404 when the message quotes nothing.',
+    socket: { command: 'message.quoted' },
     errors: ON_MESSAGE,
     examples: { request: null, response: MESSAGE_EXAMPLE },
     wwebjs: ['Message.getQuotedMessage']
@@ -300,6 +307,7 @@ export class MessagesController {
     scope: 'read',
     summary: 'Read the contacts a message mentions',
     description: 'The contacts tagged in the message.',
+    socket: { command: 'message.mentions' },
     errors: ON_MESSAGE,
     examples: { request: null, response: { items: [] } },
     wwebjs: ['Message.getMentions']
@@ -317,6 +325,7 @@ export class MessagesController {
     scope: 'read',
     summary: 'Read the groups a message mentions',
     description: 'The groups tagged in the message.',
+    socket: { command: 'message.groupMentions' },
     errors: ON_MESSAGE,
     examples: { request: null, response: { items: [] } },
     wwebjs: ['Message.getGroupMentions']
@@ -335,6 +344,7 @@ export class MessagesController {
     summary: 'Read the delivery receipts of a message',
     description:
       'Who received, played and read the message, and when. Only for your own messages; answers 404 otherwise.',
+    socket: { command: 'message.info' },
     errors: ON_MESSAGE,
     examples: {
       request: null,
@@ -363,6 +373,7 @@ export class MessagesController {
     summary: 'Read the order of an order message',
     description:
       'The products and totals of a message that carries an order. Answers 404 when the message is not an order.',
+    socket: { command: 'message.order' },
     errors: ON_MESSAGE,
     examples: {
       request: null,
@@ -382,6 +393,7 @@ export class MessagesController {
     summary: 'Read the payment of a payment message',
     description:
       'The amount and status of a message that carries a payment. Answers 404 when the message is not a payment.',
+    socket: { command: 'message.payment' },
     errors: ON_MESSAGE,
     examples: {
       request: null,
@@ -409,6 +421,7 @@ export class MessagesController {
     scope: 'read',
     summary: 'Read the reactions to a message',
     description: 'The reactions grouped by emoji, with who sent each.',
+    socket: { command: 'message.reactions' },
     errors: ON_MESSAGE,
     examples: { request: null, response: { items: [] } },
     wwebjs: ['Message.getReactions']
@@ -428,6 +441,7 @@ export class MessagesController {
     scope: 'send',
     summary: 'React to a message',
     description: 'Reacts with an emoji; an empty `reaction` removes the reaction.',
+    socket: { command: 'message.react' },
     errors: ON_MESSAGE,
     examples: { request: { reaction: '👍' }, response: null },
     wwebjs: ['Client.sendReaction', 'Message.react']
@@ -448,6 +462,7 @@ export class MessagesController {
     summary: 'Forward a message',
     description:
       'Forwards the message to a chat (a phone number or a WhatsApp id). It is a send like any other: it goes through the send queue, the send policy and the pacing, and takes `?wait`, `Idempotency-Key` and the 201/202 answers of `messages.send`. WhatsApp does not say which message the forward created, so the answer is `{ jobId, status: "sent" }` without a `message`.',
+    socket: { command: 'message.forward' },
     errors: SEND_ERRORS,
     examples: {
       request: { chatId: '5215500000003@c.us' },
@@ -477,6 +492,7 @@ export class MessagesController {
     scope: 'manage',
     summary: 'Star a message',
     description: 'Adds the message to the starred messages of the account.',
+    socket: { command: 'message.star' },
     errors: ON_MESSAGE,
     examples: { request: null, response: null },
     wwebjs: ['Message.star']
@@ -492,6 +508,7 @@ export class MessagesController {
     scope: 'manage',
     summary: 'Unstar a message',
     description: 'Removes the message from the starred messages of the account.',
+    socket: { command: 'message.unstar' },
     errors: ON_MESSAGE,
     examples: { request: null, response: null },
     wwebjs: ['Message.unstar']
@@ -508,6 +525,7 @@ export class MessagesController {
     summary: 'Pin a message',
     description:
       'Pins the message in its chat for 1 day (86400), 7 days (604800) or 30 days (2592000 seconds).',
+    socket: { command: 'message.pin' },
     errors: ON_MESSAGE,
     examples: { request: { duration: 604800 }, response: null },
     wwebjs: ['Message.pin']
@@ -526,6 +544,7 @@ export class MessagesController {
     scope: 'manage',
     summary: 'Unpin a message',
     description: 'Removes the pin of the message.',
+    socket: { command: 'message.unpin' },
     errors: ON_MESSAGE,
     examples: { request: null, response: null },
     wwebjs: ['Message.unpin']
@@ -542,6 +561,7 @@ export class MessagesController {
     summary: 'Edit a message',
     description:
       'Changes the text of one of your own messages. WhatsApp allows it for a limited time after sending; otherwise the call fails with WHATSAPP_ERROR.',
+    socket: { command: 'message.edit' },
     errors: ON_MESSAGE,
     examples: { request: { body: 'Hola, tu pedido llega hoy' }, response: MESSAGE_EXAMPLE },
     wwebjs: ['Message.edit']
@@ -561,6 +581,7 @@ export class MessagesController {
     summary: 'Delete a message',
     description:
       'Deletes the message for the account, or for everyone in the chat with `everyone=true` (WhatsApp limits that to recent messages of your own). `clearMedia=true` also removes the downloaded file.',
+    socket: { command: 'message.delete' },
     errors: ON_MESSAGE,
     examples: { request: null, response: null },
     wwebjs: ['Message.delete']
@@ -579,6 +600,7 @@ export class MessagesController {
     scope: 'manage',
     summary: 'Delete a status you posted',
     description: 'Revokes a status message (a story) of the account.',
+    socket: { command: 'message.revokeStatus' },
     errors: ON_MESSAGE,
     examples: { request: null, response: null },
     wwebjs: ['Client.revokeStatusMessage']

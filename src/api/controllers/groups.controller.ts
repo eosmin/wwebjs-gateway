@@ -90,6 +90,7 @@ export class GroupsController {
     summary: 'Create a group',
     description:
       'Creates the group with the listed participants (user ids; the account is the creator). WhatsApp answers per participant: one it cannot add directly gets an invite when `autoSendInviteV4` is true (the wwebjs default), and its entry says so. Fails with `WHATSAPP_ERROR` when WhatsApp does not create the group. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    socket: { command: 'group.create' },
     errors: [...ON_SESSION, 'OPERATION_DISABLED'],
     examples: {
       request: { subject: 'Clientes', participants: [USER_ID], messageTimer: 0 },
@@ -140,6 +141,7 @@ export class GroupsController {
     summary: 'List the groups',
     description:
       'The groups WhatsApp Web has loaded, each with its participants. The same chats as `chats.list`, without the private chats and the channels.',
+    socket: { command: 'group.list' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [GROUP] } },
     gateway: true,
@@ -158,6 +160,7 @@ export class GroupsController {
     summary: 'Join a group by its invite code',
     description:
       'Joins the group of an invite link (`https://chat.whatsapp.com/<inviteCode>`) and answers its id. Fails with `WHATSAPP_ERROR` when the code is wrong, expired or revoked, or when the group asks an admin to approve. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    socket: { command: 'group.join' },
     errors: [...ON_SESSION, 'OPERATION_DISABLED'],
     examples: {
       request: { inviteCode: 'AbCdEfGhIjKlMnOpQrStUv' },
@@ -180,6 +183,7 @@ export class GroupsController {
     summary: 'Read what an invite code points to',
     description:
       'What WhatsApp tells about the group of an invite code, without joining it (subject, size, creator). The fields are WhatsApp’s own, passed through sanitized.',
+    socket: { command: 'group.inviteInfo' },
     errors: ON_SESSION,
     examples: {
       request: null,
@@ -201,6 +205,7 @@ export class GroupsController {
     summary: 'Read a group',
     description:
       'One group with its owner, creation date, description and participants. Answers 404 `CHAT_NOT_FOUND` when the session has no such chat or it is not a group.',
+    socket: { command: 'group.get' },
     errors: ON_GROUP,
     examples: { request: null, response: GROUP },
     wwebjs: [
@@ -222,6 +227,7 @@ export class GroupsController {
     summary: 'Change the subject or the description',
     description:
       'Sets what is sent: the subject first, then the description. WhatsApp has no call that sets both, so a failure of the second leaves the first applied. Fails with `WHATSAPP_ERROR` when WhatsApp refuses (the account is not an admin and the group restricts the info).',
+    socket: { command: 'group.update' },
     errors: ON_GROUP,
     examples: { request: { subject: 'Clientes VIP', description: 'Avisos' }, response: null },
     wwebjs: ['GroupChat.setDescription', 'GroupChat.setSubject']
@@ -241,6 +247,7 @@ export class GroupsController {
     summary: 'Change who can send, edit and add',
     description:
       'Sets what is sent, one setting at a time in the order `messagesAdminsOnly`, `infoAdminsOnly`, `addMembersAdminsOnly`; a failure leaves the ones before it applied. Needs an admin account.',
+    socket: { command: 'group.settings' },
     errors: ON_GROUP,
     examples: { request: { messagesAdminsOnly: true }, response: null },
     wwebjs: [
@@ -265,6 +272,7 @@ export class GroupsController {
     summary: 'Add, remove, promote or demote participants',
     description:
       'One action on a list of user ids. `add` answers per participant (a participant WhatsApp cannot add gets an invite when `options.autoSendInviteV4` is true); the other three answer the `status` WhatsApp gave. Needs an admin account. At most 256 ids per call. **Switched off by default** (`ENABLE_GROUP_WRITES=false`, every action): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group changes goes against the terms of WhatsApp and can get the account blocked (an `add` was followed by a logout on two test accounts; the cause is not proven).',
+    socket: { command: 'group.participants' },
     errors: [...ON_GROUP, 'OPERATION_DISABLED'],
     examples: {
       request: { action: 'add', participants: [USER_ID], options: { autoSendInviteV4: false } },
@@ -299,6 +307,7 @@ export class GroupsController {
     summary: 'Read the invite link of a group',
     description:
       'The code and the link that let anyone join the group. It is `manage`, not `read`: the link is a credential of the group.',
+    socket: { command: 'group.invite' },
     errors: ON_GROUP,
     examples: {
       request: null,
@@ -322,6 +331,7 @@ export class GroupsController {
     summary: 'Revoke the invite link of a group',
     description:
       'The old link stops working; read the new one with `groups.invite`. Needs an admin account. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    socket: { command: 'group.revokeInvite' },
     errors: [...ON_GROUP, 'OPERATION_DISABLED'],
     examples: { request: null, response: null },
     wwebjs: ['GroupChat.revokeInvite']
@@ -338,6 +348,7 @@ export class GroupsController {
     summary: 'Change the picture of a group',
     description:
       'Sets the picture from inline `base64`, a public `url` or the image of a stored message. Anything that is not an image is a 400. A `url` goes through the SSRF guard and the size cap `MAX_MEDIA_BYTES`; the body of a request is limited to 1 MiB, so a larger image goes by `url`.',
+    socket: { command: 'group.setPicture' },
     errors: ON_PICTURE,
     examples: {
       request: { source: { url: 'https://example.com/logo.png' } },
@@ -359,6 +370,7 @@ export class GroupsController {
     scope: 'manage',
     summary: 'Delete the picture of a group',
     description: 'Removes the picture. Fails with `WHATSAPP_ERROR` when WhatsApp refuses.',
+    socket: { command: 'group.deletePicture' },
     errors: ON_GROUP,
     examples: { request: null, response: null },
     wwebjs: ['GroupChat.deletePicture']
@@ -375,6 +387,7 @@ export class GroupsController {
     summary: 'Leave a group',
     description:
       'The account leaves the group. The chat stays in the list until `chats.delete` removes it.',
+    socket: { command: 'group.leave' },
     errors: ON_GROUP,
     examples: { request: null, response: null },
     wwebjs: ['GroupChat.leave']
@@ -391,6 +404,7 @@ export class GroupsController {
     summary: 'List who asks to join a group',
     description:
       'The pending requests to enter a group that asks an admin to approve. Needs an admin account.',
+    socket: { command: 'group.membershipRequests' },
     errors: ON_GROUP,
     examples: {
       request: null,
@@ -430,6 +444,7 @@ export class GroupsController {
     summary: 'Approve requests to join a group',
     description:
       'Approves the listed requesters, or every pending request when `requesterIds` is left out. The answer has one entry per request; an entry with `error` is one WhatsApp refused. Needs an admin account.',
+    socket: { command: 'group.approveRequests' },
     errors: ON_GROUP,
     examples: {
       request: { requesterIds: [USER_ID] },
@@ -461,6 +476,7 @@ export class GroupsController {
     summary: 'Reject requests to join a group',
     description:
       'Rejects the listed requesters, or every pending request when `requesterIds` is left out. Same answer as `groups.approveRequests`.',
+    socket: { command: 'group.rejectRequests' },
     errors: ON_GROUP,
     examples: {
       request: { requesterIds: [USER_ID] },

@@ -13,6 +13,7 @@ import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum.js'
 import { Reflector } from '@nestjs/core'
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod'
 import { from, lastValueFrom, switchMap } from 'rxjs'
+import { z } from 'zod'
 
 import {
   OperationRegistryService,
@@ -55,8 +56,10 @@ interface CommandPlan {
   args: readonly ArgPlan[]
   // The `:name` segments of the route, which `params` fills
   pathParams: ReadonlySet<string>
-  // Where the rest of `params` goes: the body of a write, the query of a read
-  rest: 'body' | 'query' | 'none'
+  // Where the rest of `params` goes: the body of a write, the query of a read; `both` when the route
+  // has the two (a send with `wait`), and then `queryKeys` says which names are the query's
+  rest: 'body' | 'query' | 'both' | 'none'
+  queryKeys: ReadonlySet<string>
 }
 
 interface RouteArgument {
@@ -199,10 +202,19 @@ export class OperationDispatcherService implements OnApplicationBootstrap {
         }
       )
     }
+    if (plan.rest === 'both') {
+      const query = Object.entries(rest).filter(([key]) => plan.queryKeys.has(key))
+      const body = Object.entries(rest).filter(([key]) => !plan.queryKeys.has(key))
+      return {
+        param: path,
+        body: Object.fromEntries(body),
+        query: asQuery(Object.fromEntries(query))
+      }
+    }
     return {
       param: path,
       body: plan.rest === 'body' ? rest : {},
-      query: plan.rest === 'query' ? rest : {}
+      query: plan.rest === 'query' ? asQuery(rest) : {}
     }
   }
 
@@ -253,6 +265,18 @@ export class OperationDispatcherService implements OnApplicationBootstrap {
   }
 }
 
+// HTTP delivers every query value as a string, and the schemas of the queries read strings (`stringbool`
+// does not take a boolean). A command carries JSON, so a number or a boolean becomes the string REST
+// would have received; anything else is left as it is and fails the schema.
+function asQuery(values: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [
+      key,
+      typeof value === 'number' || typeof value === 'boolean' ? String(value) : value
+    ])
+  )
+}
+
 function buildPlan(operation: RegisteredOperation): CommandPlan {
   const { controller, methodName } = operation
   const prototype: unknown = Object.getPrototypeOf(controller)
@@ -285,7 +309,10 @@ function buildPlan(operation: RegisteredOperation): CommandPlan {
   args.sort((a, b) => a.index - b.index)
   const hasBody = args.some(arg => arg.kind === 'body')
   const hasQuery = args.some(arg => arg.kind === 'query')
-  if (hasBody && hasQuery) throw new Error('a route with both a body and a query')
+  // With both, the names the query schema declares are the query's and every other one is the body's:
+  // a body field named like a query parameter could never be reached, so the schema must be a plain
+  // object whose names the dispatcher can read
+  const queryKeys = hasBody && hasQuery ? queryKeysOf(args) : new Set<string>()
 
   const routePath = [
     Reflect.getMetadata(PATH_METADATA, controller.constructor),
@@ -298,8 +325,36 @@ function buildPlan(operation: RegisteredOperation): CommandPlan {
     handler,
     args,
     pathParams: new Set([...routePath.matchAll(PATH_PARAM)].map(match => match[1] ?? '')),
-    rest: hasBody ? 'body' : hasQuery ? 'query' : 'none'
+    queryKeys,
+    rest: hasBody && hasQuery ? 'both' : hasBody ? 'body' : hasQuery ? 'query' : 'none'
   }
+}
+
+function queryKeysOf(args: readonly ArgPlan[]): ReadonlySet<string> {
+  const query = args.find(arg => arg.kind === 'query')
+  const schema: unknown = (query?.metatype as { schema?: unknown } | undefined)?.schema
+  if (!(schema instanceof z.ZodObject)) {
+    throw new Error('a route with a body and a query whose query is not a Zod object DTO')
+  }
+  const keys = new Set(Object.keys(schema.shape))
+  // A name in both could only reach the query, so the body would lose a field with no error
+  const body = args.find(arg => arg.kind === 'body')
+  const clash = [
+    ...fieldNames((body?.metatype as { schema?: unknown } | undefined)?.schema)
+  ].filter(name => keys.has(name))
+  if (clash.length > 0) {
+    throw new Error(`the body and the query both declare "${clash.join('", "')}"`)
+  }
+  return keys
+}
+
+// The field names of an object schema, or of every branch of a union of them
+function fieldNames(schema: unknown): Set<string> {
+  if (schema instanceof z.ZodObject) return new Set(Object.keys(schema.shape))
+  if (schema instanceof z.ZodUnion) {
+    return new Set((schema.options as unknown[]).flatMap(option => [...fieldNames(option)]))
+  }
+  return new Set()
 }
 
 const KIND_BY_PARAMTYPE: ReadonlyMap<number, ArgKind> = new Map<number, ArgKind>([
