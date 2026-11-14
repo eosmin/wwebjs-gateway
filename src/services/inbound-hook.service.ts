@@ -1,7 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common'
 
-import { NotFoundError, UnauthorizedError } from '../common/errors.js'
+import {
+  ConflictError,
+  NotFoundError,
+  ServiceBusyError,
+  UnauthorizedError
+} from '../common/errors.js'
 import { generateToken, sha256Hex } from '../common/lib/crypto.js'
+import { KeyedLock } from '../common/lib/keyed-lock.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { InboundHook } from '../database/models.js'
@@ -10,6 +16,8 @@ import { SessionsRepository } from '../database/repositories/sessions.repository
 import type { CreatedInboundHookDto, InboundHookDto } from '../types/inbound-hooks.dto.js'
 
 export const INBOUND_HOOK_PATH = '/v1/hooks/inbound/'
+
+const SEND_WINDOW_MS = 60_000
 
 // 32 random bytes in base64url: a token of any other shape cannot be one of ours, so it is refused
 // without reading the database
@@ -36,6 +44,12 @@ export function toInboundHookDto(row: InboundHook): InboundHookDto {
 // nowhere else. The routes check that the key reaches the session; this service trusts that.
 @Injectable()
 export class InboundHookService {
+  // The creations of one session go one after another, so the count and the insert are one step
+  private readonly creating = new KeyedLock()
+  // When each hook took its last sends, inside the window; the gateway runs a single instance
+  private readonly sends = new Map<string, number[]>()
+  private sweptAt = 0
+
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(InboundHooksRepository) private readonly hooks: InboundHooksRepository,
@@ -45,8 +59,18 @@ export class InboundHookService {
   async create(sessionId: string, name: string): Promise<CreatedInboundHookDto> {
     if ((await this.sessions.findById(sessionId)) === null) throw sessionNotFound(sessionId)
     const token = generateToken()
+    // Every active hook is a secret URL that sends through the session, so the number is bounded
+    const row = await this.creating.run(sessionId, async () => {
+      const limit = this.config.WEBHOOKS_MAX_PER_SESSION
+      if ((await this.hooks.countActiveForSession(sessionId)) >= limit) {
+        throw new ConflictError(
+          'MAX_INBOUND_HOOKS_REACHED',
+          `The session already has ${limit} active inbound hooks, the most it can have`
+        )
+      }
+      return this.hooks.create({ sessionId, name, tokenHash: sha256Hex(token) })
+    })
     // The session can be deleted between the check above and the insert; the foreign key says so
-    const row = await this.hooks.create({ sessionId, name, tokenHash: sha256Hex(token) })
     if (row === null) throw sessionNotFound(sessionId)
     return { ...toInboundHookDto(row), url: this.urlFor(token) }
   }
@@ -74,6 +98,36 @@ export class InboundHookService {
     const row = await this.hooks.findByTokenHash(sha256Hex(token))
     if (row === null || row.revokedAt !== null) throw invalidToken()
     return { hookId: row.id, sessionId: row.sessionId }
+  }
+
+  // Counts one request of the hook against its allowance of INBOUND_HOOK_MAX_PER_MINUTE. It comes
+  // after `resolve`, so only real hooks have an entry; the address allowance stops the callers that
+  // invent tokens. A sliding window: the hook can send again when its oldest request leaves it.
+  admitSend(hookId: string): void {
+    const now = Date.now()
+    const recent = (this.sends.get(hookId) ?? []).filter(at => now - at < SEND_WINDOW_MS)
+    const oldest = recent[0]
+    const limit = this.config.INBOUND_HOOK_MAX_PER_MINUTE
+    if (oldest !== undefined && recent.length >= limit) {
+      this.sends.set(hookId, recent)
+      throw new ServiceBusyError(
+        'RATE_LIMITED',
+        Math.ceil((oldest + SEND_WINDOW_MS - now) / 1000),
+        true,
+        `An inbound hook accepts ${limit} messages a minute`
+      )
+    }
+    this.sends.set(hookId, [...recent, now])
+    if (now - this.sweptAt >= SEND_WINDOW_MS) this.sweepSends(now)
+  }
+
+  // Once a window at most, so a request never pays for the whole table: a hook that stopped sending
+  // (a revoked one too) leaves it within two windows
+  private sweepSends(now: number): void {
+    this.sweptAt = now
+    for (const [id, times] of this.sends) {
+      if (times.every(at => now - at >= SEND_WINDOW_MS)) this.sends.delete(id)
+    }
   }
 
   private urlFor(token: string): string {

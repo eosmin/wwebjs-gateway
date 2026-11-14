@@ -40,6 +40,11 @@ export class InboundHooksRepository {
     })
   }
 
+  // The hooks that still accept requests: a revoked one no longer counts against the limit
+  countActiveForSession(sessionId: string): Promise<number> {
+    return this.prisma.inboundHook.count({ where: { sessionId, revokedAt: null } })
+  }
+
   // Revoking twice keeps the first date, also when two requests race; null when the hook does not
   // exist
   async revoke(id: string, at: Date): Promise<InboundHook | null> {

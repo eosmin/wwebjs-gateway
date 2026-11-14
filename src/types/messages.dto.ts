@@ -235,6 +235,34 @@ export const SendMessageBody = variants({
 })
 export type SendMessageBody = z.infer<typeof SendMessageBody>
 
+// The no-code shape of an inbound hook: a system that cannot build the full body sends `{ to, text }`
+export const InboundShortBody = z.strictObject({
+  to: Recipient,
+  text: z.string().min(1).max(65_536).describe('The text to send')
+})
+
+// What an inbound hook accepts: the body of `messages.send`, or the short shape, which is that same body
+// with `type: 'text'`. The branch is chosen by the presence of `type`, so a mistake is reported against the
+// shape the caller meant and not as one merged union error. `InboundShortBody` alone is what the OpenAPI
+// document shows for the second one.
+export const InboundSendBody = z
+  .custom<object>(value => typeof value === 'object' && value !== null && !Array.isArray(value), {
+    error: 'The body must be a JSON object'
+  })
+  .transform((value, ctx): SendMessageBody => {
+    const parsed =
+      'type' in value ? SendMessageBody.safeParse(value) : InboundShortBody.safeParse(value)
+    if (!parsed.success) {
+      for (const { path, message } of parsed.error.issues) {
+        ctx.issues.push({ code: 'custom', message, path, input: value })
+      }
+      return z.NEVER
+    }
+    return 'text' in parsed.data
+      ? { to: parsed.data.to, type: 'text', body: parsed.data.text }
+      : parsed.data
+  })
+
 export const ReplyMessageBody = variants({
   to: Recipient.optional().describe('The chat to reply in; by default the chat of the message')
 })

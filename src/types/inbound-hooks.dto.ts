@@ -42,3 +42,9 @@ export const CreatedInboundHook = z.object({
     .describe('The URL to POST to. It holds the token, which is shown here and never again')
 })
 export class CreatedInboundHookDto extends createZodDto(CreatedInboundHook) {}
+
+// The token is not validated here: a malformed one is the same 401 as an unknown one (see `resolve`)
+export const InboundTokenParams = z.strictObject({
+  token: z.string().describe('The secret in the URL of the inbound hook')
+})
+export class InboundTokenParamsDto extends createZodDto(InboundTokenParams) {}
