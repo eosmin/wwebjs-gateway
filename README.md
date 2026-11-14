@@ -138,7 +138,30 @@ internal link is broken or when a guide is missing from this list.
 - [`docs/metrics.md`](docs/metrics.md): every Prometheus series.
 - [`docs/parity-matrix.md`](docs/parity-matrix.md): every `whatsapp-web.js` symbol and where it is.
 
-**Decisions:** [`docs/adr/`](docs/adr/README.md).
+**Decisions:** one record per decision, in [`docs/adr/`](docs/adr/README.md).
+
+- [ADR 0001](docs/adr/0001-nestjs-on-the-fastify-adapter.md): NestJS on the Fastify adapter.
+- [ADR 0002](docs/adr/0002-toolchain-mirrored-from-omnichannel.md): Toolchain mirrored from `omnichannel-platform`.
+- [ADR 0003](docs/adr/0003-public-repository-and-protect-main.md): Public repository and the `protect-main` ruleset.
+- [ADR 0004](docs/adr/0004-whatsapp-web-js-over-baileys.md): `whatsapp-web.js` over Baileys.
+- [ADR 0005](docs/adr/0005-prisma-7-with-the-pg-driver-adapter.md): Prisma 7 with the `pg` driver adapter and the `cjs` generator format.
+- [ADR 0006](docs/adr/0006-response-dtos-follow-what-wwebjs-delivers.md): response DTOs follow what `whatsapp-web.js` really delivers.
+- [ADR 0007](docs/adr/0007-production-is-the-default-and-fails-fast.md): production is the default mode, and a bad production setup stops the start.
+- [ADR 0008](docs/adr/0008-dedupe-survives-redis-and-migrations-are-atomic.md): the event dedupe survives a Redis that loses its keys, and every migration is atomic.
+- [ADR 0009](docs/adr/0009-single-instance-by-design.md): one instance, by design.
+- [ADR 0010](docs/adr/0010-one-operation-registry.md): one `@WaOperation` registry drives every surface.
+- [ADR 0011](docs/adr/0011-ordering-buffer-and-message-batch.md): inbound messages are ordered by the sender's time, before `seq`.
+- [ADR 0012](docs/adr/0012-persistent-send-queue-and-idempotency.md): a persistent send queue, an idempotency key, and no blind retry.
+- [ADR 0013](docs/adr/0013-send-policy-and-cold-sends-off.md): a send policy that behaves like a person, with cold sends off by default.
+- [ADR 0014](docs/adr/0014-whatsapp-web-version-pinning.md): the WhatsApp Web build and the library are pinned, and a pinned build that cannot load stops the start.
+- [ADR 0015](docs/adr/0015-raw-and-origin-are-delivered-not-interpreted.md): `raw` and `origin` are delivered, not interpreted.
+- [ADR 0016](docs/adr/0016-api-key-model.md): API keys with scopes, one optional session, expiry, rotation and an address list.
+- [ADR 0017](docs/adr/0017-no-admin-ui-bull-board-for-queues.md): no admin UI in this repository, and Bull Board for the queues.
+- [ADR 0018](docs/adr/0018-single-package-with-a-monorepo-path.md): a single package now, with a path to a pnpm workspace.
+- [ADR 0019](docs/adr/0019-esm-module-format.md): the code is ESM.
+- [ADR 0020](docs/adr/0020-credentials-need-manage-and-are-never-replayed.md): the QR and pairing code need `manage`, and a redacted credential is never replayed.
+- [ADR 0021](docs/adr/0021-private-webhook-targets-need-an-allowlist.md): private webhook targets are refused, and production reaches them only through an allowlist.
+- [ADR 0022](docs/adr/0022-watchdog-debounces-blocking-states.md): the watchdog needs two reads before it fails a session.
 
 ## Repository settings
 

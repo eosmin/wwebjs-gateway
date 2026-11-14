@@ -6,7 +6,12 @@ import { findBrokenLinks, internalLinks } from '../../scripts/lib/doc-links.js'
 import { findPlaceholders } from '../../scripts/lib/doc-placeholders.js'
 import { buildDocsModel } from '../../scripts/lib/docs-model.js'
 import { GENERATED_DOCS } from '../../scripts/lib/generated-docs.js'
-import { FEATURE_ENV, PENDING_GUIDES, WRITTEN_GUIDES } from '../../scripts/lib/guides.js'
+import {
+  FEATURE_ENV,
+  PENDING_GUIDES,
+  REQUIRED_ADRS,
+  WRITTEN_GUIDES
+} from '../../scripts/lib/guides.js'
 import { readWwebjsSymbols } from '../../scripts/lib/wwebjs-symbols.js'
 import { envSchema } from '../../src/config/env.schema.js'
 
@@ -161,6 +166,16 @@ describe('docs', () => {
 describe('architecture decision records', () => {
   it('has at least the records of Phase 0', () => {
     expect(ADR_FILES.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it.each(REQUIRED_ADRS)('has the required record %s', file => {
+    expect(ADR_FILES).toContain(file)
+  })
+
+  it.each(ADR_FILES)('%s is linked from the README', file => {
+    const linked = new Set(internalLinks(read('README.md')).map(link => link.split('#')[0]))
+
+    expect(linked).toContain(`docs/adr/${file}`)
   })
 
   it('numbers them 0001, 0002, ... with no gap and no repeat', () => {

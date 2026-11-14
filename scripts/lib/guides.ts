@@ -58,3 +58,31 @@ export const FEATURE_ENV: Readonly<Record<string, RegExp>> = {
   'docs/safety.md':
     /^(CONVERSATION_WINDOW_HOURS|ALLOW_COLD_SENDS|COLD_SEND|LOOKUPS_PER_DAY|PER_CHAT_|SESSION_MAX_PER_|DUPLICATE_|WARMUP_|UNREACHABLE_|SEND_POLICY_MAX_WAIT_MS|HEALTH_|HUMANIZE_MIN_REPLY_DELAY_MS)/
 }
+
+// The decisions the TDD requires a record for (§6.13, and the decisions log of §11), one file each in
+// docs/adr/. A record can be added beyond these, but one of them cannot go missing: the docs spec fails
+// when a file is not there, and when a record is not linked from the README.
+export const REQUIRED_ADRS: readonly string[] = [
+  '0001-nestjs-on-the-fastify-adapter.md',
+  '0002-toolchain-mirrored-from-omnichannel.md',
+  '0003-public-repository-and-protect-main.md',
+  '0004-whatsapp-web-js-over-baileys.md',
+  '0005-prisma-7-with-the-pg-driver-adapter.md',
+  '0006-response-dtos-follow-what-wwebjs-delivers.md',
+  '0007-production-is-the-default-and-fails-fast.md',
+  '0008-dedupe-survives-redis-and-migrations-are-atomic.md',
+  '0009-single-instance-by-design.md',
+  '0010-one-operation-registry.md',
+  '0011-ordering-buffer-and-message-batch.md',
+  '0012-persistent-send-queue-and-idempotency.md',
+  '0013-send-policy-and-cold-sends-off.md',
+  '0014-whatsapp-web-version-pinning.md',
+  '0015-raw-and-origin-are-delivered-not-interpreted.md',
+  '0016-api-key-model.md',
+  '0017-no-admin-ui-bull-board-for-queues.md',
+  '0018-single-package-with-a-monorepo-path.md',
+  '0019-esm-module-format.md',
+  '0020-credentials-need-manage-and-are-never-replayed.md',
+  '0021-private-webhook-targets-need-an-allowlist.md',
+  '0022-watchdog-debounces-blocking-states.md'
+]
