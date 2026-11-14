@@ -102,6 +102,7 @@ export class SessionsController {
     scope: 'read',
     summary: 'Read a session',
     description: 'The configuration and the current status of the session.',
+    socket: { command: 'session.get' },
     errors: ['VALIDATION_ERROR', 'UNAUTHORIZED', 'FORBIDDEN', 'INSUFFICIENT_SCOPE', 'NOT_FOUND'],
     examples: { request: null, response: SESSION_EXAMPLE },
     wwebjs: [],
@@ -316,6 +317,7 @@ export class SessionsController {
     scope: 'read',
     summary: 'Read the connection state of WhatsApp Web',
     description: 'The state WhatsApp Web reports, such as CONNECTED. The session must be ready.',
+    socket: { command: 'session.state' },
     errors: [
       'VALIDATION_ERROR',
       'UNAUTHORIZED',
@@ -340,6 +342,7 @@ export class SessionsController {
     scope: 'read',
     summary: 'Read the version of WhatsApp Web',
     description: 'The version of WhatsApp Web the session runs. The session must be ready.',
+    socket: { command: 'session.webVersion' },
     errors: [
       'VALIDATION_ERROR',
       'UNAUTHORIZED',
@@ -365,6 +368,7 @@ export class SessionsController {
     summary: 'Read the account linked to a session',
     description:
       'The id, name and platform of the linked account, and the battery of the phone when WhatsApp Web can read it (a linked device often cannot, and `battery` is then absent). The session must be ready.',
+    socket: { command: 'session.info' },
     errors: [
       'VALIDATION_ERROR',
       'UNAUTHORIZED',

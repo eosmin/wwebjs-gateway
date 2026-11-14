@@ -45,6 +45,7 @@ export class PresenceProfileController {
     summary: 'Show the account as online or offline',
     description:
       '`available` shows the account as online to its contacts; `unavailable` as offline. While the account is available the linked phone gets no push notifications.',
+    socket: { command: 'presence.set' },
     errors: ON_SESSION,
     examples: { request: { state: 'available' }, response: null },
     wwebjs: ['Client.sendPresenceAvailable', 'Client.sendPresenceUnavailable']
@@ -63,6 +64,7 @@ export class PresenceProfileController {
     scope: 'manage',
     summary: 'Change the "about" text of the profile',
     description: 'Sets the text under the name of the account, up to 139 characters.',
+    socket: { command: 'profile.setStatus' },
     errors: ON_SESSION,
     examples: { request: { status: 'Atendemos de 9 a 18 h' }, response: null },
     wwebjs: ['Client.setStatus']
@@ -82,6 +84,7 @@ export class PresenceProfileController {
     summary: 'Change the name of the profile',
     description:
       'Sets the name the account shows, up to 25 characters. Fails with WHATSAPP_ERROR when WhatsApp refuses.',
+    socket: { command: 'profile.setDisplayName' },
     errors: ON_SESSION,
     examples: { request: { displayName: 'Soporte' }, response: null },
     wwebjs: ['Client.setDisplayName']
@@ -101,6 +104,7 @@ export class PresenceProfileController {
     summary: 'Change the profile picture',
     description:
       'Sets the picture from inline `base64`, a public `url` or the image of a stored message. Anything that is not an image is a 400. A `url` goes through the SSRF guard and the size cap `MAX_MEDIA_BYTES`; the body of a request is limited to 1 MiB, so a larger image goes by `url`.',
+    socket: { command: 'profile.setPicture' },
     errors: ON_PICTURE,
     examples: {
       request: { source: { url: 'https://example.com/logo.png' } },
@@ -123,6 +127,7 @@ export class PresenceProfileController {
     summary: 'Delete the profile picture',
     description:
       'Removes the picture of the profile. Fails with WHATSAPP_ERROR when WhatsApp refuses.',
+    socket: { command: 'profile.deletePicture' },
     errors: ON_SESSION,
     examples: { request: null, response: null },
     wwebjs: ['Client.deleteProfilePicture']

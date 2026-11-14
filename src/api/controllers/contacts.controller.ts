@@ -73,6 +73,7 @@ export class ContactsController {
     summary: 'List the contacts',
     description:
       'Every contact WhatsApp Web has loaded: the address book and the people the account has talked to. A business account carries its `businessProfile`.',
+    socket: { command: 'contact.list' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [CONTACT] } },
     wwebjs: ['Client.getContacts']
@@ -88,6 +89,7 @@ export class ContactsController {
     scope: 'read',
     summary: 'List the blocked contacts',
     description: 'The contacts the account has blocked.',
+    socket: { command: 'contact.blocked' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [{ ...CONTACT, isBlocked: true }] } },
     wwebjs: ['Client.getBlockedContacts']
@@ -104,9 +106,17 @@ export class ContactsController {
     summary: 'Read a contact',
     description:
       'One contact by its id (`@c.us` or `@lid`). A business account carries its `businessProfile`.',
+    socket: { command: 'contact.get' },
     errors: ON_SESSION,
     examples: { request: null, response: CONTACT },
-    wwebjs: ['Client.getContactById', 'Broadcast.getContact']
+    wwebjs: [
+      'Client.getContactById',
+      'Broadcast.getContact',
+      'Chat.getContact',
+      'Message.getContact',
+      'GroupNotification.getContact',
+      'GroupNotification.getRecipients'
+    ]
   })
   get(@Param() { sessionId, contactId }: SessionContactParamsDto): Promise<AnyContactDto> {
     return this.contacts.get(sessionId, contactId)
@@ -120,6 +130,7 @@ export class ContactsController {
     summary: 'Read the status text of a contact',
     description:
       'The "about" text of the contact; `null` when WhatsApp gives none, which is what it does when the account has no permission to read it.',
+    socket: { command: 'contact.about' },
     errors: ON_SESSION,
     examples: { request: null, response: { about: 'Disponible' } },
     wwebjs: ['Contact.getAbout']
@@ -138,6 +149,7 @@ export class ContactsController {
     summary: 'Read the profile picture link of a contact',
     description:
       'A link to the profile picture; `null` when WhatsApp refuses it, which is what it does when the privacy settings of the contact do not allow it.',
+    socket: { command: 'contact.picture' },
     errors: ON_SESSION,
     examples: { request: null, response: { url: 'https://pps.whatsapp.net/v/example.jpg' } },
     wwebjs: ['Client.getProfilePicUrl', 'Contact.getProfilePicUrl']
@@ -155,6 +167,7 @@ export class ContactsController {
     scope: 'read',
     summary: 'List the groups shared with a contact',
     description: 'The ids of the groups the account and the contact are both in.',
+    socket: { command: 'contact.commonGroups' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: ['120363000000000001@g.us'] } },
     wwebjs: ['Client.getCommonGroups', 'Contact.getCommonGroups']
@@ -173,6 +186,7 @@ export class ContactsController {
     summary: 'Count the devices of a contact',
     description:
       'How many devices WhatsApp lists for the contact. The phone counts: a user with one linked WhatsApp Web session has 2. `0` when WhatsApp lists none.',
+    socket: { command: 'contact.deviceCount' },
     errors: ON_SESSION,
     examples: { request: null, response: { count: 2 } },
     wwebjs: ['Client.getContactDeviceCount']
@@ -191,6 +205,7 @@ export class ContactsController {
     summary: 'Read the broadcast (status) of a contact',
     description:
       'The status updates the contact posted, as the broadcast WhatsApp Web keeps for it. Answers 404 `NOT_FOUND` when it holds none.',
+    socket: { command: 'contact.broadcast' },
     errors: ON_SESSION,
     examples: {
       request: null,
@@ -216,6 +231,7 @@ export class ContactsController {
     summary: 'Block a contact',
     description:
       'Blocks the contact in WhatsApp. Fails with `WHATSAPP_ERROR` when WhatsApp refuses.',
+    socket: { command: 'contact.block' },
     errors: ON_SESSION,
     examples: { request: null, response: null },
     wwebjs: ['Contact.block']
@@ -231,6 +247,7 @@ export class ContactsController {
     scope: 'manage',
     summary: 'Unblock a contact',
     description: 'Lifts the block. Fails with `WHATSAPP_ERROR` when WhatsApp refuses.',
+    socket: { command: 'contact.unblock' },
     errors: ON_SESSION,
     examples: { request: null, response: null },
     wwebjs: ['Contact.unblock']
@@ -247,6 +264,7 @@ export class ContactsController {
     summary: 'Save a contact in the address book',
     description:
       'Creates the entry, or edits it when it exists. `:contactId` must be the `@c.us` id of a phone number: the address book is keyed by phone, so a `@lid` is `400`. With `syncToAddressbook: true` the linked phone gets the entry too; without it (the wwebjs default is `false`) the entry stays in WhatsApp Web only.',
+    socket: { command: 'contact.saveAddressbook' },
     errors: ON_SESSION,
     examples: {
       request: { firstName: 'Cliente', lastName: 'Uno', syncToAddressbook: true },
@@ -269,6 +287,7 @@ export class ContactsController {
     summary: 'Delete a contact from the address book',
     description:
       'Removes the entry of the address book. `:contactId` must be the `@c.us` id of a phone number.',
+    socket: { command: 'contact.deleteAddressbook' },
     errors: ON_SESSION,
     examples: { request: null, response: null },
     wwebjs: ['Client.deleteAddressbookContact']

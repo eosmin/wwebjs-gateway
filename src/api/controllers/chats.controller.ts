@@ -79,6 +79,7 @@ export class ChatsController {
     summary: 'List the chats',
     description:
       'Every chat WhatsApp Web has loaded: private chats, groups and channels. A group carries its participants and a channel its own fields.',
+    socket: { command: 'chat.list' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [CHAT] } },
     wwebjs: ['Client.getChats']
@@ -95,9 +96,16 @@ export class ChatsController {
     summary: 'Read a chat',
     description:
       'One chat by its id. Answers 404 `CHAT_NOT_FOUND` when the session has no such chat.',
+    socket: { command: 'chat.get' },
     errors: ON_CHAT,
     examples: { request: null, response: CHAT },
-    wwebjs: ['Client.getChatById', 'Contact.getChat', 'Broadcast.getChat']
+    wwebjs: [
+      'Client.getChatById',
+      'Contact.getChat',
+      'Broadcast.getChat',
+      'Message.getChat',
+      'GroupNotification.getChat'
+    ]
   })
   get(@Param() { sessionId, chatId }: SessionChatParamsDto): Promise<AnyChatDto> {
     return this.chats.get(sessionId, chatId)
@@ -111,6 +119,7 @@ export class ChatsController {
     summary: 'Read the messages of a chat from WhatsApp Web',
     description:
       'The latest messages WhatsApp Web has of the chat, oldest first, up to `limit`. `fromMe` keeps only those the account sent (true) or got (false). The history the gateway stored is `messages.stored`.',
+    socket: { command: 'chat.messages' },
     errors: ON_CHAT,
     examples: { request: null, response: { items: [] } },
     wwebjs: ['Chat.fetchMessages']
@@ -134,6 +143,7 @@ export class ChatsController {
     scope: 'read',
     summary: 'Read the pinned messages of a chat',
     description: 'The messages pinned in the chat.',
+    socket: { command: 'chat.pinnedMessages' },
     errors: ON_CHAT,
     examples: { request: null, response: { items: [] } },
     wwebjs: ['Chat.getPinnedMessages', 'Client.getPinnedMessages']
@@ -172,6 +182,7 @@ export class ChatsController {
     summary: 'Mark a chat as seen',
     description:
       'Sends the read receipt of every message of the chat: the other side sees the blue ticks.',
+    socket: { command: 'chat.seen' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Channel.sendSeen', 'Chat.sendSeen', 'Client.sendSeen']
@@ -187,6 +198,7 @@ export class ChatsController {
     scope: 'manage',
     summary: 'Mark a chat as unread',
     description: 'Shows the chat as unread in the linked phone. Nobody else sees it.',
+    socket: { command: 'chat.markUnread' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.markUnread', 'Client.markChatUnread']
@@ -202,6 +214,7 @@ export class ChatsController {
     scope: 'manage',
     summary: 'Archive a chat',
     description: 'Moves the chat to the archive. Fails with WHATSAPP_ERROR when WhatsApp refuses.',
+    socket: { command: 'chat.archive' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.archive', 'Client.archiveChat']
@@ -217,6 +230,7 @@ export class ChatsController {
     scope: 'manage',
     summary: 'Unarchive a chat',
     description: 'Takes the chat out of the archive.',
+    socket: { command: 'chat.unarchive' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.unarchive', 'Client.unarchiveChat']
@@ -233,6 +247,7 @@ export class ChatsController {
     summary: 'Pin a chat',
     description:
       'Pins the chat to the top of the list. WhatsApp allows three pinned chats; the call fails with WHATSAPP_ERROR beyond that.',
+    socket: { command: 'chat.pin' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.pin', 'Client.pinChat']
@@ -248,6 +263,7 @@ export class ChatsController {
     scope: 'manage',
     summary: 'Unpin a chat',
     description: 'Takes the chat off the top of the list.',
+    socket: { command: 'chat.unpin' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.unpin', 'Client.unpinChat']
@@ -265,6 +281,7 @@ export class ChatsController {
     summary: 'Mute a chat',
     description:
       'Silences the notifications of the chat until `until` (a future date), or for ever without it. Answers 400 for a date that is not in the future. `muteExpiration` is Unix seconds, -1 for ever.',
+    socket: { command: 'chat.mute' },
     errors: ON_CHAT,
     examples: {
       request: { until: '2099-01-01T00:00:00.000Z' },
@@ -287,6 +304,7 @@ export class ChatsController {
     scope: 'manage',
     summary: 'Unmute a chat',
     description: 'Turns the notifications of the chat back on.',
+    socket: { command: 'chat.unmute' },
     errors: ON_CHAT,
     examples: { request: null, response: { isMuted: false, muteExpiration: 0 } },
     wwebjs: ['Chat.unmute', 'Client.unmuteChat']
@@ -303,6 +321,7 @@ export class ChatsController {
     summary: 'Clear the messages of a chat',
     description:
       'Deletes the messages of the chat in the linked account only; the other side keeps them. Cannot be undone. The copy in the gateway store stays until its retention ends. A channel has no history to clear.',
+    socket: { command: 'chat.clearMessages' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.clearMessages']
@@ -319,6 +338,7 @@ export class ChatsController {
     summary: 'Delete a chat',
     description:
       'Removes the chat and its messages from the linked account only; the other side keeps them. Cannot be undone. A channel is not deleted here: `channels.delete` does it.',
+    socket: { command: 'chat.delete' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.delete']
@@ -335,6 +355,7 @@ export class ChatsController {
     summary: 'Ask the phone for the history of a chat',
     description:
       'Asks the linked phone to send the older messages of the chat. They arrive over time as events, not in this answer.',
+    socket: { command: 'chat.syncHistory' },
     errors: ON_CHAT,
     examples: { request: null, response: null },
     wwebjs: ['Chat.syncHistory', 'Client.syncHistory']
@@ -351,6 +372,7 @@ export class ChatsController {
     summary: 'Read the customer note of a chat',
     description:
       'The note a WhatsApp Business account keeps about a customer. `404 NOT_FOUND` when the chat has none, and also on an account that is not WhatsApp Business, which has no notes. A group or a channel is `400`.',
+    socket: { command: 'chat.customerNote' },
     errors: ON_CHAT,
     examples: { request: null, response: CUSTOMER_NOTE },
     wwebjs: ['Chat.getCustomerNote', 'Client.getCustomerNote']
@@ -369,6 +391,7 @@ export class ChatsController {
     summary: 'Write the customer note of a chat',
     description:
       'Creates the note of the customer, or replaces it. The gateway reads it back: if WhatsApp did not keep it (an account that is not WhatsApp Business ignores the call) the answer is `502 WHATSAPP_ERROR`. A group or a channel is `400`.',
+    socket: { command: 'chat.setCustomerNote' },
     errors: ON_CHAT,
     examples: { request: { note: 'Prefers to be called after 6 pm' }, response: CUSTOMER_NOTE },
     wwebjs: ['Chat.addOrEditCustomerNote', 'Client.addOrEditCustomerNote']

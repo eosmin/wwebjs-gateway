@@ -52,6 +52,7 @@ export class LabelsController {
     summary: 'List the labels',
     description:
       'Every label of the account (WhatsApp Business only; an account without labels answers an empty list).',
+    socket: { command: 'label.list' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [LABEL] } },
     wwebjs: ['Client.getLabels', 'Label.id', 'Label.name', 'Label.hexColor']
@@ -67,6 +68,7 @@ export class LabelsController {
     scope: 'read',
     summary: 'Read a label',
     description: 'One label by its id. Answers 404 `NOT_FOUND` when the account has no such label.',
+    socket: { command: 'label.get' },
     errors: ON_SESSION,
     examples: { request: null, response: LABEL },
     wwebjs: ['Client.getLabelById']
@@ -83,6 +85,7 @@ export class LabelsController {
     summary: 'List the chats that carry a label',
     description:
       'The chats the label is on, as `chats.get` would answer them. Answers 404 `NOT_FOUND` when the account has no such label.',
+    socket: { command: 'label.chats' },
     errors: ON_SESSION,
     examples: {
       request: null,
@@ -118,6 +121,7 @@ export class LabelsController {
     summary: 'Set the labels of several chats',
     description:
       'Every chat in `chatIds` ends with exactly the labels in `labelIds`: the ones listed are added and any other label of those chats is removed, so an empty `labelIds` clears them. An unknown label is `400 VALIDATION_ERROR` and an unknown chat `404 CHAT_NOT_FOUND`, and nothing changes. On an account that is not a Business one there are no labels, so a non-empty `labelIds` is `400`, and an empty one is refused by the page (`502 WHATSAPP_ERROR`).',
+    socket: { command: 'label.assign' },
     errors: ON_CHAT,
     examples: {
       request: { labelIds: ['1', '3'], chatIds: ['5215500000001@c.us'] },
@@ -140,6 +144,7 @@ export class LabelsController {
     summary: 'List the labels of a chat',
     description:
       'The labels on the chat. Answers 404 `CHAT_NOT_FOUND` for a chat the session lacks.',
+    socket: { command: 'label.ofChat' },
     errors: ON_CHAT,
     examples: { request: null, response: { items: [LABEL] } },
     wwebjs: ['Client.getChatLabels', 'Chat.getLabels']
@@ -156,6 +161,7 @@ export class LabelsController {
     summary: 'Set the labels of a chat',
     description:
       'The chat ends with exactly the labels in `labelIds`: the ones listed are added and any other is removed, so an empty list clears them. An unknown label is `400 VALIDATION_ERROR`, and nothing changes. On an account that is not a Business one there are no labels, so a non-empty `labelIds` is `400`, and an empty one is refused by the page (`502 WHATSAPP_ERROR`).',
+    socket: { command: 'label.setForChat' },
     errors: ON_CHAT,
     examples: { request: { labelIds: ['1', '3'] }, response: null },
     wwebjs: ['Chat.changeLabels']

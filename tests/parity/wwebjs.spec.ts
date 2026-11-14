@@ -1,10 +1,9 @@
 import { readWwebjsSymbols } from '../../scripts/lib/wwebjs-symbols.js'
 import { AppModule } from '../../src/app.module.js'
+import { brokenFieldEntries, FIELD_OWNERS, isFieldLinked } from '../../src/parity/field-links.js'
 import { collectOperations } from '../../src/parity/operation-links.js'
 import { UNSUPPORTED_SYMBOLS } from '../../src/parity/overrides.js'
 import { WA_EVENT_NAMES } from '../../src/types/events.js'
-
-import { EXPECTED_FAILURES } from './expected-failures.js'
 
 const symbols = new Set(readWwebjsSymbols())
 let linked = new Set<string>()
@@ -14,8 +13,10 @@ beforeAll(async () => {
   linked = new Set((await collectOperations(AppModule)).flatMap(operation => operation.wwebjs))
 })
 
+// A symbol is covered by an operation, an event, a field of a DTO, a body or the environment, or it is
+// unsupported with a reason (TDD §6.12)
 const isCovered = (symbol: string): boolean =>
-  linked.has(symbol) || events.has(symbol) || symbol in UNSUPPORTED_SYMBOLS
+  linked.has(symbol) || events.has(symbol) || isFieldLinked(symbol) || symbol in UNSUPPORTED_SYMBOLS
 
 const libraryEvents = [...symbols].filter(symbol => symbol.startsWith('Events.'))
 
@@ -27,9 +28,9 @@ describe('whatsapp-web.js parity', () => {
     expect(withoutReason).toEqual([])
   })
 
-  it('does not mark unsupported a symbol an operation links or an event covers', () => {
+  it('does not mark unsupported a symbol an operation, an event or a field covers', () => {
     const both = Object.keys(UNSUPPORTED_SYMBOLS).filter(
-      symbol => linked.has(symbol) || events.has(symbol)
+      symbol => linked.has(symbol) || events.has(symbol) || isFieldLinked(symbol)
     )
     expect(both).toEqual([])
   })
@@ -45,28 +46,31 @@ describe('whatsapp-web.js parity', () => {
     expect(libraryEvents.filter(symbol => !events.has(symbol))).toEqual([])
   })
 
-  describe('expected failures', () => {
-    // Field-only symbols (DTO fields, TDD §6.12 source d) stay here until that source exists
-    const uncovered = (): string[] => [...symbols].filter(symbol => !isCovered(symbol))
-
-    it('is sorted and has no repeat', () => {
-      expect([...EXPECTED_FAILURES]).toEqual([...new Set(EXPECTED_FAILURES)].sort())
+  describe('fields', () => {
+    it('has an owner the library declares for every field table', () => {
+      const owners = new Set([...symbols].map(symbol => symbol.split('.')[0]))
+      expect(Object.keys(FIELD_OWNERS).filter(owner => !owners.has(owner))).toEqual([])
     })
 
-    it('lists no symbol the library does not declare', () => {
-      expect(EXPECTED_FAILURES.filter(symbol => !symbols.has(symbol))).toEqual([])
+    it('names only members the library declares in its renames and skips', () => {
+      const stale = Object.entries(FIELD_OWNERS).flatMap(([owner, sources]) =>
+        sources.flatMap(({ renames = {}, skip = [] }) =>
+          [...Object.keys(renames), ...skip]
+            .filter(member => !symbols.has(`${owner}.${member}`))
+            .map(member => `${owner}.${member}`)
+        )
+      )
+      expect(stale).toEqual([])
     })
 
-    // A new symbol must be mapped or marked unsupported
-    it('covers every symbol that is not listed', () => {
-      const listed = new Set(EXPECTED_FAILURES)
-      expect(uncovered().filter(symbol => !listed.has(symbol))).toEqual([])
+    it('points every rename at a field that exists', () => {
+      expect(brokenFieldEntries()).toEqual([])
     })
+  })
 
-    // The list only shrinks, and it is empty by Phase 9
-    it('lists only symbols that are still uncovered', () => {
-      const stillUncovered = new Set(uncovered())
-      expect(EXPECTED_FAILURES.filter(symbol => !stillUncovered.has(symbol))).toEqual([])
-    })
+  // The expected-failures list of the earlier phases is gone: every symbol is covered. A new symbol
+  // that a library upgrade brings must be mapped or marked unsupported, so it fails here first.
+  it('covers every symbol of the library', () => {
+    expect([...symbols].filter(symbol => !isCovered(symbol))).toEqual([])
   })
 })

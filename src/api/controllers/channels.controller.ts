@@ -124,6 +124,7 @@ export class ChannelsController {
     summary: 'List the channels',
     description:
       'The channels the account follows or owns, as WhatsApp Web has them loaded. The same channels as `chats.list` shows, without the other chats.',
+    socket: { command: 'channel.list' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [CHANNEL] } },
     wwebjs: [
@@ -153,6 +154,7 @@ export class ChannelsController {
     summary: 'Read a channel by its invite code',
     description:
       'The channel of a link (`https://whatsapp.com/channel/<inviteCode>`), without following it. Fails with `WHATSAPP_ERROR` when WhatsApp finds no channel for the code.',
+    socket: { command: 'channel.byInvite' },
     errors: ON_SESSION,
     examples: { request: null, response: CHANNEL },
     wwebjs: ['Client.getChannelByInviteCode']
@@ -169,6 +171,7 @@ export class ChannelsController {
     summary: 'Search the directory of channels',
     description:
       'Searches the channels WhatsApp lists, by words in the name and by country. `countryCodes` is one comma-separated value (`MX,US`).',
+    socket: { command: 'channel.search' },
     errors: ON_SESSION,
     examples: { request: null, response: { items: [CHANNEL] } },
     wwebjs: [
@@ -195,6 +198,7 @@ export class ChannelsController {
     summary: 'Create a channel',
     description:
       'Creates a channel owned by the account. The picture is an image from `base64`, a public `url` or a stored message. Fails with `WHATSAPP_ERROR` when WhatsApp does not create it (the name is taken, or the account cannot own channels).',
+    socket: { command: 'channel.create' },
     errors: ON_PICTURE,
     examples: {
       request: { name: 'Novedades', description: 'Avisos de la tienda' },
@@ -231,6 +235,7 @@ export class ChannelsController {
     summary: 'Read a channel',
     description:
       'One channel of the session. Answers 404 `CHAT_NOT_FOUND` when the session has no such chat or it is not a channel.',
+    socket: { command: 'channel.get' },
     errors: ON_CHANNEL,
     examples: { request: null, response: CHANNEL },
     gateway: true,
@@ -248,6 +253,7 @@ export class ChannelsController {
     summary: 'Delete a channel',
     description:
       'Deletes a channel the account owns, for every subscriber. It cannot be undone. This is the way to delete a channel: `chats.delete` refuses channels. Fails with `WHATSAPP_ERROR` when WhatsApp refuses (the account is not the owner).',
+    socket: { command: 'channel.delete' },
     errors: ON_CHANNEL,
     examples: { request: null, response: null },
     wwebjs: ['Channel.deleteChannel', 'Client.deleteChannel']
@@ -264,6 +270,7 @@ export class ChannelsController {
     summary: 'Change the name or the description',
     description:
       'Sets what is sent: the name first, then the description. WhatsApp has no call that sets both, so a failure of the second leaves the first applied. Fails with `WHATSAPP_ERROR` when WhatsApp refuses (the account is not an admin).',
+    socket: { command: 'channel.update' },
     errors: ON_CHANNEL,
     examples: { request: { name: 'Novedades VIP', description: 'Avisos' }, response: null },
     wwebjs: ['Channel.setDescription', 'Channel.setSubject']
@@ -283,6 +290,7 @@ export class ChannelsController {
     summary: 'Change the picture of a channel',
     description:
       'Sets the picture from inline `base64`, a public `url` or the image of a stored message. Anything that is not an image is a 400. A `url` goes through the SSRF guard and the size cap `MAX_MEDIA_BYTES`; the body of a request is limited to 1 MiB, so a larger image goes by `url`.',
+    socket: { command: 'channel.setPicture' },
     errors: ON_PICTURE,
     examples: {
       request: { source: { url: 'https://example.com/logo.png' } },
@@ -305,6 +313,7 @@ export class ChannelsController {
     summary: 'Choose which reactions a channel allows',
     description:
       '`none` allows no reactions, `basic` the six of WhatsApp (👍 ❤️ 😂 😮 😢 🙏) and `all` any emoji. Needs an admin account.',
+    socket: { command: 'channel.reactionSetting' },
     errors: ON_CHANNEL,
     examples: { request: { setting: 'basic' }, response: null },
     wwebjs: ['Channel.setReactionSetting']
@@ -324,6 +333,7 @@ export class ChannelsController {
     summary: 'Follow a channel',
     description:
       'The account follows the channel. Fails with `WHATSAPP_ERROR` when WhatsApp refuses or finds no such channel.',
+    socket: { command: 'channel.subscribe' },
     errors: ON_SESSION,
     examples: { request: null, response: null },
     wwebjs: ['Client.subscribeToChannel']
@@ -340,6 +350,7 @@ export class ChannelsController {
     summary: 'Stop following a channel',
     description:
       'The account stops following the channel. With `deleteLocalModels` the channel is also removed from the account and becomes a guest membership.',
+    socket: { command: 'channel.unsubscribe' },
     errors: ON_SESSION,
     examples: { request: { deleteLocalModels: false }, response: null },
     wwebjs: ['Client.unsubscribeFromChannel', 'UnsubscribeOptions.deleteLocalModels']
@@ -358,6 +369,7 @@ export class ChannelsController {
     scope: 'manage',
     summary: 'Mute a channel',
     description: 'Mutes the notifications of the channel for ever, in the linked account.',
+    socket: { command: 'channel.mute' },
     errors: ON_CHANNEL,
     examples: { request: null, response: null },
     wwebjs: ['Channel.mute']
@@ -373,6 +385,7 @@ export class ChannelsController {
     scope: 'manage',
     summary: 'Unmute a channel',
     description: 'Turns the notifications of the channel on again.',
+    socket: { command: 'channel.unmute' },
     errors: ON_CHANNEL,
     examples: { request: null, response: null },
     wwebjs: ['Channel.unmute']
@@ -389,6 +402,7 @@ export class ChannelsController {
     summary: 'List the subscribers of a channel',
     description:
       'The subscribers that are in the contact list of the account (WhatsApp Web does not give the rest), with their role. Needs an admin account.',
+    socket: { command: 'channel.subscribers' },
     errors: ON_CHANNEL,
     examples: {
       request: null,
@@ -429,6 +443,7 @@ export class ChannelsController {
     summary: 'Read the posts of a channel',
     description:
       'The latest posts of the channel that WhatsApp Web has loaded, oldest first, up to `limit`. With `fromMe` only the posts the account made (true) or the rest (false).',
+    socket: { command: 'channel.messages' },
     errors: ON_CHANNEL,
     examples: { request: null, response: { items: [POST_MESSAGE] } },
     wwebjs: ['Channel.fetchMessages']
@@ -450,6 +465,7 @@ export class ChannelsController {
     summary: 'Post to a channel',
     description:
       'Posts text, or one media file with a caption, to a channel the account owns or administers. It is a send like `messages.send`: it goes through the send queue, the send policy and the pacing, answers 201 with the message or 202 with the job (`wait=false` or a long queue), and takes an `Idempotency-Key`. A channel has no typing indicator, so there is no `humanize`. A body can be up to 40 MiB.',
+    socket: { command: 'channel.post' },
     errors: [...SEND_ERRORS, 'CHAT_NOT_FOUND'],
     examples: {
       request: { type: 'text', body: 'Nueva colección' },
@@ -487,6 +503,7 @@ export class ChannelsController {
     summary: 'Invite a user to be an admin',
     description:
       'Sends the user an invitation to administer the channel. Needs the owner account. The invited user accepts it from their own account.',
+    socket: { command: 'channel.inviteAdmin' },
     errors: ON_CHANNEL,
     examples: { request: { userId: USER_ID, comment: 'Bienvenido' }, response: null },
     wwebjs: ['Channel.sendChannelAdminInvite', 'Client.sendChannelAdminInvite']
@@ -506,6 +523,7 @@ export class ChannelsController {
     summary: 'Accept an invitation to be an admin',
     description:
       'The account accepts the invitation the owner sent and becomes an admin of the channel.',
+    socket: { command: 'channel.acceptAdminInvite' },
     errors: ON_CHANNEL,
     examples: { request: null, response: null },
     wwebjs: ['Channel.acceptChannelAdminInvite', 'Client.acceptChannelAdminInvite']
@@ -521,6 +539,7 @@ export class ChannelsController {
     scope: 'manage',
     summary: 'Revoke an invitation to be an admin',
     description: 'Withdraws the invitation sent to the user. Needs the owner account.',
+    socket: { command: 'channel.revokeAdminInvite' },
     errors: ON_CHANNEL,
     examples: { request: null, response: null },
     wwebjs: ['Channel.revokeChannelAdminInvite', 'Client.revokeChannelAdminInvite']
@@ -538,6 +557,7 @@ export class ChannelsController {
     scope: 'manage',
     summary: 'Remove an admin',
     description: 'The user stops being an admin of the channel. Needs the owner account.',
+    socket: { command: 'channel.demoteAdmin' },
     errors: ON_CHANNEL,
     examples: { request: null, response: null },
     wwebjs: ['Channel.demoteChannelAdmin', 'Client.demoteChannelAdmin']
@@ -556,6 +576,7 @@ export class ChannelsController {
     summary: 'Hand the channel to another owner',
     description:
       'Makes an admin the owner of the channel. It cannot be undone by the account unless the new owner hands it back. With `shouldDismissSelfAsAdmin` the account also stops being an admin.',
+    socket: { command: 'channel.transferOwnership' },
     errors: ON_CHANNEL,
     examples: { request: { newOwnerId: USER_ID, shouldDismissSelfAsAdmin: false }, response: null },
     wwebjs: [

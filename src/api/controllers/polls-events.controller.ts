@@ -81,6 +81,7 @@ export class PollsEventsController {
     summary: 'Read the votes of a poll',
     description:
       'Who voted for what in the poll message. Answers 404 when the message does not exist and 400 when it is not a poll. Votes also arrive as `vote_update` events.',
+    socket: { command: 'poll.votes' },
     errors: ON_MESSAGE,
     examples: { request: null, response: { items: [VOTE_EXAMPLE] } },
     wwebjs: ['Client.getPollVotes']
@@ -96,6 +97,7 @@ export class PollsEventsController {
     scope: 'read',
     summary: 'Read the votes of a poll message',
     description: 'The same answer as `polls.votes`, from the route of the message.',
+    socket: { command: 'message.pollVotes' },
     errors: ON_MESSAGE,
     examples: { request: null, response: { items: [VOTE_EXAMPLE] } },
     wwebjs: ['Message.getPollVotes']
@@ -114,6 +116,7 @@ export class PollsEventsController {
     summary: 'Vote in a poll',
     description:
       'Votes for the options with these names, replacing a previous vote; an empty list removes the vote. Answers 404 when the message does not exist and 400 when it is not a poll or a name matches no option.',
+    socket: { command: 'message.vote' },
     errors: ON_MESSAGE,
     examples: { request: { selectedOptions: ['Martes'] }, response: null },
     wwebjs: ['Message.vote']
@@ -133,6 +136,7 @@ export class PollsEventsController {
     summary: 'Answer a scheduled event',
     description:
       'Tells the organizer whether the account goes: 1 going, 2 not going, 3 maybe, 0 removes a previous answer. Answers 404 when the message does not exist and 400 when it is not an event.',
+    socket: { command: 'event.respond' },
     errors: ON_MESSAGE,
     examples: { request: { response: 1 }, response: null },
     wwebjs: ['Client.sendResponseToScheduledEvent']
@@ -152,6 +156,7 @@ export class PollsEventsController {
     summary: 'Edit a scheduled event',
     description:
       'Replaces the fields of an event you created; send all of them, since one left out is cleared. `isEventCanceled` cancels it. Answers 404 when the message does not exist and 400 when it is not an event; fails with WHATSAPP_ERROR for an event somebody else created and for one already canceled.',
+    socket: { command: 'event.edit' },
     errors: ON_MESSAGE,
     examples: {
       request: { name: 'Entrega de pedidos', startTime: '2026-02-01T18:00:00.000Z' },
@@ -174,6 +179,7 @@ export class PollsEventsController {
     summary: 'Accept the group invite of a message',
     description:
       'Joins the group of an invite the message carries (a V4 invite sent to the account). Answers 404 when the message does not exist or has no invite, and 400 when the invite has expired. **Switched off by default** (`ENABLE_GROUP_WRITES=false`): it answers `403 OPERATION_DISABLED` without calling WhatsApp, because automating group creation or changes goes against the terms of WhatsApp and can get the account blocked.',
+    socket: { command: 'message.acceptGroupInvite' },
     errors: [...ON_MESSAGE, 'OPERATION_DISABLED'],
     examples: { request: null, response: { status: 200 } },
     wwebjs: ['Client.acceptGroupV4Invite', 'Message.acceptGroupV4Invite']
