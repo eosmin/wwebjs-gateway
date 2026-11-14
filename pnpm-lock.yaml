@@ -85,8 +85,8 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@12.2.0)(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2)
       nestjs-zod:
-        specifier: 5.5.0
-        version: 5.5.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/swagger@12.0.4(@fastify/static@10.1.8)(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(typescript@5.9.3))(rxjs@7.8.2)(zod@4.6.7)
+        specifier: 5.6.0
+        version: 5.6.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/swagger@12.0.4(@fastify/static@10.1.8)(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(typescript@5.9.3))(rxjs@7.8.2)(zod@4.6.7)
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -145,6 +145,9 @@ importers:
       '@types/qrcode':
         specifier: 1.5.6
         version: 1.5.6
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
       eslint:
         specifier: 10.9.1
         version: 10.9.1(jiti@2.7.0)(supports-color@8.1.1)
@@ -3425,8 +3428,8 @@ packages:
       pino-http: ^11.0.0
       rxjs: ^7.1.0
 
-  nestjs-zod@5.5.0:
-    resolution: {integrity: sha512-V0WMtmICygYE2RoMKk8ExEeoetkC7PoUmUlZNP4JNk1YgrnUnG1vgkRn2DBNqsDi+Obv3c9AOssmXe/k/AvBOg==}
+  nestjs-zod@5.6.0:
+    resolution: {integrity: sha512-ey4zmL08KQ6APzzMxJAFLi41I4454532wdSWTykAHJnO4ST26PpdtQSUL7xZUMoZ/ax2/R8EXQYHfumtxeyXpg==}
     peerDependencies:
       '@nestjs/common': ^10.0.0 || ^11.0.0
       '@nestjs/swagger': ^7.4.2 || ^8.0.0 || ^11.0.0
@@ -7918,10 +7921,9 @@ snapshots:
       pino-http: 11.0.0
       rxjs: 7.8.2
 
-  nestjs-zod@5.5.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/swagger@12.0.4(@fastify/static@10.1.8)(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(typescript@5.9.3))(rxjs@7.8.2)(zod@4.6.7):
+  nestjs-zod@5.6.0(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/swagger@12.0.4(@fastify/static@10.1.8)(@nestjs/common@12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@12.2.0)(reflect-metadata@0.2.2)(typescript@5.9.3))(rxjs@7.8.2)(zod@4.6.7):
     dependencies:
       '@nestjs/common': 12.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1)
-      deepmerge: 4.3.1
       rxjs: 7.8.2
       zod: 4.6.7
     optionalDependencies:
