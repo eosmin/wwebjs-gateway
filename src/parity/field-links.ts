@@ -185,6 +185,13 @@ function target(symbol: string): { source: FieldSource; path: string } | undefin
 
 export const isFieldLinked = (symbol: string): boolean => target(symbol) !== undefined
 
+// Where the symbol lives, for the parity matrix: an environment variable or a field path
+export function fieldTargetLabel(symbol: string): string | undefined {
+  const found = target(symbol)
+  if (found === undefined) return undefined
+  return found.source.schema === envSchema ? `env \`${found.path}\`` : `field \`${found.path}\``
+}
+
 // A rename that points at nothing: a typo, or a field that left the schema
 export function brokenFieldEntries(): string[] {
   const broken: string[] = []

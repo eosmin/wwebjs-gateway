@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common'
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants'
 import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger'
 import { cleanupOpenApiDoc } from 'nestjs-zod'
@@ -36,7 +37,7 @@ const ERROR_BODY_SCHEMA: ComponentSchema = {
   }
 }
 
-function isSuccess(status: string): boolean {
+export function isSuccess(status: string): boolean {
   return /^2\d\d$/.test(status)
 }
 
@@ -65,9 +66,36 @@ function errorResponses(codes: readonly ErrorCode[]): Record<string, ErrorRespon
   )
 }
 
+// A @ZodResponse without a `status` is documented as `default`, which a generated client does not read
+// as the success. It moves to the status the route answers: the one of @HttpCode, else 201 for a POST
+// and 200 for the rest (what Nest answers).
+function promoteDefaultResponse(
+  operation: Operation,
+  { controller, methodName }: RegisteredOperation,
+  method: string
+): void {
+  const fallback = operation.responses['default']
+  if (!fallback || Object.keys(operation.responses).some(isSuccess)) return
+  const handler: unknown = Reflect.get(Object.getPrototypeOf(controller) as object, methodName)
+  const declared: unknown =
+    typeof handler === 'function' ? Reflect.getMetadata(HTTP_CODE_METADATA, handler) : undefined
+  // only a 2xx @HttpCode is a success
+  const status =
+    typeof declared === 'number' && isSuccess(String(declared))
+      ? declared
+      : method === 'post'
+        ? 201
+        : 200
+  operation.responses[String(status)] =
+    '$ref' in fallback ? fallback : { ...fallback, description: fallback.description || 'Success' }
+  delete operation.responses['default']
+}
+
 // Copies what @WaOperation declares into the matching OpenAPI operation, so the document and the
 // registry (socket commands, parity, generated docs) cannot say different things
-function enrich(operation: Operation, { meta }: RegisteredOperation): void {
+function enrich(operation: Operation, registered: RegisteredOperation, method: string): void {
+  const { meta } = registered
+  promoteDefaultResponse(operation, registered, method)
   operation.summary = meta.summary
   operation.description = meta.description
   Object.assign(operation, {
@@ -163,7 +191,7 @@ export function buildOpenApiDocument(
     for (const method of HTTP_METHODS) {
       const operation = pathItem[method]
       const registered = operation?.operationId ? operations.get(operation.operationId) : undefined
-      if (operation && registered) enrich(operation, registered)
+      if (operation && registered) enrich(operation, registered, method)
       // An empty list overrides the document-wide key requirement: no credential is asked for
       if (operation?.operationId && publicOperationIds.has(operation.operationId)) {
         operation.security = []

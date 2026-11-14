@@ -62,30 +62,34 @@ function* methodsOf(controller: Type): Generator<object> {
   }
 }
 
-// Every @WaOperation declared in the controllers of a module and of the modules it imports. It
-// reads the decorator metadata, so no application has to boot. Nest registers the same operations
-// at runtime through OperationRegistryService, which refuses what the schema refuses.
-export async function collectOperations(root: Type): Promise<WaOperationMeta[]> {
+// Every controller of a module and of the modules it imports. It reads the decorator metadata, so no
+// application has to boot.
+export async function collectControllers(root: Type): Promise<Type[]> {
   const seenModules = new Set<Type>()
-  const seenControllers = new Set<unknown>()
-  const operations: WaOperationMeta[] = []
+  const seenControllers = new Set<Type>()
 
   const walk = async (reference: unknown): Promise<void> => {
     const { module, controllers, imports } = await partsOf(reference)
     if (seenModules.has(module)) return
     seenModules.add(module)
 
-    for (const controller of controllers.filter(isClass)) {
-      if (seenControllers.has(controller)) continue
-      seenControllers.add(controller)
-      for (const handler of methodsOf(controller)) {
-        const raw: unknown = Reflect.getMetadata(WA_OPERATION_KEY, handler)
-        if (raw !== undefined) operations.push(waOperationSchema.parse(raw))
-      }
-    }
+    for (const controller of controllers.filter(isClass)) seenControllers.add(controller)
     for (const imported of imports) await walk(imported)
   }
   await walk(root)
 
+  return [...seenControllers]
+}
+
+// Every @WaOperation declared in those controllers. Nest registers the same operations at runtime
+// through OperationRegistryService, which refuses what the schema refuses.
+export async function collectOperations(root: Type): Promise<WaOperationMeta[]> {
+  const operations: WaOperationMeta[] = []
+  for (const controller of await collectControllers(root)) {
+    for (const handler of methodsOf(controller)) {
+      const raw: unknown = Reflect.getMetadata(WA_OPERATION_KEY, handler)
+      if (raw !== undefined) operations.push(waOperationSchema.parse(raw))
+    }
+  }
   return operations
 }
