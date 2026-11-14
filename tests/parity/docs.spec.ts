@@ -1,23 +1,28 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
 import { findAdrProblems } from '../../scripts/lib/adr.js'
+import { curlRequests, matchesRoute } from '../../scripts/lib/curl-examples.js'
+import { findBrokenLinks, internalLinks } from '../../scripts/lib/doc-links.js'
+import { findPlaceholders } from '../../scripts/lib/doc-placeholders.js'
 import { buildDocsModel } from '../../scripts/lib/docs-model.js'
 import { GENERATED_DOCS } from '../../scripts/lib/generated-docs.js'
+import { FEATURE_ENV, PENDING_GUIDES, WRITTEN_GUIDES } from '../../scripts/lib/guides.js'
 import { readWwebjsSymbols } from '../../scripts/lib/wwebjs-symbols.js'
-
-// The guides every phase has to have written by its end. It starts with the ones that exist and
-// grows with each phase until it is complete in Phase 9 (TDD §6.13).
-const REQUIRED_GUIDES = [
-  'docs/authentication.md',
-  'docs/config-reference.md',
-  'docs/errors.md',
-  'docs/events.md',
-  'docs/safety.md',
-  'docs/sessions.md',
-  'docs/system.md'
-]
+import { envSchema } from '../../src/config/env.schema.js'
 
 const read = (path: string): string => readFileSync(path, 'utf8')
+
+// The plan and the TDD are working documents, not guides; the ADRs are listed by their own index
+const NOT_GUIDES = ['docs/IMPLEMENTATION_PLAN.md', 'docs/TDD.md']
+const GUIDE_FILES = readdirSync('docs')
+  .filter(file => /\.(md|json)$/.test(file))
+  .map(file => `docs/${file}`)
+const MARKDOWN_FILES = [
+  ...GUIDE_FILES.filter(path => path.endsWith('.md') && !NOT_GUIDES.includes(path)),
+  ...readdirSync('docs/adr')
+    .filter(file => file.endsWith('.md'))
+    .map(file => `docs/adr/${file}`)
+]
 
 const ADR_DIRECTORY = 'docs/adr'
 const ADR_FILES = readdirSync(ADR_DIRECTORY)
@@ -54,12 +59,101 @@ describe('docs', () => {
     expect(readWwebjsSymbols().filter(symbol => !matrix.includes(`\`${symbol}\``))).toEqual([])
   })
 
-  it.each(REQUIRED_GUIDES)('%s exists', path => {
+  // An unescaped pipe in a summary or a reason would add a cell to its row
+  it.each(['docs/operations-list.md', 'docs/websocket-commands.md', 'docs/parity-matrix.md'])(
+    '%s has the same number of cells in every row of a table',
+    path => {
+      const cells = (row: string): number =>
+        row
+          .replace(/\\./g, '')
+          .replace(/`[^`]*`/g, '')
+          .split('|').length
+      const rows = read(path).split('\n')
+      const widths = rows.map((row, index) =>
+        row.startsWith('|') && !(rows[index - 1] ?? '').startsWith('|') ? cells(row) : 0
+      )
+      let width = 0
+      const wrong = rows.filter((row, index) => {
+        if (!row.startsWith('|')) return false
+        width = widths[index] ? (widths[index] ?? 0) : width
+        return cells(row) !== width
+      })
+
+      expect(wrong).toEqual([])
+    }
+  )
+
+  it.each(WRITTEN_GUIDES)('%s exists', path => {
     expect(existsSync(path)).toBe(true)
   })
 
-  it.each(REQUIRED_GUIDES)('%s has no TODO or TBD left in it', path => {
-    expect(read(path)).not.toMatch(/\b(TODO|TBD)\b/i)
+  // A guide that is still owed (9.5) cannot be there already without leaving the pending list
+  it.each(PENDING_GUIDES)('%s is still pending, so it does not exist yet', path => {
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('has no guide outside the manifest', () => {
+    const manifest = new Set([...WRITTEN_GUIDES, ...PENDING_GUIDES])
+
+    expect(GUIDE_FILES.filter(path => !manifest.has(path) && !NOT_GUIDES.includes(path))).toEqual(
+      []
+    )
+  })
+
+  it('does not list a guide twice', () => {
+    const all = [...WRITTEN_GUIDES, ...PENDING_GUIDES]
+
+    expect(all.filter((path, index) => all.indexOf(path) !== index)).toEqual([])
+  })
+
+  // docs/TDD.md, the plan and the ADRs quote these words as rules, so they are not checked
+  it.each(WRITTEN_GUIDES.filter(path => path.endsWith('.md')))(
+    '%s is finished: no placeholder word, no empty code block',
+    path => {
+      expect(findPlaceholders(path, read(path))).toEqual([])
+    }
+  )
+
+  // The curl examples of the guides are requests the gateway can answer (TDD §6.13, docs test 5)
+  it('every curl example of a guide targets a route of the registry', async () => {
+    const { document } = await buildDocsModel()
+    const routes = Object.entries(document.paths).flatMap(([path, item]) =>
+      Object.keys(item ?? {})
+        .filter(key => ['get', 'post', 'put', 'patch', 'delete'].includes(key))
+        .map(method => ({ method: method.toUpperCase(), path }))
+    )
+    // Outside the OpenAPI document on purpose: the health probes and the metrics scrape
+    const unregistered = curlRequests(
+      WRITTEN_GUIDES.filter(path => path.endsWith('.md'))
+        .map(path => `${read(path)}\n`)
+        .join('')
+    ).filter(request => !matchesRoute(request, routes))
+
+    expect(unregistered).toEqual([])
+  }, 60_000)
+
+  // The variables of a feature are in the guide of that feature (docs test 7)
+  it.each(Object.entries(FEATURE_ENV))(
+    '%s names every variable of its feature',
+    (path, feature) => {
+      const names = Object.keys(envSchema.shape).filter(name => feature.test(name))
+      // A guide that is still pending is checked when 9.5 writes it
+      const text = existsSync(path) ? read(path) : undefined
+
+      expect(names).not.toEqual([])
+      if (text !== undefined) expect(names.filter(name => !text.includes(name))).toEqual([])
+    }
+  )
+
+  it.each(['README.md', ...MARKDOWN_FILES])('%s has no broken internal link', path => {
+    expect(findBrokenLinks(path, read(path), { exists: existsSync, read })).toEqual([])
+  })
+
+  it('links every written guide from the README', () => {
+    // A link in the text of the README, not a mention inside a code block or a code span
+    const linked = new Set(internalLinks(read('README.md')).map(link => link.split('#')[0]))
+
+    expect(WRITTEN_GUIDES.filter(path => !linked.has(path))).toEqual([])
   })
 })
 

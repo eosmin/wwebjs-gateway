@@ -98,6 +98,8 @@ All of them are gateway-native (nothing of whatsapp-web.js is behind them) and w
 
 The other variables of the policy (`CONVERSATION_WINDOW_HOURS`, the warm-up, the duplicate guard, the unreachable and health settings) are global. All of them are listed in [config-reference.md](config-reference.md).
 
+Typing before a send is part of looking human, and it has one global setting: `HUMANIZE_MIN_REPLY_DELAY_MS` (1500 by default) is the shortest typing pause of a humanized send, used when neither the message (`humanize.minReplyDelayMs`) nor the session settings give one. See [messages.md](messages.md) for the `humanize` options.
+
 ## State, restarts and failures
 
 What the budgets have spent (the session buckets, the pacing per chat, the cold chats of the last 24 hours, the look-ups, the recent content and the health window) is one JSON document per session in Redis, `policy:state:<session>`, with a two-day expiry. It is checked with a schema (bounded lists, bounded ids, no unknown keys) when it is read.

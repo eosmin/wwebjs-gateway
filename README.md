@@ -79,6 +79,43 @@ and [`.env.example`](.env.example) declares all of them.
 Git hooks run on every commit and push (secret scan, lint, commit message, checks); they are never
 bypassed. Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
+## Documentation
+
+Every guide lives in [`docs/`](docs/). The files marked generated come from the code by
+`pnpm docs:gen` and are never edited by hand; `pnpm validate:docs` fails when one is stale, when an
+internal link is broken or when a guide is missing from this list.
+
+**Using the gateway**
+
+- [`docs/authentication.md`](docs/authentication.md): API keys, scopes, expiry and rotation.
+- [`docs/sessions.md`](docs/sessions.md): QR and pairing-code login, status machine, restore on boot.
+- [`docs/messages.md`](docs/messages.md): every message type, idempotency, media sources.
+- [`docs/send-queue.md`](docs/send-queue.md): the persistent send queue and its results.
+- [`docs/safety.md`](docs/safety.md): the send policy, warm-up, suppression.
+- [`docs/ordering.md`](docs/ordering.md): inbound ordering and `message_batch`.
+- [`docs/chats.md`](docs/chats.md), [`docs/contacts.md`](docs/contacts.md),
+  [`docs/groups.md`](docs/groups.md), [`docs/channels.md`](docs/channels.md),
+  [`docs/labels.md`](docs/labels.md), [`docs/broadcasts.md`](docs/broadcasts.md),
+  [`docs/calls.md`](docs/calls.md), [`docs/lookup.md`](docs/lookup.md),
+  [`docs/presence-profile.md`](docs/presence-profile.md): one guide per area of the API.
+- [`docs/websocket.md`](docs/websocket.md) and [`docs/webhooks.md`](docs/webhooks.md): the two ways to
+  receive events.
+- [`docs/system.md`](docs/system.md) and [`docs/operations.md`](docs/operations.md): health, metrics
+  and running the gateway.
+
+**Generated reference**
+
+- [`docs/openapi.json`](docs/openapi.json): the OpenAPI document.
+- [`docs/operations-list.md`](docs/operations-list.md): every operation, its route and its scope.
+- [`docs/websocket-commands.md`](docs/websocket-commands.md): every socket command.
+- [`docs/events.md`](docs/events.md): every event and its payload.
+- [`docs/errors.md`](docs/errors.md): every error code.
+- [`docs/config-reference.md`](docs/config-reference.md): every environment variable.
+- [`docs/metrics.md`](docs/metrics.md): every Prometheus series.
+- [`docs/parity-matrix.md`](docs/parity-matrix.md): every `whatsapp-web.js` symbol and where it is.
+
+**Decisions:** [`docs/adr/`](docs/adr/README.md).
+
 ## Repository settings
 
 The repository is **public**: everything committed is world-readable, forever. Never commit phone

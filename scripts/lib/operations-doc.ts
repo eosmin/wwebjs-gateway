@@ -2,7 +2,19 @@ import type { RegisteredOperation } from '../../src/api/operation-registry.servi
 
 import type { DocsModel } from './docs-model.js'
 
-export const cell = (text: string): string => text.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ')
+// A table cell holds text with, at most, balanced `code spans`: whatever else Markdown would read
+// as syntax (a stray backtick, a tag, a link, a backslash) is escaped, so a summary or a reason
+// cannot break the table. Inside a code span only the pipe needs it, and the span stays code.
+export const cell = (text: string): string =>
+  text
+    .replace(/\s*\r?\n\s*/g, ' ')
+    .split(/(`[^`]+`)/)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part.replace(/\|/g, '\\|')
+        : part.replace(/[\\|`<>[\]]/g, character => `\\${character}`)
+    )
+    .join('')
 
 export const code = (text: string): string => `\`${text}\``
 
