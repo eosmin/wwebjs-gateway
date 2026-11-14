@@ -135,7 +135,7 @@ export class SocketApp {
   }
 
   call(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     payload?: object
   ): ReturnType<NestFastifyApplication['inject']> {

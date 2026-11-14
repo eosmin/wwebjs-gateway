@@ -89,9 +89,8 @@ describe('EventReplayService with a real Redis (integration)', () => {
 
     const kept = await replay.read(session, 0, 1000)
 
-    // MAXLEN ~ trims in whole nodes, so it may keep a few more than 10, never all 300
-    expect(kept.events.length).toBeLessThan(300)
-    expect(kept.events[kept.events.length - 1]?.seq).toBe(300)
+    // An exact bound: what the guide says and what the memory budget counts on
+    expect(kept.events.map(e => e.seq)).toEqual([291, 292, 293, 294, 295, 296, 297, 298, 299, 300])
   })
 
   it('starts the stream again when the seq of the session went back (a session created again)', async () => {

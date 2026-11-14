@@ -145,6 +145,6 @@ before them in `AppModule`, which is what puts the limit ahead of the guard.
 
 The Socket.IO gateway (see [`websocket.md`](websocket.md)) does not go through the guard, which handles
 HTTP contexts only: it authenticates the handshake itself with `AuthService.authenticate` and
-`auth: { apiKey }` (never a query string), requires the `events` scope there, checks the key again every 30
+`auth: { apiKey }` (never a query string), requires the `events` scope there, ends the sockets of a revoked key at once and checks every key again every 30
 seconds, and applies `assertScope` and `assertSessionAccess` to every message and event. A socket
 command runs the operation of the registry, so it needs the scope of that operation too.

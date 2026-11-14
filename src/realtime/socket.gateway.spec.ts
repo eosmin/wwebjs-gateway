@@ -28,7 +28,9 @@ const KEYS: Record<string, Principal> = {
   'sales-events': keyPrincipal('key-1', 'sales', ['events', 'send']),
   'sales-manage': keyPrincipal('key-2', 'sales', ['events', 'manage', 'send']),
   'sales-read': keyPrincipal('key-3', 'sales', ['read', 'send']),
-  'sales-no-send': keyPrincipal('key-4', 'sales', ['events', 'read'])
+  'sales-no-send': keyPrincipal('key-4', 'sales', ['events', 'read']),
+  // Already lapsed: the stand-in authenticate does not check dates, the gateway must
+  'sales-lapsed': keyPrincipal('key-5', 'sales', ['events', 'send'], new Date(Date.now() - 1000))
 }
 
 function envelope(
@@ -63,6 +65,10 @@ describe('SocketGateway', () => {
   let revoked: Set<string>
   let authCalls: number
   let lastSeqFails: boolean
+  let revokeAfterHandshake: string | undefined
+  let invalidateSession: jest.Mock
+  let revokedListeners: ((keyId: string) => void)[]
+  let removedListeners: ((sessionId: string) => Promise<void>)[]
   const setState = jest.fn<Promise<void>, unknown[]>()
   const clients: Socket[] = []
 
@@ -73,6 +79,8 @@ describe('SocketGateway', () => {
       if (principal === undefined || (rawKey !== undefined && revoked.has(rawKey))) {
         return Promise.reject(new UnauthorizedError('UNAUTHORIZED'))
       }
+      // A revoke that lands between the handshake and the registration of the socket
+      if (rawKey !== undefined && rawKey === revokeAfterHandshake) revoked.add(rawKey)
       return Promise.resolve(principal)
     }
     const config = parseEnv({ ...TEST_ENV, ...env })
@@ -85,11 +93,25 @@ describe('SocketGateway', () => {
         SocketGateway,
         OperationDispatcherService,
         { provide: APP_CONFIG, useValue: config },
-        { provide: AuthService, useValue: { authenticate } },
+        {
+          provide: AuthService,
+          useValue: {
+            authenticate,
+            invalidateSession,
+            onRevoked: (listener: (keyId: string) => void): (() => void) => {
+              revokedListeners.push(listener)
+              return () => undefined
+            }
+          }
+        },
         { provide: ChatsService, useValue: { setState } },
         {
           provide: SessionManager,
           useValue: {
+            onRemoved: (listener: (sessionId: string) => Promise<void>): (() => void) => {
+              removedListeners.push(listener)
+              return () => undefined
+            },
             status: (id: string): string => {
               if (id !== 'sales' && id !== 'support') {
                 throw new NotFoundError('NOT_FOUND', `Session ${id} does not exist`)
@@ -167,6 +189,10 @@ describe('SocketGateway', () => {
     revoked = new Set()
     authCalls = 0
     lastSeqFails = false
+    revokedListeners = []
+    removedListeners = []
+    revokeAfterHandshake = undefined
+    invalidateSession = jest.fn()
     setState.mockReset().mockResolvedValue(undefined)
   })
 
@@ -520,10 +546,99 @@ describe('SocketGateway', () => {
         ) as Record<string, unknown>
       })
 
-      // The key is dropped or refused, never applied: the state is the one the client wrote
-      if (ack.ok) expect(setState).toHaveBeenCalledWith('sales', 'c', 'typing', undefined)
-      else expect(errorCode(ack)).toBe('VALIDATION_ERROR')
-      expect(setState).not.toHaveBeenCalledWith('sales', 'c', 'clear', undefined)
+      // The same answer as REST (400 VALIDATION_ERROR): refused, nothing reaches the controller
+      expect(ack.ok).toBe(false)
+      expect(errorCode(ack)).toBe('VALIDATION_ERROR')
+      expect(setState).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('limits of subscribe, unsubscribe and replay', () => {
+    beforeEach(() => start({ SOCKET_MESSAGES_MAX_PER_MINUTE: '4', RATE_LIMIT_MAX: '100' }))
+
+    it('shares one allowance per key across its sockets and the three messages', async () => {
+      const first = await connect('sales-events')
+      const second = await connect('sales-events')
+      const other = await connect('sales-manage')
+
+      const answers = [
+        await ask(first, 'subscribe', { sessionId: 'sales' }),
+        await ask(second, 'unsubscribe', { sessionId: 'sales' }),
+        await ask(first, 'replay', { sessionId: 'sales', afterSeq: 0 }),
+        await ask(second, 'subscribe', { sessionId: 'sales' }),
+        await ask(first, 'replay', { sessionId: 'sales', afterSeq: 0 }),
+        await ask(second, 'unsubscribe', { sessionId: 'sales' })
+      ]
+
+      expect(answers.map(ack => ack.ok)).toEqual([true, true, true, true, false, false])
+      expect(errorCode(answers[4] as Ack)).toBe('RATE_LIMITED')
+      // Another key has its own allowance, and the commands of the refused key their own
+      expect((await ask(other, 'subscribe', { sessionId: 'sales' })).ok).toBe(true)
+      expect(
+        (
+          await ask(first, 'command', {
+            op: 'chat.state',
+            sessionId: 'sales',
+            params: { chatId: 'c', state: 'typing' }
+          })
+        ).ok
+      ).toBe(true)
+    })
+
+    it('counts a message that does not fit too, so garbage is not free', async () => {
+      const socket = await connect('sales-events')
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        expect(errorCode(await ask(socket, 'subscribe', { nonsense: true }))).toBe(
+          'VALIDATION_ERROR'
+        )
+      }
+
+      expect(errorCode(await ask(socket, 'subscribe', { sessionId: 'sales' }))).toBe('RATE_LIMITED')
+    })
+  })
+
+  describe('sockets per key', () => {
+    beforeEach(() => start({ SOCKET_MAX_PER_KEY: '2', RATE_LIMIT_MAX: '3' }))
+
+    const connections = async (count: number): Promise<void> => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((await metrics.scrape()).includes(`gw_socket_connections ${count}\n`)) return
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      throw new Error(`the gateway never reached ${count} connections`)
+    }
+
+    it('refuses the handshake past the cap, for that key only, and takes it again when one closes', async () => {
+      const first = await connect('sales-events')
+      await connect('sales-events')
+
+      expect(await rejection('sales-events')).toBe('RATE_LIMITED')
+      expect((await connect('sales-manage')).connected).toBe(true)
+
+      first.close()
+      await connections(2)
+      expect((await connect('sales-events')).connected).toBe(true)
+    })
+
+    it('does not count a key that is over its cap as a failed guess of its address', async () => {
+      await connect('sales-events')
+      await connect('sales-events')
+
+      // More refusals than the failures an address may have (3): the address is not blocked by them
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        expect(await rejection('sales-events')).toBe('RATE_LIMITED')
+      }
+
+      expect((await connect('admin')).connected).toBe(true)
+    })
+
+    it('counts the key of the environment as one key', async () => {
+      KEYS['environment-key'] = adminPrincipal(null)
+      await connect('environment-key')
+      await connect('environment-key')
+
+      expect(await rejection('environment-key')).toBe('RATE_LIMITED')
     })
   })
 
@@ -659,6 +774,160 @@ describe('SocketGateway', () => {
       const scrape = await metrics.scrape()
       expect(scrape).toMatch(/gw_socket_disconnects_total\{reason="unauthorized"\} 1\b/)
       expect(scrape).toMatch(/gw_socket_connections 1\b/)
+    })
+  })
+
+  describe('a key that is revoked, or lapses, while a socket is open', () => {
+    beforeEach(() => start())
+
+    const revoke = (keyId: string): void => {
+      for (const listener of revokedListeners) listener(keyId)
+    }
+
+    it('ends the sockets of the key at the moment it is revoked, without waiting for the check', async () => {
+      const revokedSocket = await connect('sales-events')
+      const second = await connect('sales-events')
+      const other = await connect('sales-manage')
+      const closed = Promise.all(
+        [revokedSocket, second].map(
+          socket => new Promise<string>(resolve => socket.once('disconnect', resolve))
+        )
+      )
+
+      revoke('key-1')
+
+      expect(await closed).toEqual(['io server disconnect', 'io server disconnect'])
+      expect(other.connected).toBe(true)
+      expect(await metrics.scrape()).toMatch(/gw_socket_connections 1\b/)
+    })
+
+    it('ends a socket whose key was revoked while its handshake was in flight', async () => {
+      revokeAfterHandshake = 'sales-events'
+      const socket = await connect('sales-events')
+
+      await new Promise<void>(resolve => {
+        if (socket.disconnected) resolve()
+        else socket.once('disconnect', () => resolve())
+      })
+
+      expect(socket.connected).toBe(false)
+    })
+
+    it('keeps the socket of a key with a grace period that has not ended (a rotated key)', async () => {
+      KEYS['sales-grace'] = keyPrincipal(
+        'key-7',
+        'sales',
+        ['events'],
+        new Date(Date.now() + 60_000)
+      )
+      const socket = await connect('sales-grace')
+
+      expect((await ask(socket, 'subscribe', { sessionId: 'sales' })).ok).toBe(true)
+    })
+
+    it('does not run a command the socket sends after the key was revoked', async () => {
+      const socket = await connect('sales-events')
+      revoke('key-1')
+
+      const ack = await ask(socket, 'command', {
+        op: 'chat.state',
+        sessionId: 'sales',
+        params: { chatId: 'c', state: 'typing' }
+      }).catch(() => ({ ok: false }))
+
+      expect(ack.ok).toBe(false)
+      expect(setState).not.toHaveBeenCalled()
+    })
+
+    it('answers UNAUTHORIZED and ends the socket of a key that lapsed, on its next message', async () => {
+      const socket = await connect('sales-lapsed')
+      const closed = new Promise<string>(resolve => socket.once('disconnect', resolve))
+
+      const ack = await ask(socket, 'subscribe', { sessionId: 'sales' }).catch(() => ({
+        ok: false,
+        error: { code: 'UNAUTHORIZED' }
+      }))
+
+      expect(errorCode(ack)).toBe('UNAUTHORIZED')
+      expect(await closed).toBe('io server disconnect')
+    })
+
+    it('ends the socket of a key that lapsed when an event is about to reach it, without sending it', async () => {
+      const lapsing = keyPrincipal('key-6', 'sales', ['events'], new Date(Date.now() + 60_000))
+      KEYS['sales-lapsing'] = lapsing
+      const socket = await connect('sales-lapsing')
+      const received = collect(socket)
+      await ask(socket, 'subscribe', { sessionId: 'sales' })
+      const closed = new Promise<string>(resolve => socket.once('disconnect', resolve))
+
+      lapsing.expiresAt = Date.now() - 1
+      bus.publish(envelope('sales', 1))
+
+      expect(await closed).toBe('io server disconnect')
+      expect(received).toEqual([])
+    })
+  })
+
+  describe('a session that is deleted while sockets follow it', () => {
+    beforeEach(() => start())
+
+    const remove = async (sessionId: string): Promise<void> => {
+      for (const listener of removedListeners) await listener(sessionId)
+    }
+
+    it('makes the key cache forget the keys of the session before it ends the sockets', async () => {
+      await connect('sales-events')
+
+      await remove('sales')
+
+      expect(invalidateSession).toHaveBeenCalledWith('sales')
+    })
+
+    it('ends the sockets of a key of that session and keeps the other keys', async () => {
+      const own = await connect('sales-events')
+      const another = await connect('admin')
+      const support = await connect('sales-manage')
+      await ask(own, 'subscribe', { sessionId: 'sales' })
+      const closed = Promise.all(
+        [own, support].map(
+          socket => new Promise<string>(resolve => socket.once('disconnect', resolve))
+        )
+      )
+
+      await remove('sales')
+
+      expect(await closed).toEqual(['io server disconnect', 'io server disconnect'])
+      expect(another.connected).toBe(true)
+      // sales-manage is also a key of `sales`: it goes with it
+      expect(support.connected).toBe(false)
+    })
+
+    it('stops an admin socket following the deleted session, so a session created again is not followed by it', async () => {
+      const admin = await connect('admin')
+      const received = collect(admin)
+      await ask(admin, 'subscribe', { sessionId: 'sales' })
+      await ask(admin, 'subscribe', { sessionId: 'support' })
+
+      await remove('sales')
+      // A session created again with the same id, and another one that was never deleted
+      bus.publish(envelope('sales', 1))
+      bus.publish(envelope('support', 1))
+      await settle(admin)
+
+      expect(admin.connected).toBe(true)
+      expect(received.map(event => event.sessionId)).toEqual(['support'])
+    })
+
+    it('does not touch the follow of an admin with *', async () => {
+      const admin = await connect('admin')
+      const received = collect(admin)
+      await ask(admin, 'subscribe', { sessionId: '*' })
+
+      await remove('sales')
+      bus.publish(envelope('sales', 1))
+      await settle(admin)
+
+      expect(received).toHaveLength(1)
     })
   })
 

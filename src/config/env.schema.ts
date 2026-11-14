@@ -360,6 +360,12 @@ export const envSchema = z
     SOCKET_MAX_QUEUED_EVENTS: count(1000, { min: 1 }).describe(
       'Packets that may wait to be written to one Socket.IO client; a client that falls further behind is disconnected with the reason slow_consumer instead of making the gateway hold its backlog in memory'
     ),
+    SOCKET_MAX_PER_KEY: count(50, { min: 1 }).describe(
+      'Socket.IO connections one API key may hold at once; a handshake past it is refused with 429 RATE_LIMITED. The environment key counts as one key'
+    ),
+    SOCKET_MESSAGES_MAX_PER_MINUTE: count(1200, { min: 1 }).describe(
+      'subscribe, unsubscribe and replay messages per minute allowed per API key, shared by all its sockets; one more is answered RATE_LIMITED. Commands have their own limit, RATE_LIMIT_MAX'
+    ),
     WEBHOOKS_MAX_PER_SESSION: count(20, { min: 1 }).describe(
       'Webhooks a session can have, and as many for those of every session; creating one past it is refused. Also the most active inbound hooks a session can have'
     ),

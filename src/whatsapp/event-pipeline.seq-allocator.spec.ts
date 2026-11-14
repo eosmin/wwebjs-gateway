@@ -146,6 +146,17 @@ describe('SeqAllocator', () => {
     expect(await take(allocator, 1)).toEqual([6])
   })
 
+  it('leaves no gap when a session that stopped starts again in the same process', async () => {
+    const { allocator, saves } = build()
+    expect(await take(allocator, 3)).toEqual([1, 2, 3])
+    // A stop and a start: the memory knows every seq handed out, so the reserved block is not a floor
+    await allocator.open(ID)
+    expect(await take(allocator, 3)).toEqual([4, 5, 6])
+    await allocator.open(ID)
+    expect(await take(allocator, 1)).toEqual([7])
+    expect(saves).toEqual([SEQ_BLOCK_SIZE])
+  })
+
   it('starts from zero again for a session that was forgotten', async () => {
     const { allocator, db, redis } = build()
     await take(allocator, 5)

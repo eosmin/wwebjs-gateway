@@ -293,7 +293,16 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
       this.refreshGauge()
       this.pipeline.forget(id)
       await this.deleteRedisKeys(id)
-      for (const listener of this.removedListeners) await listener(id)
+      // Every listener hears of it, whatever the others do; the first failure fails the call afterwards
+      let failure: { error: unknown } | undefined
+      for (const listener of this.removedListeners) {
+        try {
+          await listener(id)
+        } catch (error: unknown) {
+          failure ??= { error }
+        }
+      }
+      if (failure !== undefined) throw failure.error
     })
   }
 
@@ -341,7 +350,7 @@ export class SessionManager implements OnApplicationBootstrap, BeforeApplication
   }
 
   // For the services that keep something per session (the send queue): they hear of a deleted session
-  // after its row and keys are gone. A listener that throws fails the deletion call, not the deletion.
+  // after its row and keys are gone. A listener that throws fails the deletion call, not the deletion; the others still run.
   onRemoved(listener: (sessionId: string) => Promise<void>): () => void {
     this.removedListeners.add(listener)
     return () => this.removedListeners.delete(listener)

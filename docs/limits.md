@@ -60,6 +60,8 @@ The numbers are the defaults; every variable is in [config-reference](config-ref
 | Delivery attempts of a webhook       | 10 (`WEBHOOK_MAX_ATTEMPTS`) | Then the delivery is a dead letter (`failed`)                     |
 | Events replayed to a socket          | 5000 events or 300 s        | `EVENT_REPLAY_MAX_EVENTS`, `EVENT_REPLAY_WINDOW_SECONDS` ([websocket](websocket.md)) |
 | Packets queued for a slow socket     | 1000 (`SOCKET_MAX_QUEUED_EVENTS`) | Past it the socket is disconnected               |
+| Sockets per API key                  | 50 (`SOCKET_MAX_PER_KEY`)   | The handshake past it is refused with `RATE_LIMITED`   |
+| subscribe, unsubscribe and replay messages per minute | 1200 (`SOCKET_MESSAGES_MAX_PER_MINUTE`) | Per API key, shared by its sockets |
 
 A file between roughly 30 and 32 MiB sent as base64 is larger than 40 MiB once encoded and is
 refused by the body limit: send it as a `url` instead ([messages](messages.md)).

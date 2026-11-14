@@ -91,6 +91,8 @@ const DEFAULTS = {
   EVENT_REPLAY_WINDOW_SECONDS: 300,
   EVENT_REPLAY_MAX_EVENTS: 5000,
   SOCKET_MAX_QUEUED_EVENTS: 1000,
+  SOCKET_MAX_PER_KEY: 50,
+  SOCKET_MESSAGES_MAX_PER_MINUTE: 1200,
   WEBHOOKS_MAX_PER_SESSION: 20,
   INBOUND_HOOK_MAX_PER_MINUTE: 60,
   WEBHOOK_TEST_MAX_PER_MINUTE: 6,
@@ -310,6 +312,8 @@ describe('envSchema bounds and edges', () => {
     ['WEBHOOK_MAX_ATTEMPTS', 1],
     ['WEBHOOKS_MAX_PER_SESSION', 1],
     ['INBOUND_HOOK_MAX_PER_MINUTE', 1],
+    ['SOCKET_MAX_PER_KEY', 1],
+    ['SOCKET_MESSAGES_MAX_PER_MINUTE', 1],
     // Fewer starts than this would take one slow start for a login that WhatsApp refuses
     ['SESSION_INITIALIZE_MAX_ATTEMPTS', 3]
   ])('%s accepts its minimum %d and rejects one below', (key, min) => {

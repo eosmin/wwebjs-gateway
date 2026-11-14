@@ -42,16 +42,20 @@ interface SeqState {
 // after a session stops (its last `session_status`), and they must continue the same count.
 // `next` is called one at a time per session (EventSequencer).
 //
-// Numbers are never reused but may skip: after a crash the gap is at most SEQ_BLOCK_SIZE.
+// Numbers are never reused but may skip: after a crash the gap is at most SEQ_BLOCK_SIZE. A clean
+// shutdown (`flushAll`) and a stop and start of a session leave none.
 export class SeqAllocator {
   private readonly logger = new Logger(SeqAllocator.name)
   private readonly sessions = new Map<string, SeqState>()
 
   constructor(private readonly store: SeqStore) {}
 
-  // Reads the reserved bound of the session; the next `seq` will be above it. What the memory
-  // already knows is never lowered. Rejects when the database cannot be read: starting without the
-  // bound would risk repeating numbers.
+  // Reads the reserved bound of the session; for a session this process has not counted yet, the
+  // next `seq` is above it. A session the memory already counts (it stopped and starts again) goes on
+  // from its last `seq`: the memory knows everything handed out, so the reserved block is no floor and
+  // a restart of a session leaves no gap; only a crash or a kill does (see the class comment). What
+  // the memory knows is never lowered. Rejects when the database cannot be read: starting without
+  // the bound would risk repeating numbers.
   async open(sessionId: string): Promise<void> {
     const reserved = await this.store.loadReserved(sessionId)
     const known = this.sessions.get(sessionId)
@@ -60,7 +64,6 @@ export class SeqAllocator {
       return
     }
     // In place: a `next` that is waiting on the store holds this very object
-    known.last = Math.max(known.last, reserved)
     known.reserved = Math.max(known.reserved, reserved)
   }
 

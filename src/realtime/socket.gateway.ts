@@ -22,6 +22,7 @@ import {
 } from '../common/errors.js'
 import { describeException } from '../common/filters/all-exceptions.filter.js'
 import { resolveClientIp } from '../common/lib/client-ip.js'
+import { hasPrototypeKey } from '../common/lib/prototype-keys.js'
 import { type Principal, assertScope, assertSessionAccess } from '../common/principal.js'
 import { APP_CONFIG } from '../config/config.module.js'
 import type { AppConfig } from '../config/env.schema.js'
@@ -91,8 +92,11 @@ interface ClientState extends Handshake {
 //   disconnected (`slow_consumer`); the gateway never holds the backlog of a client that does not read.
 //
 // - Global guards: the rate limit guard skips the websocket context (it reads HTTP headers); the limits of
-//   a socket are the handshake limiter and the command limiter (`subscribe`, `unsubscribe` and `replay`
-//   have none yet, see the plan). `@Public()` makes ApiKeyGuard pass.
+//   a socket are the handshake limiter, the command limiter, the limiter of `subscribe` / `unsubscribe` /
+//   `replay` (per key) and the cap of sockets per key. `@Public()` makes ApiKeyGuard pass.
+// - Lifecycle: a revoked key and a deleted session end their sockets at once (the key service and the
+//   session manager tell the gateway); a key that lapses is noticed at the next message or event; the
+//   30 s check is the safety net behind all three.
 //
 // Single instance by design: no Redis adapter, rooms are not used, the fan-out is a map in memory.
 @Public()
@@ -107,7 +111,12 @@ export class SocketGateway
   private readonly followers = new Map<string, Set<ClientState>>()
   private readonly limiter: HandshakeLimiter
   private readonly commandLimiter: CommandLimiter
+  // `subscribe`, `unsubscribe` and `replay`, per key; `command` has its own allowance
+  private readonly messageLimiter: CommandLimiter
+  // Open sockets per key (`ENVIRONMENT_KEY` for the key of the environment)
+  private readonly socketsPerKey = new Map<string, number>()
   private revalidating = false
+  private readonly stops: (() => void)[] = []
   private stopBus: (() => void) | undefined
   private revalidateTimer: NodeJS.Timeout | undefined
 
@@ -122,17 +131,30 @@ export class SocketGateway
   ) {
     this.limiter = new HandshakeLimiter(config.RATE_LIMIT_MAX)
     this.commandLimiter = new CommandLimiter(config.RATE_LIMIT_MAX)
+    this.messageLimiter = new CommandLimiter(config.SOCKET_MESSAGES_MAX_PER_MINUTE)
   }
 
   onModuleInit(): void {
     this.stopBus = this.bus.subscribe(ALL_EVENTS, envelope => this.fanOut(envelope))
     this.revalidateTimer = setInterval(() => void this.revalidate(), REVALIDATE_INTERVAL_MS)
     this.revalidateTimer.unref()
+    // The timer above is the safety net; these two end a socket at the moment its key or its session goes
+    this.stops.push(
+      this.auth.onRevoked(keyId => this.dropKey(keyId)),
+      this.sessions.onRemoved(sessionId => {
+        // Before the sockets go: a reconnect must not authenticate from the cache with a key the
+        // deletion already removed (the service that deletes the session forgets them only afterwards)
+        this.auth.invalidateSession(sessionId)
+        this.sessionRemoved(sessionId)
+        return Promise.resolve()
+      })
+    )
   }
 
   onModuleDestroy(): void {
     this.stopBus?.()
     this.stopBus = undefined
+    for (const stop of this.stops.splice(0)) stop()
     if (this.revalidateTimer !== undefined) clearInterval(this.revalidateTimer)
     this.revalidateTimer = undefined
   }
@@ -154,6 +176,13 @@ export class SocketGateway
       return
     }
     this.handshakes.delete(socket)
+    // The handshake checked this already; a burst of handshakes that passed before any connected
+    // is caught here
+    if (this.socketsOf(handshake.principal) >= this.config.SOCKET_MAX_PER_KEY) {
+      socket.disconnect(true)
+      return
+    }
+    this.countSocket(handshake.principal, 1)
     this.clients.set(socket, {
       ...handshake,
       socket,
@@ -162,6 +191,8 @@ export class SocketGateway
       closed: false
     })
     this.metrics.metrics.socketConnections.inc()
+    // A key revoked while its handshake was in flight was not in `clients` for `dropKey` to find
+    void this.recheck(this.clients.get(socket))
   }
 
   handleDisconnect(socket: Socket): void {
@@ -178,6 +209,7 @@ export class SocketGateway
   ): Promise<SubscribeAck> {
     return this.answer(async () => {
       const state = this.requireState(socket)
+      this.limitMessages(state)
       const message = parse(SubscribeMessage, body)
       assertScope(state.principal, 'events')
       const { sessionId } = message
@@ -234,6 +266,7 @@ export class SocketGateway
   ): Promise<UnsubscribeAck> {
     return this.answer(() => {
       const state = this.requireState(socket)
+      this.limitMessages(state)
       const { sessionId } = parse(UnsubscribeMessage, body)
       this.unfollow(state, sessionId)
       return Promise.resolve({ ok: true as const })
@@ -255,6 +288,11 @@ export class SocketGateway
           ErrorCode.RATE_LIMITED,
           'Too many commands from this key; retry after a minute'
         )
+      }
+      // The same answer as REST gives a body with `__proto__`; Socket.IO's parser lets it through. After
+      // the limiter, so a message that costs a walk also costs allowance.
+      if (hasPrototypeKey(body)) {
+        throw new ValidationError('VALIDATION_ERROR', 'The message contains a forbidden key')
       }
       if (state.commandsInFlight >= MAX_COMMANDS_IN_FLIGHT) {
         throw new AppError(
@@ -284,6 +322,7 @@ export class SocketGateway
   ): Promise<ReplayAck> {
     return this.answer(async () => {
       const state = this.requireState(socket)
+      this.limitMessages(state)
       const { sessionId, afterSeq, limit } = parse(ReplayMessage, body)
       assertScope(state.principal, 'events')
       assertSessionAccess(state.principal, sessionId)
@@ -335,6 +374,10 @@ export class SocketGateway
     ])
     for (const state of targets) {
       if (state.closed) continue
+      if (isExpired(state)) {
+        this.drop(state, 'unauthorized')
+        continue
+      }
       const delivered = [...state.subscriptions.values()].some(
         subscription =>
           (subscription.sessionId === ALL_SESSIONS ||
@@ -413,6 +456,7 @@ export class SocketGateway
   }
 
   private forget(state: ClientState): void {
+    if (!state.closed) this.countSocket(state.principal, -1)
     state.closed = true
     for (const sessionId of [...state.subscriptions.keys()]) this.unfollow(state, sessionId)
     this.clients.delete(state.socket)
@@ -428,6 +472,57 @@ export class SocketGateway
     this.forget(state)
     this.metrics.metrics.socketConnections.dec()
     state.socket.disconnect(true)
+  }
+
+  // One lookup for a socket that just connected; what `revalidate` does every 30 s, for one socket
+  private async recheck(state: ClientState | undefined): Promise<void> {
+    if (state === undefined || state.principal.keyId === null) return
+    try {
+      const principal = await this.auth.authenticate(state.apiKey, state.address)
+      if (principal.scopes.has('events')) state.principal = principal
+      else this.drop(state, 'unauthorized')
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedError || error instanceof ForbiddenError) {
+        this.drop(state, 'unauthorized')
+      }
+    }
+  }
+
+  // The key was revoked: every socket it holds goes now
+  private dropKey(keyId: string): void {
+    for (const state of [...this.clients.values()]) {
+      if (state.principal.keyId === keyId) this.drop(state, 'unauthorized')
+    }
+  }
+
+  // The session was deleted: a socket of a key that belonged to it goes (its keys went with it); a
+  // socket that followed it stops following it, so a session created again under the same id is not
+  // followed by what was subscribed to the old one
+  private sessionRemoved(sessionId: string): void {
+    for (const state of [...this.clients.values()]) {
+      if (state.principal.sessionId === sessionId) this.drop(state, 'unauthorized')
+      else if (state.subscriptions.has(sessionId)) this.unfollow(state, sessionId)
+    }
+  }
+
+  private socketsOf(principal: Principal): number {
+    return this.socketsPerKey.get(principal.keyId ?? ENVIRONMENT_KEY) ?? 0
+  }
+
+  private countSocket(principal: Principal, change: 1 | -1): void {
+    const key = principal.keyId ?? ENVIRONMENT_KEY
+    const next = (this.socketsPerKey.get(key) ?? 0) + change
+    if (next <= 0) this.socketsPerKey.delete(key)
+    else this.socketsPerKey.set(key, next)
+  }
+
+  private limitMessages(state: ClientState): void {
+    if (!this.messageLimiter.tryAcquire(state.principal.keyId ?? ENVIRONMENT_KEY)) {
+      throw new AppError(
+        ErrorCode.RATE_LIMITED,
+        'Too many subscribe, unsubscribe and replay messages from this key; retry after a minute'
+      )
+    }
   }
 
   // A key that was revoked, expired or lost its address list ends its sockets; a database that is
@@ -491,11 +586,25 @@ export class SocketGateway
       this.limiter.recordFailure(bucket)
       throw error
     }
+    // After the try: a key that is valid but holds too many sockets is not a failed guess
+    const { principal } = this.handshakes.get(socket) as Handshake
+    if (this.socketsOf(principal) >= this.config.SOCKET_MAX_PER_KEY) {
+      this.handshakes.delete(socket)
+      throw new AppError(
+        ErrorCode.RATE_LIMITED,
+        `A key may hold at most ${this.config.SOCKET_MAX_PER_KEY} sockets; close one and retry`
+      )
+    }
   }
 
   private requireState(socket: Socket): ClientState {
     const state = this.clients.get(socket)
     if (state === undefined || state.closed) {
+      throw new UnauthorizedError('UNAUTHORIZED')
+    }
+    // A key that lapsed since the handshake does not wait for the next check
+    if (isExpired(state)) {
+      this.drop(state, 'unauthorized')
       throw new UnauthorizedError('UNAUTHORIZED')
     }
     return state
@@ -523,6 +632,11 @@ export class SocketGateway
       }
     }
   }
+}
+
+function isExpired(state: ClientState): boolean {
+  const { expiresAt } = state.principal
+  return expiresAt !== undefined && expiresAt <= Date.now()
 }
 
 // `qr` and `code` can be named in the list but not through `*`; an absent list names none

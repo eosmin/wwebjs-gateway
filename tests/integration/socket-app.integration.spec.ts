@@ -67,4 +67,34 @@ describe('Socket.IO gateway in the whole application (integration)', () => {
     expect(unknown).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } })
     expect(harness.exceptionsLogged()).toEqual([])
   })
+
+  // The gateway hears of a revoked key and of a deleted session from the services that do it, through
+  // the real wiring of the module; the 30 s check is only the safety net behind them
+  it('ends the sockets of a key at the moment it is revoked through the API', async () => {
+    const created = await harness.call('POST', '/v1/api-keys', {
+      name: 'socket revoked key',
+      sessionId: harness.id,
+      scopes: ['events']
+    })
+    const { id, key } = created.json<{ id: string; key: string }>()
+    const socket = await harness.connected(key)
+    const closed = new Promise<string>(resolve => socket.once('disconnect', resolve))
+
+    expect((await harness.call('DELETE', `/v1/api-keys/${id}`)).statusCode).toBe(200)
+
+    expect(await closed).toBe('io server disconnect')
+  })
+
+  it('ends the sockets of a session that is deleted through the API', async () => {
+    const doomed = `${harness.id}-del`
+    expect((await harness.call('POST', '/v1/sessions', { id: doomed })).statusCode).toBe(201)
+    const key = await harness.createKey('socket doomed key', ['events'], doomed)
+    const socket = await harness.connected(key)
+    await harness.send(socket, 'subscribe', { sessionId: doomed })
+    const closed = new Promise<string>(resolve => socket.once('disconnect', resolve))
+
+    expect((await harness.call('DELETE', `/v1/sessions/${doomed}`)).statusCode).toBe(204)
+
+    expect(await closed).toBe('io server disconnect')
+  })
 })

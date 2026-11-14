@@ -28,6 +28,7 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name)
   private readonly cache = new Map<string, CachedKey>()
   private readonly lastStamped = new Map<string, number>()
+  private readonly revokedListeners = new Set<(keyId: string) => void>()
   // Bumped by invalidate(): a row read before the bump may already be stale, so it is not cached
   private generation = 0
 
@@ -56,8 +57,28 @@ export class AuthService {
     this.stampLastUsed(row.id, now)
     // A database key with no session is an admin key
     return row.sessionId === null
-      ? adminPrincipal(row.id)
-      : keyPrincipal(row.id, row.sessionId, row.scopes)
+      ? adminPrincipal(row.id, row.expiresAt)
+      : keyPrincipal(row.id, row.sessionId, row.scopes, row.expiresAt)
+  }
+
+  // For what outlives a request (the sockets): told when a key is revoked, so it does not wait for its
+  // next check. A rotation is not told: the old key keeps working for its grace period.
+  onRevoked(listener: (keyId: string) => void): () => void {
+    this.revokedListeners.add(listener)
+    return () => this.revokedListeners.delete(listener)
+  }
+
+  // The key was revoked: forgotten by the cache, then announced. A listener that throws is logged and
+  // does not stop the others nor the revoke.
+  revoked(keyId: string): void {
+    this.invalidate(keyId)
+    for (const listener of this.revokedListeners) {
+      try {
+        listener(keyId)
+      } catch (error: unknown) {
+        this.logger.warn(`A listener of a revoked key failed: ${errorKind(error)}`)
+      }
+    }
   }
 
   // The revoke and rotate paths call it so the change does not wait for the cache to expire

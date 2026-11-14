@@ -2514,6 +2514,20 @@ describe('SessionManager remove and the saved login', () => {
     expect(existsSync(join(dataPath, `session-${ID}`, 'Default', 'Cookies'))).toBe(true)
   })
 
+  it('tells every listener of a removed session even when one of them fails, then fails the call', async () => {
+    const built = build()
+    built.sessions.seed({ id: ID, status: 'stopped', linkedAt: NOW })
+    const failing = jest.fn(() => Promise.reject(new Error('a listener failed')))
+    const later = jest.fn(() => Promise.resolve())
+    built.manager.onRemoved(failing)
+    built.manager.onRemoved(later)
+
+    await expect(built.manager.remove(ID)).rejects.toThrow(/a listener failed/)
+
+    // The sockets of the gateway must not wait for the 30 s check because another listener threw
+    expect(later).toHaveBeenCalledWith(ID)
+  })
+
   it('keeps a running session that cannot move its login, with the browser already closed', async () => {
     const built = build()
     built.sessions.seed({ id: ID, linkedAt: NOW })
