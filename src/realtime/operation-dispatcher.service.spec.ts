@@ -25,6 +25,7 @@ class StateBody extends createZodDto(
 class ListQuery extends createZodDto(
   z.strictObject({ limit: z.coerce.number().int().optional() })
 ) {}
+class WaitQuery extends createZodDto(z.strictObject({ wait: z.stringbool().default(true) })) {}
 class ChatDto extends createZodDto(z.object({ id: z.string() })) {}
 
 const meta = (id: string, command: string, scope: WaOperationMeta['scope']): WaOperationMeta => ({
@@ -72,6 +73,18 @@ class FakeController {
     return { sessionId, key: key ?? null }
   }
 
+  // The shape of messages.send: a body and a `wait` flag in the query
+  @Post(':sessionId/both')
+  @WaOperation(meta('fake.both', 'fake.both', 'send'))
+  both(
+    @Param('sessionId') sessionId: string,
+    @Body() body: StateBody,
+    @Query() query: WaitQuery
+  ): unknown {
+    calls.push({ op: 'both', args: [sessionId, body, query] })
+    return { ok: true }
+  }
+
   // Not tied to a session: the operation decides by the principal, as the webhooks routes do
   @Post('who-am-i')
   @WaOperation(meta('fake.whoAmI', 'fake.whoAmI', 'webhooks'))
@@ -86,6 +99,17 @@ class FakeController {
   }
 }
 
+class WaitBody extends createZodDto(z.strictObject({ wait: z.boolean() })) {}
+
+@Controller('v1/clash')
+class ClashController {
+  @Post(':sessionId/clash')
+  @WaOperation(meta('clash.op', 'clash.op', 'send'))
+  op(@Body() body: WaitBody, @Query() query: WaitQuery): unknown {
+    return { body, query }
+  }
+}
+
 @Controller('v1/broken')
 class BrokenController {
   @Get('x')
@@ -96,7 +120,7 @@ class BrokenController {
 }
 
 async function build(
-  ...controllers: (typeof FakeController | typeof BrokenController)[]
+  ...controllers: (typeof FakeController | typeof BrokenController | typeof ClashController)[]
 ): Promise<OperationDispatcherService> {
   const module = await Test.createTestingModule({
     imports: [ApiModule],
@@ -129,7 +153,14 @@ describe('OperationDispatcherService', () => {
 
   it('lists the socket commands of the registry', () => {
     expect(dispatcher.commands()).toEqual(
-      expect.arrayContaining(['fake.state', 'fake.list', 'fake.echo', 'fake.whoAmI', 'fake.reset'])
+      expect.arrayContaining([
+        'fake.state',
+        'fake.list',
+        'fake.echo',
+        'fake.whoAmI',
+        'fake.reset',
+        'fake.both'
+      ])
     )
   })
 
@@ -162,6 +193,38 @@ describe('OperationDispatcherService', () => {
     // The query went through the pipe (the number is a number) and `secret` did not leave
     expect(result).toEqual({ id: 'chat-1' })
     expect(calls[0]?.args).toEqual(['sales', { limit: 5 }])
+  })
+
+  it('sends the names the query schema declares to the query and the rest to the body', async () => {
+    await dispatcher.dispatch(sessionKey('sales', 'send'), {
+      op: 'fake.both',
+      sessionId: 'sales',
+      params: { state: 'typing', wait: false }
+    })
+    expect(calls).toEqual([{ op: 'both', args: ['sales', { state: 'typing' }, { wait: false }] }])
+  })
+
+  it('validates both parts of a route that has a body and a query', async () => {
+    const principal = sessionKey('sales', 'send')
+    const badQuery = await failure(
+      dispatcher.dispatch(principal, {
+        op: 'fake.both',
+        sessionId: 'sales',
+        params: { state: 'typing', wait: 'maybe' }
+      })
+    )
+    const badBody = await failure(
+      dispatcher.dispatch(principal, {
+        op: 'fake.both',
+        sessionId: 'sales',
+        params: { state: 'typing', extra: 1 }
+      })
+    )
+    expect([badQuery, badBody].map(error => describeException(error, false).code)).toEqual([
+      'VALIDATION_ERROR',
+      'VALIDATION_ERROR'
+    ])
+    expect(calls).toEqual([])
   })
 
   it('answers a body that does not fit its schema as VALIDATION_ERROR and runs nothing', async () => {
@@ -291,6 +354,10 @@ describe('OperationDispatcherService', () => {
       expect(error.code).toBe('VALIDATION_ERROR')
     }
     expect(calls).toEqual([])
+  })
+
+  it('refuses at boot a route whose body has a field the query also declares', async () => {
+    await expect(build(ClashController)).rejects.toThrow(/body and the query both declare "wait"/)
   })
 
   it('does not know a command that no operation declares', async () => {
