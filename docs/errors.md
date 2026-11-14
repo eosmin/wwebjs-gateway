@@ -27,6 +27,7 @@ optional: it carries extra data of some codes (the issues of a `VALIDATION_ERROR
 | `SESSION_ALREADY_EXISTS` | 409 Conflict | A session with that id already exists. |
 | `MAX_SESSIONS_REACHED` | 409 Conflict | The number of running sessions has reached MAX_SESSIONS. |
 | `MAX_WEBHOOKS_REACHED` | 409 Conflict | The session already has WEBHOOKS_MAX_PER_SESSION webhooks (the webhooks of every session have the same limit); delete one first. |
+| `MAX_INBOUND_HOOKS_REACHED` | 409 Conflict | The session already has WEBHOOKS_MAX_PER_SESSION active inbound hooks; revoke one first. |
 | `WEBHOOK_CHANGED` | 409 Conflict | The webhook was changed by another request while this one was being applied; read it again and retry. |
 | `SESSION_NOT_READY` | 409 Conflict | The session is not connected to WhatsApp yet; retry when it is ready. A queued send that waits longer than SEND_MAX_WAIT_MS ends with this code. |
 | `PAYLOAD_TOO_LARGE` | 413 Payload Too Large | The request body is larger than the route accepts: 1 MiB in general, 40 MiB on the routes that send media. |

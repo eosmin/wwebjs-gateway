@@ -1,4 +1,9 @@
-import { NotFoundError, UnauthorizedError } from '../common/errors.js'
+import {
+  ConflictError,
+  NotFoundError,
+  ServiceBusyError,
+  UnauthorizedError
+} from '../common/errors.js'
 import { generateToken, sha256Hex } from '../common/lib/crypto.js'
 import type { AppConfig } from '../config/env.schema.js'
 import type { InboundHook } from '../database/models.js'
@@ -26,6 +31,7 @@ function setup() {
     create: jest.fn<Promise<InboundHook | null>, [Record<string, string>]>(data =>
       Promise.resolve(row(data))
     ),
+    countActiveForSession: jest.fn<Promise<number>, [string]>(() => Promise.resolve(0)),
     findById: jest.fn<Promise<InboundHook | null>, [string]>(() => Promise.resolve(row())),
     findByTokenHash: jest.fn<Promise<InboundHook | null>, [string]>(() => Promise.resolve(row())),
     listForSession: jest.fn<Promise<InboundHook[]>, [string]>(() => Promise.resolve([row()])),
@@ -35,7 +41,11 @@ function setup() {
   }
   const sessions = { findById: jest.fn(() => Promise.resolve({ id: 'main' })) }
   const service = new InboundHookService(
-    { PUBLIC_BASE_URL: 'https://gw.example.test' } as AppConfig,
+    {
+      PUBLIC_BASE_URL: 'https://gw.example.test',
+      WEBHOOKS_MAX_PER_SESSION: 3,
+      INBOUND_HOOK_MAX_PER_MINUTE: 2
+    } as AppConfig,
     hooks as unknown as InboundHooksRepository,
     sessions as unknown as SessionsRepository
   )
@@ -184,5 +194,122 @@ describe('list and the DTO', () => {
     expect(hooks.listForSession).toHaveBeenCalledWith('main')
     expect(list).toEqual([toInboundHookDto(row())])
     expect(JSON.stringify(list)).not.toContain('stored-hash')
+  })
+})
+
+describe('the limit of active hooks per session', () => {
+  it('refuses a hook past WEBHOOKS_MAX_PER_SESSION and stores nothing', async () => {
+    const { service, hooks } = setup()
+    hooks.countActiveForSession.mockResolvedValue(3)
+
+    const error = await service.create('main', 'crisp').catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ConflictError)
+    expect(error).toMatchObject({ code: 'MAX_INBOUND_HOOKS_REACHED', status: 409 })
+    expect(hooks.countActiveForSession).toHaveBeenCalledWith('main')
+    expect(hooks.create).not.toHaveBeenCalled()
+  })
+
+  it('accepts the hook that fills the last place', async () => {
+    const { service, hooks } = setup()
+    hooks.countActiveForSession.mockResolvedValue(2)
+
+    await expect(service.create('main', 'crisp')).resolves.toMatchObject({ name: 'crisp' })
+  })
+
+  it('counts and inserts as one step, so a burst cannot pass the limit', async () => {
+    const { service, hooks } = setup()
+    let stored = 0
+    hooks.countActiveForSession.mockImplementation(async () => {
+      await Promise.resolve()
+      return stored
+    })
+    hooks.create.mockImplementation(async data => {
+      await Promise.resolve()
+      stored += 1
+      return row(data)
+    })
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, index) => service.create('main', `hook ${index}`))
+    )
+
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(3)
+    expect(stored).toBe(3)
+  })
+
+  it('does not make a session wait for another one', async () => {
+    const { service, hooks } = setup()
+    hooks.countActiveForSession.mockResolvedValue(3)
+
+    await expect(service.create('a', 'x')).rejects.toBeInstanceOf(ConflictError)
+    hooks.countActiveForSession.mockResolvedValue(0)
+    await expect(service.create('b', 'x')).resolves.toBeDefined()
+  })
+})
+
+describe('admitSend', () => {
+  afterEach(() => jest.useRealTimers())
+
+  it('lets INBOUND_HOOK_MAX_PER_MINUTE requests through and refuses the next with Retry-After', () => {
+    jest.useFakeTimers({ now: new Date('2026-01-01T00:00:00Z') })
+    const { service } = setup()
+
+    service.admitSend(ID)
+    jest.advanceTimersByTime(10_000)
+    service.admitSend(ID)
+    jest.advanceTimersByTime(5_000)
+
+    let error: unknown
+    try {
+      service.admitSend(ID)
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(ServiceBusyError)
+    expect(error).toMatchObject({
+      code: 'RATE_LIMITED',
+      retryAfterSeconds: 45,
+      nothingQueued: true
+    })
+  })
+
+  it('counts each hook on its own and lets a hook send again when its oldest request leaves the window', () => {
+    jest.useFakeTimers({ now: new Date('2026-01-01T00:00:00Z') })
+    const { service } = setup()
+    service.admitSend(ID)
+    service.admitSend(ID)
+
+    expect(() => service.admitSend(ID)).toThrow(ServiceBusyError)
+    expect(() => service.admitSend('another-hook')).not.toThrow()
+
+    jest.advanceTimersByTime(60_000)
+    expect(() => service.admitSend(ID)).not.toThrow()
+  })
+
+  it('does not count a refused request against the hook', () => {
+    jest.useFakeTimers({ now: new Date('2026-01-01T00:00:00Z') })
+    const { service } = setup()
+    service.admitSend(ID)
+    service.admitSend(ID)
+    for (let i = 0; i < 5; i += 1) expect(() => service.admitSend(ID)).toThrow(ServiceBusyError)
+
+    jest.advanceTimersByTime(60_000)
+    service.admitSend(ID)
+    service.admitSend(ID)
+    expect(() => service.admitSend(ID)).toThrow(ServiceBusyError)
+  })
+
+  it('forgets the hooks that stopped sending, once a window', () => {
+    jest.useFakeTimers({ now: new Date('2026-01-01T00:00:00Z') })
+    const { service } = setup()
+    const table = (service as unknown as { sends: Map<string, number[]> }).sends
+    service.admitSend('idle-1')
+    service.admitSend('idle-2')
+
+    jest.advanceTimersByTime(60_000)
+    service.admitSend(ID)
+
+    expect([...table.keys()]).toEqual([ID])
   })
 })

@@ -90,6 +90,7 @@ const DEFAULTS = {
   HUMANIZE_MIN_REPLY_DELAY_MS: 1500,
   EVENT_REPLAY_WINDOW_SECONDS: 300,
   WEBHOOKS_MAX_PER_SESSION: 20,
+  INBOUND_HOOK_MAX_PER_MINUTE: 60,
   WEBHOOK_TEST_MAX_PER_MINUTE: 6,
   WEBHOOK_TIMEOUT_MS: 10000,
   WEBHOOK_MAX_ATTEMPTS: 10,
@@ -306,6 +307,7 @@ describe('envSchema bounds and edges', () => {
     ['SEND_MAX_WAIT_MS', 1],
     ['WEBHOOK_MAX_ATTEMPTS', 1],
     ['WEBHOOKS_MAX_PER_SESSION', 1],
+    ['INBOUND_HOOK_MAX_PER_MINUTE', 1],
     // Fewer starts than this would take one slow start for a login that WhatsApp refuses
     ['SESSION_INITIALIZE_MAX_ATTEMPTS', 3]
   ])('%s accepts its minimum %d and rejects one below', (key, min) => {

@@ -79,6 +79,12 @@ describe('the subclasses', () => {
     ['ConflictError', new ConflictError('MAX_SESSIONS_REACHED'), 'MAX_SESSIONS_REACHED', 409],
     ['ConflictError', new ConflictError('MAX_WEBHOOKS_REACHED'), 'MAX_WEBHOOKS_REACHED', 409],
     [
+      'ConflictError',
+      new ConflictError('MAX_INBOUND_HOOKS_REACHED'),
+      'MAX_INBOUND_HOOKS_REACHED',
+      409
+    ],
+    [
       'UnprocessableError',
       new UnprocessableError('IDEMPOTENCY_KEY_REUSED'),
       'IDEMPOTENCY_KEY_REUSED',

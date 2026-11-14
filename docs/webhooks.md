@@ -213,8 +213,40 @@ The sweep reads the ids of the jobs and, of a finished one, a single field (the 
 
 Each row the sweep sends to the dead letters counts as `gw_webhook_deliveries_total{result="swept"}` and is logged as one warning per run, so an alert on that counter tells that deliveries are losing their jobs. A row it marks delivered is logged as a warning of its own (it means the database refused writes for a while), and is not counted as swept. If the job was only hidden from the sweep while it moved between states, nothing is lost: when it runs it records its result over the `failed` row.
 
+## Inbound hooks
+
+An inbound hook is the other direction: a secret URL that lets another system **send** a message through a session, with no API key (TDD §6.10). A chatbot platform, a form or a script that cannot hold a key calls the URL and the message goes out like any other send.
+
+| Operation | Route | Scope | Answer |
+| --- | --- | --- | --- |
+| `inboundHooks.create` | `POST /v1/sessions/:sessionId/inbound-hooks` `{ name }` | `webhooks` | `201` with the hook and its `url` |
+| `inboundHooks.list` | `GET /v1/sessions/:sessionId/inbound-hooks` | `webhooks` | `200` with `{ hooks }` |
+| `inboundHooks.revoke` | `DELETE /v1/sessions/:sessionId/inbound-hooks/:hookId` | `webhooks` | `200` with the hook and its `revokedAt` |
+| `inboundHooks.send` | `POST /v1/hooks/inbound/:token` | none (the token) | `201` with the message, `202` with the job |
+
+The first three are the management routes. They need a key with the `webhooks` scope that reaches the session (a session key reaches its own session only, an admin key any). They are not socket commands. The fourth is the only route of the gateway that is public to the API key guard besides the probes: the token in its path is the credential. It is documented with the scope `send`, the scope a key would need for the same send.
+
+**The URL is shown once.** `create` answers `{ id, sessionId, name, createdAt, revokedAt, url }`, and the token (32 random bytes in base64url) is inside `url`, built from `PUBLIC_BASE_URL`. Only its sha256 is stored, so neither `list` nor anything else can show it again: a lost URL is replaced by revoking the hook and creating another. Treat the URL as a password. The gateway never logs it (the path is redacted in the request log and in error text), and neither should the caller or a proxy in front of it.
+
+**The body.** The body of `messages.send` (text, media, location, contacts, a poll, an event, a group invite), or the short shape for a system that cannot build it:
+
+```json
+{ "to": "+52 55 0000 0001", "text": "Hola, tu pedido va en camino" }
+```
+
+`{ to, text }` is the same as `{ to, type: "text", body: text }`; the shape is chosen by the presence of `type`, and a mistake is reported against that shape, field by field; mixing the two shapes, or any field they do not name (a `sessionId` too), is `400 VALIDATION_ERROR`. The message goes out through the session **of the hook**, never one the caller names, and through the same path as `messages.send`: the send queue, the send policy, the pacing, the idempotency table. It answers like it: `201` with the message when it went out within `SEND_SYNC_TIMEOUT_MS`, `202` with the job otherwise or with `?wait=false`, and the errors of a send (`POLICY_BLOCKED`, `RECIPIENT_SUPPRESSED`, `SESSION_NOT_READY`, ...). `Idempotency-Key` (1 to 128 characters) makes a retry safe: the same key and request returns the first result with `Idempotent-Replayed: true`, the same key with another request is `422 IDEMPOTENCY_KEY_REUSED`. The key is kept apart per hook: two hooks of a session can use the same key without meeting, and it never meets a key of `messages.send`.
+
+**The size.** The body is limited to 1 MiB, like every route but the send routes of a session, so media goes by `source.url` (public hosts only) or `source.messageId`, not as base64 (`413` otherwise). The send routes of a session accept 40 MiB because they ask for a key before the body is read; this one has no key to ask for.
+
+**Refusals.** A malformed, unknown or revoked token is the same `401 UNAUTHORIZED`, whatever the body says, so the answer does not tell which tokens exist. A revocation takes effect at once: nothing about a token is cached. Fastify reads the body (1 MiB at most) and parses its JSON before any guard runs, so a body that is not JSON is `400` whatever the token; the token is checked before the body is validated against the send schema, so a caller without a valid token never reaches that validation or the send path. A request of a valid token counts against the allowance of its hook even when its body is then refused.
+
+**Limits.**
+
+- **Per hook:** `INBOUND_HOOK_MAX_PER_MINUTE` requests a minute (60 by default; a sliding window, counted from the first valid request, refusals not included). One more is `429 RATE_LIMITED` with `Retry-After`. It is stricter than the allowance of the address, which also applies (`RATE_LIMIT_MAX`, and what protects the route from a caller that invents tokens). The counters live in the memory of the process, so a restart resets them (the gateway is a single instance).
+- **Per session:** `WEBHOOKS_MAX_PER_SESSION` active hooks (20 by default, the same number as for webhooks). One more is `409 MAX_INBOUND_HOOKS_REACHED`; revoking a hook frees its place. Revoked hooks stay in the list and do not count.
+
 ## Redis for the queues
 
 BullMQ keeps the queues in Redis: the jobs of the deliveries (with the event, and the file in base64 for the webhooks in `inline` mode), the send queues and the schedules. Run Redis with **`maxmemory` set and `maxmemory-policy noeviction`**, never an `allkeys-*` or `volatile-*` policy: those delete queue keys to make room, and a job or a lock that disappears is a delivery or a send lost without any error. With `noeviction` a full Redis refuses new writes instead, which the gateway reports (`not_queued`, a failing enqueue) and the dead letters recover. Leave room for the worst case: the jobs kept after they finish (an hour of completed ones, a day of failed ones, an hour for the failed ones of an `inline` webhook) times the size of the events, the files included. The `docker-compose.yml` of the repository sets the policy; the size is yours to choose for your host.
 
-> **Status.** Milestone 7 is complete: the routes, the queue, the dispatcher, the processor, the retention job, the media block and the integration suite are in place.
+> **Status.** Milestone 7 is complete: the routes, the queue, the dispatcher, the processor, the retention job, the media block and the integration suite are in place. Milestone 8 adds the inbound hooks: the service (8.1) and the routes (8.2).

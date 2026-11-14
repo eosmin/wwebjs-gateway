@@ -355,7 +355,10 @@ export const envSchema = z
       'Seconds of past events a reconnecting socket may replay'
     ),
     WEBHOOKS_MAX_PER_SESSION: count(20, { min: 1 }).describe(
-      'Webhooks a session can have, and as many for those of every session; creating one past it is refused'
+      'Webhooks a session can have, and as many for those of every session; creating one past it is refused. Also the most active inbound hooks a session can have'
+    ),
+    INBOUND_HOOK_MAX_PER_MINUTE: count(60, { min: 1 }).describe(
+      'Messages one inbound hook (POST /v1/hooks/inbound/:token) accepts per minute; one more is refused with 429 RATE_LIMITED. Stricter than RATE_LIMIT_MAX, which also applies to the address'
     ),
     WEBHOOK_TEST_MAX_PER_MINUTE: count(6, { min: 1 }).describe(
       'Test pings (POST /v1/webhooks/:id/test) a webhook accepts per minute; one more is refused with 429 RATE_LIMITED. Each one is a signed request to the URL of the webhook'
