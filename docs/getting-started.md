@@ -2,7 +2,8 @@
 
 From a clone of the repository to a first message, on a development machine. It takes about ten
 minutes plus the time to scan a QR code. This guide runs the gateway from source on a development
-machine; the `docker compose up` stack of the repository is also for development only.
+machine; the `docker compose up` stack of the repository is also for development only. To deploy, read
+[deploy-vps](deploy-vps.md) and [deploy-railway](deploy-railway.md).
 
 **Use a spare phone number.** The gateway automates WhatsApp Web with a library that is not an official
 product: an account that is automated can be restricted ([limits](limits.md)). Never try it with
@@ -183,3 +184,4 @@ also produces a `message_batch` event ([ordering](ordering.md)).
 - [messages](messages.md), [chats](chats.md), [groups](groups.md): the API by area; the whole list is in
   [operations-list](operations-list.md).
 - [errors](errors.md) and [troubleshooting](troubleshooting.md) when something answers an error.
+- [development](development.md) to work on the gateway itself.

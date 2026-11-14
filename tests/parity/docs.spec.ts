@@ -87,9 +87,10 @@ describe('docs', () => {
     expect(existsSync(path)).toBe(true)
   })
 
-  // A guide that is still owed (9.5) cannot be there already without leaving the pending list
-  it.each(PENDING_GUIDES)('%s is still pending, so it does not exist yet', path => {
-    expect(existsSync(path)).toBe(false)
+  // A guide that is still owed cannot be there already without leaving the pending list. A plain test
+  // and not `it.each`: the list is empty once every guide is written, and Jest refuses an empty table
+  it('has no pending guide that already exists', () => {
+    expect(PENDING_GUIDES.filter(path => existsSync(path))).toEqual([])
   })
 
   it('has no guide outside the manifest', () => {
@@ -137,7 +138,7 @@ describe('docs', () => {
     '%s names every variable of its feature',
     (path, feature) => {
       const names = Object.keys(envSchema.shape).filter(name => feature.test(name))
-      // A guide that is still pending is checked when 9.5 writes it
+      // A guide that is still pending is checked when it is written
       const text = existsSync(path) ? read(path) : undefined
 
       expect(names).not.toEqual([])
