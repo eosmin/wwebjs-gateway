@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 
+import { isForeignKeyViolation } from '../db-errors.js'
 import type { InboundHook } from '../models.js'
 import { PrismaService } from '../prisma.service.js'
 
@@ -13,8 +14,14 @@ export interface NewInboundHook {
 export class InboundHooksRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  create(data: NewInboundHook): Promise<InboundHook> {
-    return this.prisma.inboundHook.create({ data })
+  // Null when the session is gone (the foreign key says so)
+  async create(data: NewInboundHook): Promise<InboundHook | null> {
+    try {
+      return await this.prisma.inboundHook.create({ data })
+    } catch (error) {
+      if (isForeignKeyViolation(error)) return null
+      throw error
+    }
   }
 
   findById(id: string): Promise<InboundHook | null> {
