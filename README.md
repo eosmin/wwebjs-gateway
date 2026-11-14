@@ -85,6 +85,14 @@ Every guide lives in [`docs/`](docs/). The files marked generated come from the 
 `pnpm docs:gen` and are never edited by hand; `pnpm validate:docs` fails when one is stale, when an
 internal link is broken or when a guide is missing from this list.
 
+**Start here**
+
+- [`docs/getting-started.md`](docs/getting-started.md): from a clone to a first message.
+- [`docs/architecture.md`](docs/architecture.md): how the pieces fit and how data moves.
+- [`docs/limits.md`](docs/limits.md): what the gateway cannot do, its limits, and what was checked live.
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) and [`docs/faq.md`](docs/faq.md): symptom, cause,
+  fix, and short answers.
+
 **Using the gateway**
 
 - [`docs/authentication.md`](docs/authentication.md): API keys, scopes, expiry and rotation.
@@ -93,6 +101,9 @@ internal link is broken or when a guide is missing from this list.
 - [`docs/send-queue.md`](docs/send-queue.md): the persistent send queue and its results.
 - [`docs/safety.md`](docs/safety.md): the send policy, warm-up, suppression.
 - [`docs/ordering.md`](docs/ordering.md): inbound ordering and `message_batch`.
+- [`docs/reactions-and-receipts.md`](docs/reactions-and-receipts.md): reactions, ack levels and who read a
+  message.
+- [`docs/origin.md`](docs/origin.md): `origin` (Click-to-WhatsApp) and `raw` on a message.
 - [`docs/chats.md`](docs/chats.md), [`docs/contacts.md`](docs/contacts.md),
   [`docs/groups.md`](docs/groups.md), [`docs/channels.md`](docs/channels.md),
   [`docs/labels.md`](docs/labels.md), [`docs/broadcasts.md`](docs/broadcasts.md),
