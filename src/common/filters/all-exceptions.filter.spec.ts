@@ -221,6 +221,22 @@ describe('AllExceptionsFilter', () => {
       })
     })
 
+    it.each([
+      ['GET', '/v1/hooks/inbound/ERRTOKEN'],
+      ['PUT', '/v1/hooks/inbound/ERRTOKEN'],
+      ['DELETE', '/v1/hooks/inbound/ERRTOKEN'],
+      ['OPTIONS', '/v1/hooks/inbound/ERRTOKEN'],
+      ['POST', '/v1/hooks/inbound/ERRTOKEN/'],
+      ['POST', '/v1/hooks/inbound/ERRTOKEN/extra'],
+      ['GET', '/v1/hooks/inbound/ERRTOKEN%4aA1/nope']
+    ])('keeps the token of an inbound path out of the 404 of %s %s', async (method, url) => {
+      const response = await app.inject({ method: method as 'GET', url })
+
+      expect(response.statusCode).toBe(404)
+      expect(response.body).not.toContain('ERRTOKEN')
+      expect(response.json<ErrorBody>().error.code).toBe('NOT_FOUND')
+    })
+
     it('keeps the status of an error Fastify raises before routing', async () => {
       const malformed = await app.inject({
         method: 'POST',
