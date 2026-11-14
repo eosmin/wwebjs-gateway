@@ -108,6 +108,9 @@ importers:
       rxjs:
         specifier: 7.8.2
         version: 7.8.2
+      socket.io:
+        specifier: 4.8.4
+        version: 4.8.4(supports-color@8.1.1)
       whatsapp-web.js:
         specifier: 1.34.8
         version: 1.34.8(patch_hash=884d53b50d5695150c664f1bb7171212812d53ff7711c1980f0cf04d02f0fa68)(supports-color@8.1.1)(typescript@5.9.3)
