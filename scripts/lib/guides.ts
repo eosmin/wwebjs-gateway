@@ -2,6 +2,7 @@
 // hand-written ones; until a guide is written it sits in PENDING_GUIDES, and the docs spec fails
 // the moment a guide exists without having left that list.
 export const WRITTEN_GUIDES: readonly string[] = [
+  'docs/architecture.md',
   'docs/authentication.md',
   'docs/broadcasts.md',
   'docs/calls.md',
@@ -11,8 +12,11 @@ export const WRITTEN_GUIDES: readonly string[] = [
   'docs/contacts.md',
   'docs/errors.md',
   'docs/events.md',
+  'docs/faq.md',
+  'docs/getting-started.md',
   'docs/groups.md',
   'docs/labels.md',
+  'docs/limits.md',
   'docs/lookup.md',
   'docs/messages.md',
   'docs/metrics.md',
@@ -20,32 +24,29 @@ export const WRITTEN_GUIDES: readonly string[] = [
   'docs/operations-list.md',
   'docs/operations.md',
   'docs/ordering.md',
+  'docs/origin.md',
   'docs/parity-matrix.md',
   'docs/presence-profile.md',
+  'docs/reactions-and-receipts.md',
   'docs/safety.md',
   'docs/send-queue.md',
   'docs/sessions.md',
   'docs/system.md',
+  'docs/troubleshooting.md',
   'docs/webhooks.md',
   'docs/websocket-commands.md',
   'docs/websocket.md'
 ]
 
-// Required by the TDD and not written yet: 9.5 writes each one and takes it out of this list
+// Required by the TDD and not written yet: step 9.5 writes each one and takes it out of this list
+// (the guides of use are written; the project and operations guides are the last PR of the step)
 export const PENDING_GUIDES: readonly string[] = [
-  'docs/architecture.md',
   'docs/backup-restore.md',
   'docs/contributing.md',
   'docs/deploy-railway.md',
   'docs/deploy-vps.md',
   'docs/development.md',
-  'docs/faq.md',
-  'docs/getting-started.md',
-  'docs/limits.md',
-  'docs/origin.md',
-  'docs/reactions-and-receipts.md',
   'docs/repository-settings.md',
-  'docs/troubleshooting.md',
   'docs/upgrading.md'
 ]
 
