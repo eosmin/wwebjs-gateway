@@ -143,9 +143,8 @@ management operations above. `AuthModule` is imported by the modules that have c
 (`SystemModule`, `ApiKeysModule`) and registers the guard globally. `RateLimitModule` is imported
 before them in `AppModule`, which is what puts the limit ahead of the guard.
 
-Not built yet:
-
-- The guard handles HTTP contexts only. A Socket.IO handler never goes through it; the gateway
-  authenticates the handshake itself.
-- Socket.IO authentication (`auth: { apiKey }`) arrives with the gateway and reuses
-  `AuthService.authenticate`.
+The Socket.IO gateway (see [`websocket.md`](websocket.md)) does not go through the guard, which handles
+HTTP contexts only: it authenticates the handshake itself with `AuthService.authenticate` and
+`auth: { apiKey }` (never a query string), requires the `events` scope there, checks the key again every 30
+seconds, and applies `assertScope` and `assertSessionAccess` to every message and event. A socket
+command runs the operation of the registry, so it needs the scope of that operation too.

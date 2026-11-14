@@ -11,6 +11,7 @@ import { applyServerTimeouts, setupHttp } from './infra/http/http-setup.js'
 import { createFastifyAdapter } from './infra/logger/fastify-adapter.js'
 import { armHardExit } from './infra/process/hard-exit.js'
 import { formatStartupFailure } from './infra/process/startup-failure.js'
+import { GatewayIoAdapter } from './realtime/socket-io.adapter.js'
 import { DeliveryQueueService } from './services/delivery-queue.service.js'
 import { SendQueueService } from './services/send-queue.service.js'
 
@@ -26,6 +27,7 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks(undefined, { useProcessExit: true })
   armHardExit()
   const config = app.get<AppConfig>(APP_CONFIG)
+  app.useWebSocketAdapter(new GatewayIoAdapter(app, config))
   await setupHttp(app, config)
   applyServerTimeouts(app.getHttpServer(), config)
   setupDocs(app, config)

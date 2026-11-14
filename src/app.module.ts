@@ -17,6 +17,7 @@ import { DatabaseModule } from './database/database.module.js'
 import { LoggerModule } from './infra/logger/logger.module.js'
 import { MetricsModule } from './infra/metrics/metrics.module.js'
 import { RedisModule } from './infra/redis/redis.module.js'
+import { RealtimeModule } from './realtime/realtime.module.js'
 import { MessagingModule } from './services/messaging.module.js'
 import { RetentionModule } from './services/retention.module.js'
 import { WebhooksModule } from './services/webhooks.module.js'
@@ -39,7 +40,8 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module.js'
     ApiKeysModule,
     SessionsModule,
     MessagesModule,
-    WebhooksApiModule
+    WebhooksApiModule,
+    RealtimeModule
   ],
   providers: [
     { provide: APP_PIPE, useClass: ZodValidationPipe },

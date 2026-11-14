@@ -202,6 +202,25 @@ export const METRIC_DEFINITIONS = {
     help: 'Chats on the suppression lists of all sessions.',
     labels: []
   },
+  socketConnections: {
+    name: 'gw_socket_connections',
+    type: 'gauge',
+    help: 'Socket.IO clients connected and authenticated.',
+    labels: []
+  },
+  socketDisconnects: {
+    name: 'gw_socket_disconnects_total',
+    type: 'counter',
+    help: 'Socket.IO clients the gateway disconnected, by reason (slow_consumer: its packets queued past SOCKET_MAX_QUEUED_EVENTS; unauthorized: its key was revoked, expired or no longer allowed).',
+    labels: ['reason'],
+    seed: [{ reason: 'slow_consumer' }, { reason: 'unauthorized' }]
+  },
+  replayWriteFailures: {
+    name: 'gw_replay_write_failures_total',
+    type: 'counter',
+    help: 'Events that could not be kept for socket replay (Redis down, or the event over the size limit); live delivery is not affected.',
+    labels: []
+  },
   reconcileRecovered: {
     name: 'gw_reconcile_recovered_total',
     type: 'counter',

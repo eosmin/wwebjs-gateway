@@ -99,6 +99,8 @@ Every environment variable the gateway reads. `.env.example` declares the same s
 | `HEALTH_COOLDOWN_MIN` | integer, 0 or more | no | `30` | Minutes a session stays paused after a bad window |
 | `HUMANIZE_MIN_REPLY_DELAY_MS` | integer, 0 or more | no | `1500` | Minimum milliseconds between an inbound message and the reply to it |
 | `EVENT_REPLAY_WINDOW_SECONDS` | integer, 0 or more | no | `300` | Seconds of past events a reconnecting socket may replay |
+| `EVENT_REPLAY_MAX_EVENTS` | integer, 1 or more | no | `5000` | Most events kept per session for the replay of a reconnecting socket; older ones go first even inside EVENT_REPLAY_WINDOW_SECONDS. Bounds the memory Redis spends on replay (each event is kept whole, up to 256 KiB) |
+| `SOCKET_MAX_QUEUED_EVENTS` | integer, 1 or more | no | `1000` | Packets that may wait to be written to one Socket.IO client; a client that falls further behind is disconnected with the reason slow_consumer instead of making the gateway hold its backlog in memory |
 | `WEBHOOKS_MAX_PER_SESSION` | integer, 1 or more | no | `20` | Webhooks a session can have, and as many for those of every session; creating one past it is refused. Also the most active inbound hooks a session can have |
 | `INBOUND_HOOK_MAX_PER_MINUTE` | integer, 1 or more | no | `60` | Messages one inbound hook (POST /v1/hooks/inbound/:token) accepts per minute; one more is refused with 429 RATE_LIMITED. Stricter than RATE_LIMIT_MAX, which also applies to the address |
 | `WEBHOOK_TEST_MAX_PER_MINUTE` | integer, 1 or more | no | `6` | Test pings (POST /v1/webhooks/:id/test) a webhook accepts per minute; one more is refused with 429 RATE_LIMITED. Each one is a signed request to the URL of the webhook |

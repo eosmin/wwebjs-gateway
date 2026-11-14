@@ -17,12 +17,13 @@ export const RequireScope = (scope: OperationScope): MethodDecorator & ClassDeco
 // The key behind the request, for the operations that decide by it what they may touch. The guard
 // sets it on every route that is not @Public, so a missing one is a wiring mistake: it never
 // falls back to an admin.
-export const CurrentPrincipal = createParamDecorator(
-  (_data: unknown, context: ExecutionContext): Principal => {
-    const principal = context.switchToHttp().getRequest<AuthenticatedRequest>().principal
-    if (principal === undefined) {
-      throw new InternalError('INTERNAL', 'The request reached the operation without a principal')
-    }
-    return principal
+export const currentPrincipalFactory = (_data: unknown, context: ExecutionContext): Principal => {
+  const principal = context.switchToHttp().getRequest<AuthenticatedRequest>().principal
+  if (principal === undefined) {
+    throw new InternalError('INTERNAL', 'The request reached the operation without a principal')
   }
-)
+  return principal
+}
+
+// Exported so the socket dispatch can recognize the parameter and hand it the principal of the socket
+export const CurrentPrincipal = createParamDecorator(currentPrincipalFactory)

@@ -32,6 +32,9 @@ an admin key is also accepted, and when `METRICS_TOKEN` is unset only an admin k
 | `gw_policy_decisions_total` | counter | `rule`, `decision` | Decisions of the send policy that are not a plain allow at enqueue, by rule (`none` for an allow) and decision (allow, delay, reject). |
 | `gw_policy_delay_seconds` | histogram | - | Seconds the send policy asked a job to wait. |
 | `gw_suppressed_chats` | gauge | - | Chats on the suppression lists of all sessions. |
+| `gw_socket_connections` | gauge | - | Socket.IO clients connected and authenticated. |
+| `gw_socket_disconnects_total` | counter | `reason` | Socket.IO clients the gateway disconnected, by reason (slow_consumer: its packets queued past SOCKET_MAX_QUEUED_EVENTS; unauthorized: its key was revoked, expired or no longer allowed). |
+| `gw_replay_write_failures_total` | counter | - | Events that could not be kept for socket replay (Redis down, or the event over the size limit); live delivery is not affected. |
 | `gw_reconcile_recovered_total` | counter | - | Messages the reconciliation pass recovered after a reconnect. |
 
 Histograms also expose the `_bucket`, `_sum` and `_count` series Prometheus derives from them.
