@@ -114,6 +114,19 @@ internal link is broken or when a guide is missing from this list.
 - [`docs/system.md`](docs/system.md) and [`docs/operations.md`](docs/operations.md): health, metrics
   and running the gateway.
 
+**Running and changing the project**
+
+- [`docs/development.md`](docs/development.md): toolchain, scripts, tests, Git hooks and CI.
+- [`docs/contributing.md`](docs/contributing.md): the flow of a change, from branch to merge.
+- [`docs/repository-settings.md`](docs/repository-settings.md): the ruleset of `main`, what the owner
+  enables, the secrets and permissions of the workflows.
+- [`docs/deploy-vps.md`](docs/deploy-vps.md) and [`docs/deploy-railway.md`](docs/deploy-railway.md): what
+  a deployment needs, and what is not available yet.
+- [`docs/backup-restore.md`](docs/backup-restore.md): what holds state, what each loss costs, how to copy
+  and restore it.
+- [`docs/upgrading.md`](docs/upgrading.md): the runbook for a break of WhatsApp Web or a new
+  `whatsapp-web.js`.
+
 **Generated reference**
 
 - [`docs/openapi.json`](docs/openapi.json): the OpenAPI document.

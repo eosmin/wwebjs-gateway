@@ -56,7 +56,7 @@ The code is under `src/`.
 | `parity/`        | What maps every `whatsapp-web.js` symbol to an operation, a field or a reason it is not exposed            |
 
 `scripts/` holds the generators and validators that CI runs, and `docs/` the documentation that
-they check.
+they check ([development](development.md)).
 
 ## Two rules that shape everything
 
