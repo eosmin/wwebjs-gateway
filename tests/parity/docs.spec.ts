@@ -1,7 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
 import { findAdrProblems } from '../../scripts/lib/adr.js'
+import { buildDocsModel } from '../../scripts/lib/docs-model.js'
 import { GENERATED_DOCS } from '../../scripts/lib/generated-docs.js'
+import { readWwebjsSymbols } from '../../scripts/lib/wwebjs-symbols.js'
 
 // The guides every phase has to have written by its end. It starts with the ones that exist and
 // grows with each phase until it is complete in Phase 9 (TDD §6.13).
@@ -25,10 +27,32 @@ const ADR_FILES = readdirSync(ADR_DIRECTORY)
 describe('docs', () => {
   it.each(GENERATED_DOCS.map(doc => [doc.path, doc] as const))(
     '%s equals a fresh generation',
-    (_path, doc) => {
-      expect(read(doc.path)).toBe(doc.render())
-    }
+    async (_path, doc) => {
+      expect(read(doc.path)).toBe(await doc.render())
+    },
+    60_000
   )
+
+  // What each generated reference has to name, so that an operation, a command or a symbol cannot
+  // go missing from it (TDD §6.13)
+  it('names every operation id in operations-list.md and every socket command in websocket-commands.md', async () => {
+    const { operations } = await buildDocsModel()
+    const list = read('docs/operations-list.md')
+    const commands = read('docs/websocket-commands.md')
+
+    expect(operations.filter(({ meta }) => !list.includes(`\`${meta.id}\``))).toEqual([])
+    expect(
+      operations.filter(
+        ({ meta }) => meta.socket !== undefined && !commands.includes(`\`${meta.socket.command}\``)
+      )
+    ).toEqual([])
+  }, 60_000)
+
+  it('lists every symbol of whatsapp-web.js in parity-matrix.md', () => {
+    const matrix = read('docs/parity-matrix.md')
+
+    expect(readWwebjsSymbols().filter(symbol => !matrix.includes(`\`${symbol}\``))).toEqual([])
+  })
 
   it.each(REQUIRED_GUIDES)('%s exists', path => {
     expect(existsSync(path)).toBe(true)

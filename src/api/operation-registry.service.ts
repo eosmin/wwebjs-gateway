@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common'
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common'
 import { METHOD_METADATA } from '@nestjs/common/constants'
 import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core'
 
@@ -18,9 +18,9 @@ export class OperationRegistryService implements OnModuleInit {
   private readonly byCommand = new Map<string, RegisteredOperation>()
 
   constructor(
-    private readonly discovery: DiscoveryService,
-    private readonly scanner: MetadataScanner,
-    private readonly reflector: Reflector
+    @Inject(DiscoveryService) private readonly discovery: DiscoveryService,
+    @Inject(MetadataScanner) private readonly scanner: MetadataScanner,
+    @Inject(Reflector) private readonly reflector: Reflector
   ) {}
 
   // Fails the boot, with every problem at once, when an operation is incomplete or repeated

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common'
+import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common'
 import { APP_PIPE } from '@nestjs/core'
 import type { NestFastifyApplication } from '@nestjs/platform-fastify'
 import type { OpenAPIObject } from '@nestjs/swagger'
@@ -82,6 +82,76 @@ class ResetController {
   }
 }
 
+// A @ZodResponse without a status: Nest documents it as `default`, which no client reads as a success
+@Controller('v1/implied')
+class ImpliedStatusController {
+  @Get('read')
+  @ZodResponse({ type: SentDto })
+  @WaOperation({
+    id: 'probe.impliedRead',
+    scope: 'read',
+    summary: 'Read with the implied status',
+    description: 'A GET answers 200.',
+    errors: [],
+    examples: { request: null, response: { messageId: 'true_1' } },
+    wwebjs: [],
+    gateway: true
+  })
+  read(): SentDto {
+    return { messageId: 'true_1' }
+  }
+
+  @Post('create')
+  @ZodResponse({ type: SentDto })
+  @WaOperation({
+    id: 'probe.impliedCreate',
+    scope: 'manage',
+    summary: 'Create with the implied status',
+    description: 'A POST answers 201.',
+    errors: [],
+    examples: { request: null, response: { messageId: 'true_1' } },
+    wwebjs: [],
+    gateway: true
+  })
+  create(): SentDto {
+    return { messageId: 'true_1' }
+  }
+
+  @Post('accept')
+  @HttpCode(202)
+  @ZodResponse({ type: SentDto })
+  @WaOperation({
+    id: 'probe.impliedAccept',
+    scope: 'manage',
+    summary: 'Accept with a declared status',
+    description: 'An @HttpCode(202) answers 202.',
+    errors: [],
+    examples: { request: null, response: { messageId: 'true_1' } },
+    wwebjs: [],
+    gateway: true
+  })
+  accept(): SentDto {
+    return { messageId: 'true_1' }
+  }
+
+  @Post('moved')
+  @HttpCode(302)
+  @ZodResponse({ type: SentDto })
+  @WaOperation({
+    id: 'probe.impliedMoved',
+    scope: 'manage',
+    summary: 'Declare a status that is no success',
+    description: 'A 3xx @HttpCode is not where the success schema goes.',
+    errors: [],
+    examples: { request: null, response: { messageId: 'true_1' } },
+    wwebjs: [],
+    gateway: true
+  })
+  moved(): SentDto {
+    return { messageId: 'true_1' }
+  }
+}
+
 @Controller('v1/plain')
 class PlainController {
   @Get()
@@ -118,6 +188,7 @@ describe('setupDocs', () => {
         ProbeController,
         StatusController,
         ResetController,
+        ImpliedStatusController,
         PlainController,
         OpenController,
         OpenClassController
@@ -161,6 +232,18 @@ describe('setupDocs', () => {
       'x-socket-command': 'messages.sendText',
       'x-wwebjs': ['Client.sendMessage']
     })
+  })
+
+  it('documents a response without a declared status under the status the route answers', async () => {
+    const { paths } = await fetchDocument()
+    const answers = (path: string, method: 'get' | 'post'): string[] =>
+      Object.keys(paths[path]?.[method]?.responses ?? {})
+
+    expect(answers('/v1/implied/read', 'get')).toEqual(['200'])
+    expect(answers('/v1/implied/create', 'post')).toEqual(['201'])
+    expect(answers('/v1/implied/accept', 'post')).toEqual(['202'])
+    expect(answers('/v1/implied/moved', 'post')).toEqual(['201'])
+    expect(JSON.stringify(paths['/v1/implied/read']?.get?.responses['200'])).toContain('SentDto')
   })
 
   it('adds the examples and the Zod field descriptions', async () => {

@@ -1,0 +1,16 @@
+{
+  // `pnpm docs:gen` compiles with the TypeScript compiler, as `nest build` does, and runs the result:
+  // the OpenAPI document needs the `design:paramtypes` metadata of the decorators, which the
+  // transpilers that run TypeScript directly (tsx, esbuild) do not emit
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./node_modules/.cache/gen-docs",
+    "types": ["node"],
+    "sourceMap": false,
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/gen-docs/.tsbuildinfo"
+  },
+  "include": ["src", "scripts/gen-docs.ts", "scripts/lib"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+}

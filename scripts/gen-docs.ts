@@ -1,4 +1,4 @@
-// Usage: tsx scripts/gen-docs.ts [--check]
+// Usage: pnpm docs:gen | pnpm validate:docs (they compile with tsconfig.docs.json first, then run this)
 //   no flag: writes every generated file of docs/
 //   --check: writes nothing, and exits 1 when a generated file differs from a fresh generation
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -10,7 +10,7 @@ const check = argv.includes('--check')
 const stale: string[] = []
 
 for (const { path, render } of GENERATED_DOCS) {
-  const expected = render()
+  const expected = await render()
   if (!check) {
     writeFileSync(path, expected)
     continue
