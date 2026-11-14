@@ -192,14 +192,23 @@ describe('the rate limit', () => {
 
 describe('the address bucket of a request the large-body hook already counted', () => {
   const options = buildRateLimitOptions({ RATE_LIMIT_MAX: 5, TRUST_PROXY_HOPS: 0 })
+  const bucket = (name: string): { skipIf?: (context: ExecutionContext) => boolean } => {
+    const throttlers = Array.isArray(options) ? options : options.throttlers
+    const found = throttlers.find(throttler => throttler.name === name)
+    if (!found) throw new Error(`no ${name} bucket`)
+    return found
+  }
   const addressBucket = (): { skipIf?: (context: ExecutionContext) => boolean } => {
     const throttlers = Array.isArray(options) ? options : options.throttlers
     const found = throttlers.find(throttler => throttler.name === 'ip')
     if (!found) throw new Error('no address bucket')
     return found
   }
-  const contextOf = (request: object): ExecutionContext =>
-    ({ switchToHttp: () => ({ getRequest: () => request }) }) as unknown as ExecutionContext
+  const contextOf = (request: object, type = 'http'): ExecutionContext =>
+    ({
+      getType: () => type,
+      switchToHttp: () => ({ getRequest: () => request })
+    }) as unknown as ExecutionContext
 
   it('is skipped by the guard, so a large send costs one hit and not two', () => {
     expect(addressBucket().skipIf?.(contextOf({ ipRateCounted: true }))).toBe(true)
@@ -207,5 +216,16 @@ describe('the address bucket of a request the large-body hook already counted', 
 
   it('is counted by the guard for every other request', () => {
     expect(addressBucket().skipIf?.(contextOf({ headers: {} }))).toBe(false)
+  })
+
+  it.each(['ip', 'key'])(
+    'is skipped in a websocket context by the %s bucket, whose request has no headers',
+    name => {
+      expect(bucket(name).skipIf?.(contextOf({}, 'ws'))).toBe(true)
+    }
+  )
+
+  it('still counts an HTTP request with a key in the key bucket', () => {
+    expect(bucket('key').skipIf?.(contextOf({ headers: { 'x-api-key': 'wgk_x' } }))).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 import { Inject, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common'
-import { SkipThrottle, normalizeIp } from '@nestjs/throttler'
+import { normalizeIp } from '@nestjs/throttler'
 import {
   ConnectedSocket,
   MessageBody,
@@ -90,9 +90,12 @@ interface ClientState extends Handshake {
 // - Backpressure: a client whose queue of unsent packets reaches SOCKET_MAX_QUEUED_EVENTS is
 //   disconnected (`slow_consumer`); the gateway never holds the backlog of a client that does not read.
 //
+// - Global guards: the rate limit guard skips the websocket context (it reads HTTP headers); the limits of
+//   a socket are the handshake limiter and the command limiter (`subscribe`, `unsubscribe` and `replay`
+//   have none yet, see the plan). `@Public()` makes ApiKeyGuard pass.
+//
 // Single instance by design: no Redis adapter, rooms are not used, the fan-out is a map in memory.
 @Public()
-@SkipThrottle()
 @WebSocketGateway()
 export class SocketGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy
