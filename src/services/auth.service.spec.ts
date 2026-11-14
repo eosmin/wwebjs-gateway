@@ -202,6 +202,42 @@ describe('AuthService cache', () => {
     expect(findByHash).toHaveBeenCalledTimes(2)
   })
 
+  it('tells the listeners of a revoked key, and drops it from the cache, but not for an invalidate', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation()
+    const generated = generateApiKey()
+    const { service, rows } = setup([row({ keyHash: generated.hash })])
+    const heard: string[] = []
+    const stop = service.onRevoked(keyId => heard.push(keyId))
+    service.onRevoked(() => {
+      throw new Error('a listener that fails')
+    })
+    await service.authenticate(generated.raw, '203.0.113.1')
+
+    service.invalidate('key-1')
+    expect(heard).toEqual([])
+
+    rows[0] = row({ keyHash: generated.hash, revokedAt: NOW })
+    service.revoked('key-1')
+    expect(heard).toEqual(['key-1'])
+    await expect(service.authenticate(generated.raw, '203.0.113.1')).rejects.toMatchObject({
+      code: 'UNAUTHORIZED'
+    })
+
+    stop()
+    service.revoked('key-1')
+    expect(heard).toEqual(['key-1'])
+  })
+
+  it('carries the expiry of the key in the principal', async () => {
+    const generated = generateApiKey()
+    const expiresAt = new Date(NOW.getTime() + 60_000)
+    const { service } = setup([row({ keyHash: generated.hash, expiresAt, sessionId: 'shop' })])
+
+    await expect(service.authenticate(generated.raw, '203.0.113.1')).resolves.toMatchObject({
+      expiresAt: expiresAt.getTime()
+    })
+  })
+
   it('stops a revoked key at once after invalidate, not after the TTL', async () => {
     const generated = generateApiKey()
     const { service, rows } = setup([row({ keyHash: generated.hash })])

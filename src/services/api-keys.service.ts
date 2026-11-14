@@ -125,7 +125,7 @@ export class ApiKeysService {
   async revoke(id: string): Promise<ApiKeyDto> {
     const row = await this.apiKeys.revoke(id, new Date())
     if (row === null) throw keyNotFound(id)
-    this.auth.invalidate(id)
+    this.auth.revoked(id)
     return toApiKeyDto(row)
   }
 

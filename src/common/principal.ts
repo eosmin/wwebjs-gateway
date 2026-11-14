@@ -17,20 +17,36 @@ export interface Principal {
   // Null = every session
   sessionId: string | null
   scopes: ReadonlySet<OperationScope>
+  // Epoch milliseconds at which the key lapses; absent when it never does. A connection that outlives
+  // a request (a socket) checks it, since nothing calls it again at that moment.
+  expiresAt?: number
 }
 
-export function adminPrincipal(keyId: string | null): Principal {
-  return { keyId, isAdmin: true, sessionId: null, scopes: new Set(OPERATION_SCOPES) }
+export function adminPrincipal(keyId: string | null, expiresAt?: Date | null): Principal {
+  return {
+    keyId,
+    isAdmin: true,
+    sessionId: null,
+    scopes: new Set(OPERATION_SCOPES),
+    ...(expiresAt != null && { expiresAt: expiresAt.getTime() })
+  }
 }
 
 // Stored scopes outside KEY_SCOPES (a row edited by hand) are dropped, so `admin` is never granted
 export function keyPrincipal(
   keyId: string,
   sessionId: string | null,
-  scopes: readonly string[]
+  scopes: readonly string[],
+  expiresAt?: Date | null
 ): Principal {
   const granted = KEY_SCOPES.filter(scope => scopes.includes(scope))
-  return { keyId, isAdmin: false, sessionId, scopes: new Set(granted) }
+  return {
+    keyId,
+    isAdmin: false,
+    sessionId,
+    scopes: new Set(granted),
+    ...(expiresAt != null && { expiresAt: expiresAt.getTime() })
+  }
 }
 
 export function assertScope(principal: Principal, scope: OperationScope): void {

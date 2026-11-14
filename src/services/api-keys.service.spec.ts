@@ -44,7 +44,7 @@ function setup(config: Partial<AppConfig> = {}) {
     list: jest.fn<Promise<ApiKey[]>, []>()
   }
   const sessions = { findById: jest.fn().mockResolvedValue({ id: 'main' }) }
-  const auth = { invalidate: jest.fn() }
+  const auth = { invalidate: jest.fn(), revoked: jest.fn() }
   const service = new ApiKeysService(
     { API_KEY_ROTATION_GRACE_MINUTES: 10, API_KEY_MAX_TTL_DAYS: 0, ...config } as AppConfig, // reason: only these two fields are read
     apiKeys as unknown as ApiKeysRepository, // reason: the fake implements the methods the service calls
@@ -268,13 +268,14 @@ describe('ApiKeysService.rotate', () => {
 })
 
 describe('ApiKeysService.revoke', () => {
-  it('drops the key from the auth cache', async () => {
+  it('tells the auth service the key is revoked, which drops it from the cache and ends its sockets', async () => {
     const { service, apiKeys, auth } = setup()
     apiKeys.revoke.mockResolvedValue(row({ revokedAt: new Date() }))
 
     await service.revoke('id')
 
-    expect(auth.invalidate).toHaveBeenCalledWith('id')
+    expect(auth.revoked).toHaveBeenCalledWith('id')
+    // A rotation keeps the old key for its grace period, so only a revoke announces itself
   })
 
   it('answers NOT_FOUND for a key that does not exist', async () => {
@@ -282,6 +283,6 @@ describe('ApiKeysService.revoke', () => {
     apiKeys.revoke.mockResolvedValue(null)
 
     await expect(service.revoke('id')).rejects.toMatchObject({ code: 'NOT_FOUND' })
-    expect(auth.invalidate).not.toHaveBeenCalled()
+    expect(auth.revoked).not.toHaveBeenCalled()
   })
 })

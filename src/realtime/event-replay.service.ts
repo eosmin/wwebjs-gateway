@@ -39,7 +39,9 @@ export interface ReplayPage {
 // it missed (TDD §6.10). One Redis stream per session, `events:<sessionId>`, whose entry id IS the
 // `seq` (`<seq>-0`): `seq` only ever grows, so Redis accepts it as an id and a range read from
 // `afterSeq` is a plain XRANGE. The window is enforced by age (EVENT_REPLAY_WINDOW_SECONDS, swept
-// from the timestamp of each event) and by count (EVENT_REPLAY_MAX_EVENTS, a MAXLEN on every write),
+// from the timestamp of each event) and by count (EVENT_REPLAY_MAX_EVENTS, an exact MAXLEN on every write: the approximate form keeps up to a node
+// of 100 more, which would break the bound the guide states; one entry is added per write, so the exact trim
+// removes about one entry per write),
 // so the memory is bounded whatever the traffic.
 //
 // Writing is best effort: it never blocks nor fails the live fan-out (the bus does not wait for its
@@ -146,7 +148,7 @@ export class EventReplayService implements OnModuleInit, OnModuleDestroy {
         this.redis.client.xadd(
           key,
           'MAXLEN',
-          '~',
+          '=',
           this.config.EVENT_REPLAY_MAX_EVENTS,
           id,
           FIELD,

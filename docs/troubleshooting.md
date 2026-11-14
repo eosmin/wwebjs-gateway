@@ -78,7 +78,7 @@ curl http://localhost:3000/v1/sessions/main -H "X-API-Key: $API_KEY"
 | `connect_error` with a `data.code` | The handshake failed: `UNAUTHORIZED`, `INSUFFICIENT_SCOPE` (the key needs `events`) or the limit of failed handshakes | The key goes in `auth: { apiKey }`, never in the query string ([websocket](websocket.md)) |
 | `subscribe` is refused | `INSUFFICIENT_SCOPE`: the `qr` and `code` events need `manage` | Do not name them, or use a key with `manage` |
 | A socket is disconnected while it works | A slow consumer: `SOCKET_MAX_QUEUED_EVENTS` packets were waiting for it | Read faster, or follow fewer events. After reconnecting, ask for the replay from the last `seq` you handled |
-| A replay answers `truncated: true` | There are more events than the limit, or the window (`EVENT_REPLAY_WINDOW_SECONDS`, 300) no longer holds the start | Ask again from the `to` of the answer; what the window dropped is gone ([websocket](websocket.md)) |
+| A replay answers `truncated: true` | There are more events than the limit, the window (`EVENT_REPLAY_WINDOW_SECONDS`, 300) no longer holds the start, or the gateway crashed since and left a gap in `seq` | Ask again from the `to` of the answer; what the window dropped is gone ([websocket](websocket.md)) |
 
 ## Ordering and missing messages
 
@@ -87,6 +87,6 @@ curl http://localhost:3000/v1/sessions/main -H "X-API-Key: $API_KEY"
 | Two messages of the same second arrive in a surprising order | WhatsApp timestamps have one-second resolution | Nothing can be done; see [ordering](ordering.md) |
 | A message arrives up to a few seconds late | The order buffer holds a burst to sort it: at most `INBOUND_ORDER_WINDOW_MS`, and never longer than `INBOUND_ORDER_MAX_HOLD_MS` | Expected. `INBOUND_ORDERING_ENABLED=false`, or `ordering.enabled: false` in the session settings, turns the holding off |
 | `message_batch` still arrives with `MESSAGE_BATCH_ENABLED=false` | The variable is read when a session starts, so a session that was already running keeps the old value | Restart the session (or the gateway) after changing it; see [ordering](ordering.md) |
-| `seq` jumps by up to 100 | A crash leaves a reserved block of numbers | Not a lost event ([sessions](sessions.md)) |
+| `seq` jumps by up to 100 | A crash or a kill of the gateway leaves a reserved block of numbers (a clean shutdown and the stop and start of a session leave none) | Usually not a lost event, but a `replay` across the gap answers `truncated: true`: fill from REST once ([sessions](sessions.md)) |
 | Messages that arrived during a downtime are missing | The reconciler recovers the incoming messages of the most recent chats only, within its limits | See "Catch-up reconciliation" in [ordering](ordering.md) for `RECONCILE_MAX_CHATS`, `RECONCILE_FETCH_LIMIT` and `RECONCILE_LOOKBACK_HOURS` |
 | `origin` is missing on a message from an ad | The message carries no `ctwaContext`, or WhatsApp Web moved it | See [origin](origin.md) |
