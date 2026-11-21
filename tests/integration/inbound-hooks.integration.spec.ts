@@ -228,6 +228,13 @@ describe('inbound hooks API (integration)', () => {
       expect((await manage('POST', mine, '', { name: 'x', extra: 1 })).statusCode).toBe(400)
     })
 
+    it('answers 404 when listing the hooks of an unknown session, as create does', async () => {
+      const response = await manage('GET', `nope-${suffix}`)
+
+      expect(response.statusCode).toBe(404)
+      expect(response.json<{ error: { code: string } }>().error.code).toBe('NOT_FOUND')
+    })
+
     it('refuses the hook past WEBHOOKS_MAX_PER_SESSION, and a revoked one frees its place', async () => {
       const hooks: HookBody[] = []
       for (let i = 0; i < MAX_HOOKS; i += 1) hooks.push(await createHook(mine, `hook ${i}`))
@@ -383,6 +390,33 @@ describe('inbound hooks API (integration)', () => {
       expect(response.statusCode).toBe(401)
       expect(response.json<{ error: { code: string } }>().error.code).toBe('UNAUTHORIZED')
     })
+
+    it('words the 401 of a token for the URL, not for an API key, and keeps the error contract', async () => {
+      const response = await inbound(`/v1/hooks/inbound/${'A'.repeat(43)}`, { to: '', text: '' })
+
+      const { error } = response.json<{ error: { message: string; requestId: string } }>()
+      expect(error.message).toBe('The inbound hook URL is not valid or was revoked')
+      expect(error.requestId).toBe(response.headers['x-request-id'])
+    })
+
+    it.each([
+      ['a token longer than the router accepts', `${'LONGTOKEN'.repeat(30)}`, 414],
+      ['a token with a broken percent escape', 'BROKEN%zzTOKEN', 400]
+    ])(
+      'answers %s with the error contract and no echo of the URL',
+      async (_name, token, status) => {
+        const response = await inbound(`/v1/hooks/inbound/${token}`, { to: '', text: '' })
+
+        expect(response.statusCode).toBe(status)
+        const body = response.json<{
+          error: { code: string; message: string; requestId: string }
+        }>()
+        expect(body.error.code).toBe('VALIDATION_ERROR')
+        expect(body.error.requestId).toBe(response.headers['x-request-id'])
+        expect(response.body).not.toContain('TOKEN')
+        expect(response.body).not.toContain('/v1/')
+      }
+    )
 
     it('leaves a body over 1 MiB unread (413) even with a valid token', async () => {
       const response = await inbound(path, {
