@@ -50,7 +50,7 @@ and the Prisma CLI read. To run a session you also need a browser: see
 | `pnpm lint` / `pnpm lint:fix` | ESLint over the whole repository, zero warnings allowed                                      |
 | `pnpm type-check`             | `tsc --noEmit`                                                                               |
 | `pnpm format` / `format:check`| Prettier, write or check                                                                     |
-| `pnpm test`                   | Unit suites                                                                                  |
+| `pnpm test`                   | Unit suites; the run fails when Jest had to force exit a worker (a spec leaks a handle)       |
 | `pnpm test:cov`               | Unit suites with the coverage thresholds (what CI runs)                                      |
 | `pnpm test:integration`       | Integration suites, one worker at a time; they need `pnpm infra:up`                          |
 | `pnpm test:integration:cov`   | The same with the 90 % thresholds of the critical code (what CI runs)                        |
@@ -115,6 +115,13 @@ needs for the ESM-only packages of Nest 12. If you run `jest` through another to
 - **Integration specs** (`tests/integration/`) use a real Postgres and a real Redis: run
   `pnpm infra:up` first. They run one at a time. The critical code (the send queue, the event
   pipeline and the order buffer) has 90 % thresholds, measured with the unit specs of those files too.
+- **Chaos suites** (`tests/integration/*-chaos.integration.spec.ts`) stop and start the real servers
+  under the gateway: Redis restarting under the queues, a Postgres outage. They need Docker and
+  nothing else: `tests/helpers/chaos.ts` starts a Postgres and a Redis of their own (the images of
+  `docker-compose.yml`) on free loopback ports, labelled `wwebjs-gw.chaos=1`, and removes them at the end,
+  so they never touch the stack of `pnpm infra:up`. A run that died leaves its containers behind:
+  `docker rm -f $(docker ps -aq --filter label=wwebjs-gw.chaos=1)`. Redis is stopped with SIGTERM; with
+  SIGKILL the AOF (`appendfsync everysec`) may lose the last second of writes.
 - **Nothing in CI reaches WhatsApp.** What needs a real account is checked by hand with a test account
   and the protocol of [sessions](sessions.md) ("Checking an upgrade of whatsapp-web.js with a real
   account"): never use a production number.

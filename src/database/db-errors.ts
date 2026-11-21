@@ -89,6 +89,21 @@ export const isTransientDbError = (error: unknown): boolean =>
   (error instanceof Prisma.PrismaClientKnownRequestError && TRANSIENT_CODES.has(error.code)) ||
   databaseCodesOf(error).some(isTransientCode)
 
+// What the HTTP filter answers with 503: a failure of Prisma that waiting cures. Not any error that
+// carries a socket code: an ECONNREFUSED from a webhook target or from Redis is not the database.
+export function isDatabaseUnavailable(error: unknown): boolean {
+  // A connection that cannot be opened for a reason waiting does not cure (bad credentials P1000, a
+  // database that does not exist P1003) is a broken deployment, not an outage
+  if (error instanceof Prisma.PrismaClientInitializationError) {
+    return error.errorCode !== undefined && TRANSIENT_CODES.has(error.errorCode)
+  }
+  return (
+    (error instanceof Prisma.PrismaClientKnownRequestError ||
+      error instanceof Prisma.PrismaClientUnknownRequestError) &&
+    isTransientDbError(error)
+  )
+}
+
 // A transient failure after which the same write can run again with no risk of it counting twice. Use
 // this, not `isTransientDbError`, to retry a write that is not idempotent (an increment, an insert
 // without a unique key); `isTransientDbError` also covers a connection lost with the outcome unknown.

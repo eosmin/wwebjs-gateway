@@ -45,6 +45,7 @@ optional: it carries extra data of some codes (the issues of a `VALIDATION_ERROR
 | `ACK_ERROR` | 502 Bad Gateway | WhatsApp reported a delivery error (ack -1) for the message. |
 | `WHATSAPP_ERROR` | 502 Bad Gateway | WhatsApp Web failed to carry out the operation. `details.kind: "mapping"` marks the case where the operation ran but the gateway could not read its answer (a send made through the send queue ends as `UNKNOWN_OUTCOME` in that case). |
 | `QUEUE_UNAVAILABLE` | 503 Service Unavailable | The send queue (Redis) cannot be reached, so the message was not accepted. Wait the seconds in the Retry-After header. When `details.queued` is false nothing was queued; when it is `unknown` the message may be queued, so repeat with the same Idempotency-Key (or check the chat) rather than a new request. |
+| `DATABASE_UNAVAILABLE` | 503 Service Unavailable | Postgres cannot be reached or dropped the connection, so the request could not be served. Wait the seconds in the Retry-After header and repeat it; the gateway reconnects by itself. A write whose connection dropped mid-statement may have taken effect, so repeat it with an Idempotency-Key where the route takes one (or check the result first). |
 | `POLICY_DELAY_EXCEEDED` | 504 Gateway Timeout | The send policy kept the message waiting longer than SEND_POLICY_MAX_WAIT_MS, so it was given up. |
 | `WHATSAPP_TIMEOUT` | 504 Gateway Timeout | WhatsApp Web did not answer within WA_CALL_TIMEOUT_MS. |
 

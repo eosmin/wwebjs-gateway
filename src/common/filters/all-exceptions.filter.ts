@@ -13,9 +13,11 @@ import { z } from 'zod'
 
 import { APP_CONFIG } from '../../config/config.module.js'
 import type { AppConfig } from '../../config/env.schema.js'
+import { isDatabaseUnavailable } from '../../database/db-errors.js'
 import { REQUEST_ID_HEADER } from '../../infra/logger/logger.config.js'
 import { scrubInboundToken } from '../../infra/logger/redaction.js'
 import { AppError, ErrorCode, ServiceBusyError } from '../errors.js'
+import { LogThrottle } from '../lib/log-throttle.js'
 
 // The body of every error response (TDD §6.11)
 export interface ErrorBody {
@@ -35,6 +37,10 @@ interface DescribedError {
 }
 
 const INTERNAL_MESSAGE = 'Internal server error'
+const DATABASE_UNAVAILABLE_MESSAGE = 'The database cannot be reached; repeat the request shortly'
+// What a client waits before it repeats a request refused because Postgres is down
+const DATABASE_RETRY_AFTER_SECONDS = 5
+const DATABASE_LOG_INTERVAL_MS = 30_000
 const FIRST_CLIENT_ERROR = 400
 const FIRST_SERVER_ERROR = 500
 
@@ -90,6 +96,14 @@ export function describeException(exception: unknown, hideInternal: boolean): De
       ...(zodError instanceof z.ZodError && { details: z.treeifyError(zodError) })
     }
   }
+  // The message of a Prisma error carries the query, the file and the address of the server: never sent
+  if (isDatabaseUnavailable(exception)) {
+    return {
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      code: ErrorCode.DATABASE_UNAVAILABLE,
+      message: DATABASE_UNAVAILABLE_MESSAGE
+    }
+  }
   const status =
     exception instanceof HttpException ? exception.getStatus() : clientErrorStatus(exception)
   if (status !== undefined && status >= FIRST_CLIENT_ERROR && status < FIRST_SERVER_ERROR) {
@@ -119,6 +133,8 @@ function failedSchemaFields(exception: unknown): string | undefined {
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name)
+  // An outage fails every request that reaches the database: one line per interval says so
+  private readonly databaseDown = new LogThrottle(DATABASE_LOG_INTERVAL_MS)
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -127,7 +143,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const request = http.getRequest<FastifyRequest>()
     const reply = http.getResponse<FastifyReply>()
     const { status, ...error } = describeException(exception, this.config.NODE_ENV === 'production')
-    if (status >= FIRST_SERVER_ERROR) {
+    if (error.code === ErrorCode.DATABASE_UNAVAILABLE) {
+      // The Prisma message carries the query and the address of the server: a summary, not the error
+      const line = this.databaseDown.next()
+      if (line !== undefined) {
+        const more = line.suppressed === 0 ? '' : ` (${line.suppressed} more since the last line)`
+        this.logger.error(`The database cannot be reached; requests are refused with 503${more}`)
+      }
+    } else if (status >= FIRST_SERVER_ERROR) {
       this.logger.error(exception)
       const fields = failedSchemaFields(exception)
       if (fields !== undefined) this.logger.error(`A response failed its schema at: ${fields}`)
@@ -136,6 +159,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     void reply.header(REQUEST_ID_HEADER, request.id)
     if (exception instanceof ServiceBusyError) {
       void reply.header('retry-after', String(exception.retryAfterSeconds))
+    } else if (error.code === ErrorCode.DATABASE_UNAVAILABLE) {
+      void reply.header('retry-after', String(DATABASE_RETRY_AFTER_SECONDS))
     }
     void reply.status(status).send(body)
   }

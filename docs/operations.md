@@ -99,6 +99,8 @@ A person, never the workflow. Do it when a build has passed the checks, or when 
 | debug | `WhatsApp Web page: …`, `…page before the logout: …` | The few fixed console lines about a reload or logout (numbers and addresses masked) |
 | metric | `gw_wa_web_build_info{version}` | Sessions per build; more than one version is a mixed fleet |
 | metric | `gw_logout_total{reason}` | Logouts by reason |
+| error | `Redis connection error: … (N more since the last line)` | Redis does not answer. One line per connection every 30 s, not one per retry (ioredis retries about every 2 s); `N` counts the errors held back |
+| log | `Redis connection restored` | A connection that had failed is ready again; the queues and workers go on by themselves |
 
 ## Alerts
 
