@@ -121,6 +121,7 @@ export class MessageSendService {
     const hash = this.hashOf(request, { op: 'forward', messageId, to })
     const replay = await this.replayOf(request, hash)
     if (replay) return replay
+    this.sender.assertQueueAvailable()
     const chatId = await this.recipients.resolve(request.sessionId, to)
     if (isChannelId(chatId)) {
       throw new ValidationError('VALIDATION_ERROR', 'A message cannot be forwarded to a channel', {
@@ -166,6 +167,8 @@ export class MessageSendService {
     hash: string | undefined
   ): Promise<SendResult> {
     const { sessionId } = request
+    // Resolving a number and the policy read Redis: with it down they would hang, not fail
+    this.sender.assertQueueAvailable()
     const chatId = await this.recipients.resolve(sessionId, to)
     await this.checkPolicy(sessionId, chatId, policyTextOf(body))
     const toChannel = isChannelId(chatId)

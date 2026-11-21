@@ -1042,6 +1042,27 @@ describe('send queue (integration)', () => {
       expect(await depthOf(sessionId)).toBe(0)
     })
 
+    it('answers 503 at once to a job lookup while Redis is not connected, without saying nothing was queued', async () => {
+      const service = await boot()
+      const entry = open.find(item => item.service === service)
+      const client = entry?.redis.client as RedisService['client']
+      const original = Object.getOwnPropertyDescriptor(client, 'status')
+      Object.defineProperty(client, 'status', { configurable: true, get: () => 'reconnecting' })
+
+      try {
+        const refused = await service.status(sessionId, 'abc').catch((error: unknown) => error)
+
+        expect(refused).toMatchObject({
+          code: 'QUEUE_UNAVAILABLE',
+          status: 503,
+          nothingQueued: false,
+          details: { queued: 'unknown' }
+        })
+      } finally {
+        if (original) Object.defineProperty(client, 'status', original)
+      }
+    })
+
     afterEach(() => {
       jest.restoreAllMocks()
     })

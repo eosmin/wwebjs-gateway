@@ -87,6 +87,7 @@ describe('IdempotentSendService', () => {
   let keys: FakeKeys
   let submit: jest.Mock<Promise<SubmitResult>, [NewSendJob, { waitMs?: number; jobId?: string }]>
   let status: jest.Mock<Promise<SendJobStatus>, [string, string]>
+  let assertAvailable: jest.Mock<void, []>
   let service: IdempotentSendService
 
   beforeEach(() => {
@@ -94,10 +95,21 @@ describe('IdempotentSendService', () => {
     submit = jest.fn<Promise<SubmitResult>, [NewSendJob, { waitMs?: number; jobId?: string }]>()
     submit.mockResolvedValue({ jobId: 'job-1', outcome: sent })
     status = jest.fn<Promise<SendJobStatus>, [string, string]>()
+    assertAvailable = jest.fn<void, []>()
     service = new IdempotentSendService(keys.asRepository(), {
       submit,
-      status
+      status,
+      assertAvailable
     } as unknown as SendQueueService)
+  })
+
+  it('asks the queue whether it can take a send, and passes its refusal on', () => {
+    expect(() => service.assertQueueAvailable()).not.toThrow()
+    assertAvailable.mockImplementation(() => {
+      throw new ServiceBusyError('QUEUE_UNAVAILABLE', 1, true, 'down')
+    })
+
+    expect(() => service.assertQueueAvailable()).toThrow(ServiceBusyError)
   })
 
   it('queues a send without a key straight away and never touches the table', async () => {
@@ -116,6 +128,21 @@ describe('IdempotentSendService', () => {
     const [firstCall, secondCall] = submit.mock.calls
     expect(firstCall?.[1].jobId).toMatch(/^idem-[0-9a-f]{32}$/)
     expect(secondCall?.[1].jobId).not.toBe(firstCall?.[1].jobId)
+  })
+
+  it('answers 503 to the replay of a pending key while the queue cannot be read, and keeps the key pending', async () => {
+    await service.send(job('hola', 'k1'))
+    const row = keys.rows.get(`${SESSION}/k1`)
+    if (!row) throw new Error('the key was not claimed')
+    row.createdAt = new Date(Date.now() - STALE_PENDING_MS - 1)
+    submit.mockClear()
+    status.mockRejectedValue(new ServiceBusyError('QUEUE_UNAVAILABLE', 1, false, 'down'))
+
+    await expect(service.send(job('hola', 'k1'))).rejects.toBeInstanceOf(ServiceBusyError)
+
+    expect(keys.rows.get(`${SESSION}/k1`)?.status).toBe('pending')
+    expect(keys.released).toEqual([])
+    expect(submit).not.toHaveBeenCalled()
   })
 
   describe('replay', () => {

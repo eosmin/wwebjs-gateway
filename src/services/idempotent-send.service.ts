@@ -73,6 +73,12 @@ export class IdempotentSendService {
     @Inject(SendQueueService) private readonly queue: SendQueueService
   ) {}
 
+  // Throws QUEUE_UNAVAILABLE (503) while the queue cannot take a send. Callers check it before the
+  // work that needs Redis as well, and after the replay of an ended key, which needs only Postgres.
+  assertQueueAvailable(): void {
+    this.queue.assertAvailable()
+  }
+
   // The stored answer of a key that was used before, or undefined when it was not. It queues and
   // claims nothing, so a caller can look before it does work a replay does not need (resolving the
   // recipient, downloading media) and before the send policy, which may say no by now to a request

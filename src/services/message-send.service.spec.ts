@@ -1,5 +1,5 @@
 import { buildMessageDto } from '../../tests/helpers/fake-whatsapp-client.js'
-import { NotFoundError, ValidationError } from '../common/errors.js'
+import { NotFoundError, ServiceBusyError, ValidationError } from '../common/errors.js'
 import type { AppConfig } from '../config/env.schema.js'
 import { ChannelPostBody } from '../types/channels.dto.js'
 import { SendMessageBody } from '../types/messages.dto.js'
@@ -22,6 +22,7 @@ function build(
     policy?: PolicyDecision
     original?: ReturnType<typeof buildMessageDto> | null
     replay?: { jobId: string; replayed: boolean }
+    queueDown?: boolean
   } = {}
 ) {
   const send = jest.fn((_job: NewSendJob, _options: { waitMs?: number; requestHash?: string }) =>
@@ -30,6 +31,10 @@ function build(
   const peek = jest.fn((_session: string, _key: string, _hash: string) =>
     Promise.resolve(options.replay)
   )
+  const assertAvailable = jest.fn(() => {
+    if (options.queueDown)
+      throw new ServiceBusyError('QUEUE_UNAVAILABLE', 1, true, 'queue down', { queued: false })
+  })
   const resolve = jest.fn((_session: string, to: string) =>
     Promise.resolve(to.includes('@') ? to : CHAT)
   )
@@ -51,7 +56,7 @@ function build(
     { resolve } as unknown as RecipientResolverService,
     media as unknown as MediaResolverService,
     { check } as unknown as SendPolicyService,
-    { send, peek } as unknown as IdempotentSendService,
+    { send, peek, assertQueueAvailable: assertAvailable } as unknown as IdempotentSendService,
     { resolve: humanize } as unknown as HumanizeDefaultsService
   )
   const jobOf = (): NewSendJob => {
@@ -59,13 +64,65 @@ function build(
     if (!first) throw new Error('nothing was sent')
     return first[0]
   }
-  return { service, send, peek, check, media, resolve, humanize, jobOf }
+  return { service, send, peek, check, media, resolve, humanize, jobOf, assertAvailable }
 }
 
 const parse = (body: unknown): SendMessageBody => SendMessageBody.parse(body)
 const request = { sessionId: 's', wait: true }
 
 describe('MessageSendService', () => {
+  describe('with the send queue down', () => {
+    const channelBody = ChannelPostBody.parse({ type: 'text', body: 'x' })
+
+    it.each([
+      [
+        'send',
+        (s: MessageSendService) =>
+          s.send(request, parse({ to: '+5215500000001', type: 'text', body: 'x' }))
+      ],
+      [
+        'reply',
+        (s: MessageSendService) =>
+          s.reply(request, 'm1', { to: CHAT, type: 'text', body: 'x' } as never)
+      ],
+      [
+        'reply to the chat of the message',
+        (s: MessageSendService) => s.reply(request, 'm1', { type: 'text', body: 'x' } as never)
+      ],
+      [
+        'channel post',
+        (s: MessageSendService) => s.postToChannel(request, '1@newsletter', channelBody)
+      ],
+      ['forward', (s: MessageSendService) => s.forward(request, 'm1', '+5215500000001')]
+    ])(
+      'refuses a %s with 503 before it resolves, checks or queues anything',
+      async (_name, run) => {
+        const { service, send, resolve, check } = build({ queueDown: true })
+
+        await expect(run(service)).rejects.toMatchObject({ code: 'QUEUE_UNAVAILABLE', status: 503 })
+
+        expect(resolve).not.toHaveBeenCalled()
+        expect(check).not.toHaveBeenCalled()
+        expect(send).not.toHaveBeenCalled()
+      }
+    )
+
+    it('still answers the replay of a key that ended, which needs no queue', async () => {
+      const { service, send } = build({
+        queueDown: true,
+        replay: { jobId: 'job-0', replayed: true }
+      })
+
+      await expect(
+        service.send(
+          { ...request, idempotencyKey: 'k' },
+          parse({ to: CHAT, type: 'text', body: 'x' })
+        )
+      ).resolves.toEqual({ jobId: 'job-0', replayed: true })
+      expect(send).not.toHaveBeenCalled()
+    })
+  })
+
   it('queues text for the resolved chat and waits SEND_SYNC_TIMEOUT_MS', async () => {
     const { service, send, jobOf } = build()
 
