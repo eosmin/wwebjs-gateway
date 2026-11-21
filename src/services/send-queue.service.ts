@@ -147,7 +147,7 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     const stamp = this.nextStamp()
     // Nothing is queued while Redis cannot take it: the add would wait in the connection's offline queue
     // and go out after the caller was told it failed, so a retry would send the message twice
-    this.assertRedisReady()
+    this.assertAvailable()
     const lane = await this.admit(job.sessionId)
     const jobId = options.jobId ?? randomUUID()
     const waiting =
@@ -172,7 +172,10 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
     return Math.max(1, Math.ceil(ms / 1000))
   }
 
-  private assertRedisReady(): void {
+  // 503 at once while Redis is not connected: every call that needs the queue would otherwise wait in
+  // the offline queue of the connection (it retries for ever), and the caller would hang. Public so
+  // the send path can refuse before it does work that needs Redis too (resolving a number, the policy).
+  assertAvailable(): void {
     if (this.redis.client.status === 'ready') return
     throw new ServiceBusyError(
       'QUEUE_UNAVAILABLE',
@@ -180,6 +183,19 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
       true,
       'The send queue (Redis) is not reachable, so the message was not accepted',
       { queued: false }
+    )
+  }
+
+  // The same refusal for a read of a job: it says nothing about whether a send was queued, because
+  // the job may be in Redis already (a caller that read "not queued" could send it again)
+  private assertReadable(): void {
+    if (this.redis.client.status === 'ready') return
+    throw new ServiceBusyError(
+      'QUEUE_UNAVAILABLE',
+      this.retryAfterSeconds(this.config.SEND_ENQUEUE_TIMEOUT_MS),
+      false,
+      'The send queue (Redis) is not reachable, so the state of the send cannot be read now. Try again; do not send it again with a new key',
+      { queued: 'unknown' }
     )
   }
 
@@ -290,6 +306,7 @@ export class SendQueueService implements OnModuleInit, OnModuleDestroy {
 
   async status(sessionId: string, jobId: string): Promise<SendJobStatus> {
     this.sessions.status(sessionId)
+    this.assertReadable()
     const lane = await this.lane(sessionId)
     // The state first: a job read before it completes would come back without its result
     const state = await lane.queue.getJobState(jobId)
