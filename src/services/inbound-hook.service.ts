@@ -76,6 +76,7 @@ export class InboundHookService {
   }
 
   async list(sessionId: string): Promise<InboundHookDto[]> {
+    if ((await this.sessions.findById(sessionId)) === null) throw sessionNotFound(sessionId)
     return (await this.hooks.listForSession(sessionId)).map(toInboundHookDto)
   }
 
@@ -137,7 +138,8 @@ export class InboundHookService {
   }
 }
 
-const invalidToken = (): UnauthorizedError => new UnauthorizedError('UNAUTHORIZED')
+const invalidToken = (): UnauthorizedError =>
+  new UnauthorizedError('UNAUTHORIZED', 'The inbound hook URL is not valid or was revoked')
 
 const hookNotFound = (id: string): NotFoundError =>
   new NotFoundError('NOT_FOUND', `Inbound hook "${id}" does not exist`)

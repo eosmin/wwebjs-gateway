@@ -1,10 +1,17 @@
-import { DEFAULT_BODY_LIMIT_BYTES, createFastifyAdapter } from './fastify-adapter.js'
+import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify'
+
+import {
+  DEFAULT_BODY_LIMIT_BYTES,
+  answerFrameworkError,
+  createFastifyAdapter
+} from './fastify-adapter.js'
 
 describe('createFastifyAdapter', () => {
   const adapter = createFastifyAdapter()
   const fastify = adapter.getInstance()
   fastify.get('/id', request => ({ id: request.id }))
   fastify.post('/echo', () => ({ ok: true }))
+  fastify.get('/:segment/x', () => ({ ok: true }))
 
   beforeAll(async () => {
     await fastify.ready()
@@ -57,5 +64,54 @@ describe('createFastifyAdapter', () => {
     })
 
     expect(response.statusCode).toBe(200)
+  })
+
+  it.each([
+    ['too long for the router', `/${'SECRET'.repeat(40)}/x`, 414],
+    ['not a valid URL component', '/SECRET%zz/x', 400]
+  ])(
+    'answers a URL %s with the error contract and no echo of the URL',
+    async (_name, url, status) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url,
+        headers: { 'x-request-id': 'trace-7' }
+      })
+
+      expect(response.statusCode).toBe(status)
+      expect(response.headers['x-request-id']).toBe('trace-7')
+      const { error } = response.json<{ error: Record<string, string> }>()
+      expect(error).toEqual({
+        code: 'VALIDATION_ERROR',
+        message: error['message'],
+        requestId: 'trace-7'
+      })
+      expect(error['message']).toMatch(/URL/)
+      expect(response.body).not.toContain('SECRET')
+    }
+  )
+
+  it.each([
+    [{ statusCode: 500 }, 500, 'INTERNAL'],
+    [{}, 400, 'VALIDATION_ERROR']
+  ])('answers a router error %j with %i and the contract', (error, status, code) => {
+    const sent: unknown[] = []
+    const reply = {
+      header: () => reply,
+      status: (value: number) => {
+        sent.push(value)
+        return reply
+      },
+      send: (body: unknown) => sent.push(body)
+    }
+
+    answerFrameworkError(
+      error as FastifyError,
+      { id: 'r1' } as FastifyRequest,
+      reply as unknown as FastifyReply
+    )
+
+    expect(sent[0]).toBe(status)
+    expect(sent[1]).toMatchObject({ error: { code, requestId: 'r1' } })
   })
 })
