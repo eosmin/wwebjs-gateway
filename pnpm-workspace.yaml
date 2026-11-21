@@ -27,11 +27,15 @@ patchedDependencies:
 # Transitive copies with a published fix. The majors are forced on purpose: archiver (glob 10),
 # @fastify/static (glob 13) and get-uri (basic-ftp 5) only call APIs that kept their shape, checked
 # by running them. Remove each entry once its parents ask for a patched version themselves.
+# effect 3.20.0 is pinned exactly by @prisma/config 7.10.1 (CVE-2026-121707, ReDoS in Schema.TemplateLiteral,
+# fixed in 3.22.1). Prisma stays on 7.10.1 (TDD), so the patch release of the same 3.x line is forced;
+# remove the entry once @prisma/config asks for effect 3.22.1 or later itself.
 # minimatch gets no override: 11 drops the default export that readdir-glob (archiver) needs and the
 # `makeRe` export that eslint-plugin-import-x needs. glob 14 brings its own minimatch 11 privately.
 overrides:
   'basic-ftp@<6.2.1': 6.2.1
   'glob@<14.0.2': 14.0.2
+  'effect@<3.22.1': 3.22.1
 
 # 1.34.8 is newer than the release-age gate; it was reviewed by hand (diff of 1.34.7..1.34.8) and the
 # entry is removed at the first dependency PR after the gate has passed (IMPLEMENTATION_PLAN 10.4, F20)
