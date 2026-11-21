@@ -1,6 +1,7 @@
 import { Prisma } from '../generated/prisma/client.js'
 
 import {
+  isDatabaseUnavailable,
   isForeignKeyViolation,
   isRetrySafeDbError,
   isRecordNotFound,
@@ -29,6 +30,50 @@ describe('db-errors', () => {
     expect(isRecordNotFound(new Error('P2025'))).toBe(false)
     expect(isUniqueViolation('P2002')).toBe(false)
     expect(isUniqueViolation(undefined)).toBe(false)
+  })
+
+  describe('isDatabaseUnavailable', () => {
+    it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2034'])(
+      'is true for %s, which waiting cures',
+      code => {
+        expect(isDatabaseUnavailable(knownError(code))).toBe(true)
+      }
+    )
+
+    it('is true for a connection that cannot be opened because the server does not answer', () => {
+      expect(
+        isDatabaseUnavailable(new Prisma.PrismaClientInitializationError('down', 'test', 'P1001'))
+      ).toBe(true)
+    })
+
+    it.each(['P1000', 'P1003', undefined])(
+      'is false for a connection that cannot be opened for a reason waiting does not cure (%s)',
+      code => {
+        expect(
+          isDatabaseUnavailable(new Prisma.PrismaClientInitializationError('x', 'test', code))
+        ).toBe(false)
+      }
+    )
+
+    it.each(['P2002', 'P2003', 'P2025'])('is false for %s, which would fail again', code => {
+      expect(isDatabaseUnavailable(knownError(code))).toBe(false)
+    })
+
+    it('is false for a failure of Prisma without a code, and for what is not an error of Prisma', () => {
+      const refused = Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:6379'), {
+        code: 'ECONNREFUSED'
+      })
+
+      expect(isTransientDbError(refused)).toBe(true)
+      expect(isDatabaseUnavailable(refused)).toBe(false)
+      expect(
+        isDatabaseUnavailable(
+          new Prisma.PrismaClientUnknownRequestError('x', { clientVersion: 'test' })
+        )
+      ).toBe(false)
+      expect(isDatabaseUnavailable(undefined)).toBe(false)
+      expect(isDatabaseUnavailable('P1001')).toBe(false)
+    })
   })
 
   describe('isTransientDbError', () => {

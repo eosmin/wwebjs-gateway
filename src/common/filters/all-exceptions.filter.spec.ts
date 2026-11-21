@@ -12,6 +12,13 @@ import { ConflictError, InternalError, ServiceBusyError, WhatsAppError } from '.
 
 import { AllExceptionsFilter, type ErrorBody } from './all-exceptions.filter.js'
 
+// The predicate has its own spec (it needs Prisma, which only src/database imports): here it only
+// has to turn what it accepts into the 503 of the contract
+jest.mock('../../database/db-errors.js', () => ({
+  isDatabaseUnavailable: (error: unknown): boolean =>
+    error instanceof Error && error.message.startsWith("Can't reach database")
+}))
+
 class SendDto extends createZodDto(z.strictObject({ phone: z.string().min(5) })) {}
 
 @Controller('probe')
@@ -29,6 +36,16 @@ class ProbeController {
   @Get('unavailable')
   unavailable(): never {
     throw new ServiceBusyError('QUEUE_UNAVAILABLE', 5, true)
+  }
+
+  @Get('database-down')
+  databaseDown(): never {
+    throw new Error("Can't reach database server at 10.0.0.5:5432")
+  }
+
+  @Get('database-constraint')
+  databaseConstraint(): never {
+    throw new Error('Unique constraint failed on 10.0.0.5')
   }
 
   @Get('whatsapp')
@@ -146,6 +163,37 @@ describe('AllExceptionsFilter', () => {
 
       expect(response.statusCode).toBe(503)
       expect(response.headers['retry-after']).toBe('5')
+    })
+
+    it('answers 503 DATABASE_UNAVAILABLE with Retry-After when Postgres cannot be reached', async () => {
+      const response = await get('/probe/database-down')
+
+      expect(response.statusCode).toBe(503)
+      expect(response.headers['retry-after']).toBe('5')
+      const { error } = response.json<ErrorBody>()
+      expect(error.code).toBe('DATABASE_UNAVAILABLE')
+      expect(error.message).not.toContain('10.0.0.5')
+    })
+
+    it('logs a summary once for an outage, never the error with the address of the server', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+      try {
+        await get('/probe/database-down')
+        await get('/probe/database-down')
+
+        expect(logged).toHaveBeenCalledTimes(1)
+        expect(String(logged.mock.calls[0]?.[0])).not.toContain('10.0.0.5')
+      } finally {
+        logged.mockRestore()
+      }
+    })
+
+    it('keeps a database error that waiting does not cure as an internal error', async () => {
+      const response = await get('/probe/database-constraint')
+
+      expect(response.statusCode).toBe(500)
+      expect(response.json<ErrorBody>().error.code).toBe('INTERNAL')
+      expect(response.headers['retry-after']).toBeUndefined()
     })
 
     it('sends no Retry-After with an error that is not a refusal of that kind', async () => {

@@ -21,6 +21,7 @@ export const ErrorCode = {
   RATE_LIMITED: 'RATE_LIMITED',
   SEND_QUEUE_FULL: 'SEND_QUEUE_FULL',
   QUEUE_UNAVAILABLE: 'QUEUE_UNAVAILABLE',
+  DATABASE_UNAVAILABLE: 'DATABASE_UNAVAILABLE',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   MEDIA_FETCH_FAILED: 'MEDIA_FETCH_FAILED',
   NUMBER_NOT_ON_WHATSAPP: 'NUMBER_NOT_ON_WHATSAPP',
@@ -124,6 +125,11 @@ export const ERROR_DEFINITIONS = {
     status: HttpStatus.SERVICE_UNAVAILABLE,
     meaning:
       'The send queue (Redis) cannot be reached, so the message was not accepted. Wait the seconds in the Retry-After header. When `details.queued` is false nothing was queued; when it is `unknown` the message may be queued, so repeat with the same Idempotency-Key (or check the chat) rather than a new request.'
+  },
+  DATABASE_UNAVAILABLE: {
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+    meaning:
+      'Postgres cannot be reached or dropped the connection, so the request could not be served. Wait the seconds in the Retry-After header and repeat it; the gateway reconnects by itself. A write whose connection dropped mid-statement may have taken effect, so repeat it with an Idempotency-Key where the route takes one (or check the result first).'
   },
   PAYLOAD_TOO_LARGE: {
     status: HttpStatus.PAYLOAD_TOO_LARGE,
