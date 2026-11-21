@@ -33,8 +33,11 @@ The numbers are the defaults; every variable is in [config-reference](config-ref
 
 - The gateway runs **exactly one replica**: a session's Chromium belongs to one Node process, and
   there is no Redis adapter for Socket.IO and no remote authentication store.
-- `MAX_SESSIONS` (10) is the number of sessions the gateway accepts to create. Every started session
-  is its own browser, so size the host for the sessions you start, not only for the limit.
+- `MAX_SESSIONS` (10) is the number of sessions that can run at once, one that waits to reconnect
+  included. `create`, `start` and `restart` answer `409 MAX_SESSIONS_REACHED` while that many run; a
+  session that is only created, stopped or failed does not count, so the number of rows is not
+  limited. Every started session is its own browser, so size the host for the sessions you run, not
+  only for the limit ([sessions](sessions.md)).
 - `SESSION_START_STAGGER_MS` spaces the starts of a restore, so a restart brings the sessions back
   one after another and not all at once ([sessions](sessions.md)).
 

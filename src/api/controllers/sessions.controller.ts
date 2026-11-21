@@ -60,7 +60,7 @@ export class SessionsController {
     scope: 'admin',
     summary: 'Create a session',
     description:
-      'Registers the session as `created`; nothing runs until it is started. Fails when the id exists or MAX_SESSIONS sessions are registered.',
+      'Registers the session as `created`; nothing runs until it is started. Fails when the id exists or MAX_SESSIONS sessions are running.',
     errors: [
       'VALIDATION_ERROR',
       'UNAUTHORIZED',

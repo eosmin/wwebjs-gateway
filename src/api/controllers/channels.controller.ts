@@ -419,7 +419,8 @@ export class ChannelsController {
               isMyContact: true,
               isUser: true,
               isWAContact: true,
-              isBlocked: false
+              isBlocked: false,
+              statusMute: false
             },
             role: 'subscriber'
           }

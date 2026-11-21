@@ -6,6 +6,7 @@ import { isChannelId, isWaId } from '../common/lib/wa-id.js'
 import { AnyContact } from './contacts.dto.js'
 import { ChannelDto, MessageDto } from './dto.js'
 import { MediaSource } from './messages.dto.js'
+import { namedZodDto } from './named-dto.js'
 import { SessionId } from './sessions.dto.js'
 
 // WhatsApp limits: a channel name has 100 characters and a description 2048
@@ -197,7 +198,7 @@ const Channel = z.object({
   lastMessage: z.object(MessageDto.shape).optional()
 })
 
-export const ChannelResponseDto = createZodDto(Channel)
+export const ChannelResponseDto = namedZodDto('ChannelResponseDto', Channel)
 export class ChannelListDto extends createZodDto(z.object({ items: z.array(Channel) })) {}
 
 export class CreatedChannelDto extends createZodDto(

@@ -188,7 +188,9 @@ export const envSchema = z
       .describe('ffmpeg binary used to convert media; when unset, the one on the PATH'),
 
     // Sessions
-    MAX_SESSIONS: count(10, { min: 1 }).describe('Sessions the gateway accepts to create'),
+    MAX_SESSIONS: count(10, { min: 1 }).describe(
+      'Sessions that can run at once; create, start and restart are refused (409) beyond it'
+    ),
     SESSION_START_STAGGER_MS: count(5000).describe(
       'Milliseconds between the starts of sessions at boot'
     ),

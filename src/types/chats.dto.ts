@@ -2,6 +2,7 @@ import { createZodDto } from 'nestjs-zod'
 import { z } from 'zod'
 
 import { ChannelDto, ChatDto, GroupChatDto, MessageDto } from './dto.js'
+import { namedZodDto } from './named-dto.js'
 import { SessionId } from './sessions.dto.js'
 
 export const ChatId = z
@@ -63,7 +64,7 @@ const plain = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) =>
 export const AnyChat = z.union([plain(GroupChatDto), plain(ChannelDto), plain(ChatDto)])
 
 // A union cannot be the base of a class, so this one is the DTO value without a class
-export const ChatResponseDto = createZodDto(AnyChat)
+export const ChatResponseDto = namedZodDto('ChatResponseDto', AnyChat)
 export class ChatListDto extends createZodDto(z.object({ items: z.array(AnyChat) })) {}
 
 export class MuteResultDto extends createZodDto(

@@ -44,7 +44,21 @@ export function isSuccess(status: string): boolean {
 // The codes an operation can answer, grouped under the HTTP status each one maps to
 interface ErrorResponse {
   description: string
+  headers?: Record<string, { description: string; schema: { type: 'integer'; minimum: number } }>
   content: Record<string, { schema: { $ref: string } }>
+}
+
+const TOO_MANY_REQUESTS = 429
+// The global rate limit (RateLimitGuard, an APP_GUARD) runs before every route, the public ones and a
+// request with no key included, so every operation can answer it; it is not the business of each
+// @WaOperation to say so
+const EVERY_OPERATION_ERRORS: readonly ErrorCode[] = [ErrorCode.RATE_LIMITED]
+// What a 429 carries besides the body: the seconds to wait, from the throttler and from the send queue
+const RETRY_AFTER_HEADERS: NonNullable<ErrorResponse['headers']> = {
+  'Retry-After': {
+    description: 'Seconds to wait before the request is repeated.',
+    schema: { type: 'integer', minimum: 1 }
+  }
 }
 
 function errorResponses(codes: readonly ErrorCode[]): Record<string, ErrorResponse> {
@@ -60,6 +74,7 @@ function errorResponses(codes: readonly ErrorCode[]): Record<string, ErrorRespon
         description: group
           .map(code => `**${code}**: ${ERROR_DEFINITIONS[code].meaning}`)
           .join('\n\n'),
+        ...(status === TOO_MANY_REQUESTS && { headers: RETRY_AFTER_HEADERS }),
         content: { [JSON_MEDIA]: { schema: { $ref: `#/components/schemas/${ERROR_SCHEMA}` } } }
       }
     ])
@@ -123,7 +138,10 @@ function enrich(operation: Operation, registered: RegisteredOperation, method: s
   }
 
   // The declared errors win over any 4xx/5xx Nest generated, so an operation lists the codes it can answer
-  Object.assign(operation.responses, errorResponses(meta.errors))
+  Object.assign(
+    operation.responses,
+    errorResponses([...new Set([...meta.errors, ...EVERY_OPERATION_ERRORS])])
+  )
 }
 
 // `Controller.method` of every route the ApiKeyGuard lets through: @Public() on the method or on
@@ -192,6 +210,8 @@ export function buildOpenApiDocument(
       const operation = pathItem[method]
       const registered = operation?.operationId ? operations.get(operation.operationId) : undefined
       if (operation && registered) enrich(operation, registered, method)
+      // a route outside the registry (health, metrics) is behind the same global limit
+      else if (operation) Object.assign(operation.responses, errorResponses(EVERY_OPERATION_ERRORS))
       // An empty list overrides the document-wide key requirement: no credential is asked for
       if (operation?.operationId && publicOperationIds.has(operation.operationId)) {
         operation.security = []

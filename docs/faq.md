@@ -34,8 +34,9 @@ No. A session's browser and saved login belong to one Node process and some stat
 so the gateway is a single-instance service ([architecture](architecture.md)).
 
 **How many sessions can it hold?**
-`MAX_SESSIONS` (10) is the number it accepts to create. Each started session is its own Chromium, so size
-the host for the sessions you actually run ([limits](limits.md)).
+`MAX_SESSIONS` (10) is the number of sessions that can run at once; sessions that are only created or
+stopped do not count. Each running session is its own Chromium, so size the host for the sessions you
+actually run ([limits](limits.md)).
 
 **Where does a session keep its login, and how careful should I be with it?**
 Under `WWEBJS_DATA_PATH`, in one folder per session. Whoever has that folder can use the WhatsApp

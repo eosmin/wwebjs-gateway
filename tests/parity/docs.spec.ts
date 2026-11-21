@@ -221,4 +221,18 @@ describe('architecture decision records', () => {
       'security-scan'
     ])
   })
+
+  // DP-3: SessionManager.assertCapacity counts the runtimes (the sessions that run), never the rows
+  it('says MAX_SESSIONS limits the sessions that run, not the ones created', () => {
+    const wrong = MARKDOWN_FILES.filter(path => {
+      const text = read(path)
+      return /MAX_SESSIONS[^\n]*(accepts? to create|registered)/i.test(text)
+    })
+
+    expect(wrong).toEqual([])
+    expect(envSchema.shape.MAX_SESSIONS.description).toMatch(/run/)
+    for (const path of ['docs/limits.md', 'docs/faq.md']) {
+      expect(read(path)).toMatch(/MAX_SESSIONS[\s\S]{0,80}can run at once/)
+    }
+  })
 })

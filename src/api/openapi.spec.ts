@@ -12,7 +12,7 @@ import { ErrorCode } from '../common/errors.js'
 import { createFastifyAdapter } from '../infra/logger/fastify-adapter.js'
 
 import { ApiModule } from './api.module.js'
-import { DOCS_JSON_PATH, setupDocs } from './openapi.js'
+import { DOCS_JSON_PATH, isSuccess, setupDocs } from './openapi.js'
 import { WaOperation } from './wa-operation.decorator.js'
 
 class SendTextDto extends createZodDto(
@@ -237,7 +237,7 @@ describe('setupDocs', () => {
   it('documents a response without a declared status under the status the route answers', async () => {
     const { paths } = await fetchDocument()
     const answers = (path: string, method: 'get' | 'post'): string[] =>
-      Object.keys(paths[path]?.[method]?.responses ?? {})
+      Object.keys(paths[path]?.[method]?.responses ?? {}).filter(isSuccess)
 
     expect(answers('/v1/implied/read', 'get')).toEqual(['200'])
     expect(answers('/v1/implied/create', 'post')).toEqual(['201'])
@@ -333,12 +333,12 @@ describe('setupDocs', () => {
     expect(JSON.stringify(operation?.requestBody)).not.toContain('example')
   })
 
-  it('leaves a route outside the registry as Nest generated it', async () => {
+  it('leaves a route outside the registry as Nest generated it, plus the global 429', async () => {
     const operation = (await fetchDocument()).paths['/v1/plain']?.get
 
     expect(operation?.operationId).toBe('PlainController.plain')
     expect(operation).not.toHaveProperty('x-scope')
-    expect(Object.keys(operation?.responses ?? {})).toEqual(['200'])
+    expect(Object.keys(operation?.responses ?? {})).toEqual(['200', '429'])
   })
 
   it('does not mount /docs when ENABLE_DOCS is false', async () => {
